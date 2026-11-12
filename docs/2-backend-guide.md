@@ -278,6 +278,27 @@ DEBUG ... org.hibernate.SQL :
 private LocalDateTime measuredAt;   // 측정 시각
 ```
 
+## 주기 실행 작업 (@Scheduled, 시뮬레이터)
+
+일정 시간마다 자동으로 실행할 메서드에는 `@Scheduled`를 붙입니다.
+
+```java
+@Component
+@RequiredArgsConstructor
+public class EnergySimulator {
+
+    @Scheduled(fixedRate = 5000)   // 5초마다 실행
+    public void run() {
+        // 원본 테이블 읽기 → 현재 시각으로 바꾸기 → 실시간 테이블에 저장
+    }
+}
+```
+
+- **`backend/.env`에 `SIMULATOR_ENABLED=true`인 PC에서만 실행됩니다.** (기본값은 꺼짐)
+  - 팀 공용 DB라서 여러 명이 동시에 실행하면 데이터가 중복으로 쌓이기 때문입니다.
+  - 시뮬레이터 담당자만 `true`로 켜세요. 서버 시작 로그에 `시뮬레이터(@Scheduled 작업) 켜짐`이 보이면 켜진 것입니다.
+- `@EnableScheduling` 설정은 `global/config/SchedulingConfig.java`에 이미 되어 있습니다. 따로 붙이지 마세요.
+
 ## API 주소 규칙 (REST)
 
 주소는 **명사(복수형)**, 동작은 **HTTP 메서드**로 표현합니다.
@@ -310,4 +331,7 @@ private LocalDateTime measuredAt;   // 측정 시각
 
 - **`application.properties`는 함부로 수정하지 마세요.** 바꿔야 하면 팀에 먼저 공유해주세요.
 - 개인 설정이 필요하면 `application-local.properties`를 만들어 쓰세요. (Git에 올라가지 않음)
-- Entity 필드 이름을 바꾸면 DB에 **새 컬럼이 추가**되고 옛날 컬럼은 남아 있습니다. 꼬이면 `docker compose down -v`로 DB를 초기화하세요.
+- **팀 전체가 같은 DB 하나를 씁니다.** 서버를 실행하면 내 Entity 기준으로 테이블이 자동 변경되어 다른 팀원에게도 바로 적용됩니다.
+  - Entity를 새로 만들거나 필드를 바꾸기 전에 **팀에 먼저 공유**하세요.
+  - 필드 이름을 바꾸면 **새 컬럼이 추가**되고 옛날 컬럼은 그대로 남습니다. 남은 컬럼 정리는 Supabase 담당 팀원에게 요청하세요.
+  - 다른 팀원의 테이블이나 데이터를 함부로 지우지 마세요.

@@ -5,12 +5,12 @@
 ## 전체 그림
 
 ```
-[브라우저] ──→ [프론트엔드 React :5173] ──/api 요청──→ [백엔드 Spring :8080] ──→ [DB PostgreSQL :5433]
+[브라우저] ──→ [프론트엔드 React :5173] ──/api 요청──→ [백엔드 Spring :8080] ──→ [DB Supabase (PostgreSQL)]
 ```
 
 - **프론트엔드**: 사용자가 보는 화면. 백엔드에 데이터를 요청해서 보여줍니다.
 - **백엔드**: 데이터를 처리하고 DB에 저장/조회하는 서버. API를 제공합니다.
-- **DB**: 데이터 저장소. Docker로 띄우기 때문에 따로 설치할 필요가 없습니다.
+- **DB**: 데이터 저장소. **Supabase(클라우드 PostgreSQL) 하나를 팀 전체가 같이 씁니다.** 따로 설치할 필요가 없습니다.
 
 ## 1단계: 프로그램 설치
 
@@ -19,7 +19,6 @@
 | [Git](https://git-scm.com/) | 코드 공유 | 모두 | `git --version` |
 | [Node.js 24 LTS](https://nodejs.org/) | 프론트엔드 실행 | 모두 | `node -v` |
 | [JDK 17](https://adoptium.net/) | 백엔드 실행 | 백엔드 | `java -version` |
-| [Docker Desktop](https://www.docker.com/products/docker-desktop/) | DB 실행 | 백엔드 (프론트도 권장) | `docker --version` |
 
 **에디터 추천**
 - 백엔드: **IntelliJ IDEA** (Community 무료 버전도 OK)
@@ -36,30 +35,23 @@ cd smart_factory_energy_solution_project
 
 ## 3단계: 실행하기
 
-항상 **DB → 백엔드 → 프론트엔드** 순서로 실행합니다.
+### ① DB 접속 정보 넣기 (백엔드, 처음 한 번)
 
-### ① DB 실행
+DB는 Supabase에 항상 켜져 있어서 따로 실행할 필요가 없습니다. 접속 정보만 넣으면 됩니다.
 
-Docker Desktop을 먼저 켜고, 왼쪽 아래에 `Engine running`이 뜨는지 확인한 뒤 프로젝트 루트에서:
+1. `backend/.env.example` 파일을 복사해서 같은 폴더에 **`.env`** 라는 이름으로 만듭니다.
+2. `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` 값을 채웁니다. 값은 **Supabase 담당 팀원에게 개인적으로** 받습니다.
+3. `SIMULATOR_ENABLED`는 **`false` 그대로** 둡니다. 시뮬레이터 담당자 1명만 `true`로 바꿉니다. (여러 명이 켜면 데이터가 중복으로 쌓임)
 
-```bash
-docker compose up -d
+```
+backend/
+├── .env.example   # 예시 (Git에 올라감)
+└── .env           # 실제 접속 정보 (Git에 올라가지 않음)
 ```
 
-| 상황 | 명령어 |
-|---|---|
-| DB 켜기 | `docker compose up -d` |
-| DB 끄기 (데이터 유지) | `docker compose down` |
-| DB 초기화 (데이터 전부 삭제) | `docker compose down -v` |
+> ⚠️ `.env`에는 DB 비밀번호가 들어 있습니다. **커밋하거나 단체 채팅방, 스크린샷에 올리지 마세요.** 노출되면 누구나 팀 DB를 지울 수 있습니다.
 
-DB 접속 정보 (DBeaver 같은 DB 도구로 볼 때):
-
-| 항목 | 값 |
-|---|---|
-| Host | `localhost` |
-| Port | `5433` (5432 아님 주의!) |
-| Database | `energy` |
-| User / Password | `postgres` / `postgres` |
+> 팀 전체가 **같은 DB 하나**를 씁니다. 내가 넣거나 지운 데이터가 다른 팀원에게도 그대로 보입니다.
 
 ### ② 백엔드 실행
 
@@ -94,9 +86,10 @@ http://localhost:5173 에 들어가서 화면이 뜨면 성공입니다.
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| `failed to connect to the docker API` | Docker Desktop이 꺼져 있음 | Docker Desktop 실행 후 `Engine running` 확인 |
-| 백엔드 실행 시 `Connection refused` / `Unable to determine Dialect` | DB가 안 켜져 있음 | `docker compose up -d` 먼저 실행 |
-| `password authentication failed for user "postgres"` | PC에 설치된 다른 PostgreSQL에 접속됨 | 프로젝트 DB는 5433 포트. `application.properties`의 포트 확인 |
+| `'url' must start with "jdbc"` | `backend/.env` 파일이 없음 | ① 단계대로 `backend` 폴더 안에 `.env` 생성. IntelliJ는 루트가 아니라 `backend` 폴더로 열었는지 확인 |
+| `password authentication failed` | `.env`의 아이디/비밀번호가 틀림 | 담당 팀원에게 받은 값과 비교 (앞뒤 공백 주의) |
+| `Connection refused` / `Connection timed out` | 인터넷 연결 또는 네트워크에서 DB 접속이 막힘 | 인터넷 확인. 학원·회사 와이파이에서 막히면 다른 네트워크(핫스팟 등)로 시도 |
+| `too many connections` / `max clients reached` | 동시 접속 수 초과 | 안 쓰는 백엔드 서버(다른 창, 테스트 실행 등)를 끄기 |
 | `Port 8080 was already in use` | 백엔드가 이미 실행 중 | 실행 중인 백엔드를 끄고 다시 실행 (IntelliJ ■ 버튼) |
 | 백엔드에서 `getXxx()`를 못 찾는다는 오류 | Lombok 설정 안 됨 | IntelliJ 설정 → Annotation Processors → Enable 체크 |
 | 프론트에서 API 호출 시 404 / 500 | 백엔드가 꺼져 있거나 주소가 틀림 | 백엔드 실행 확인, API 주소가 `/api/...`로 시작하는지 확인 |

@@ -8,16 +8,22 @@
 |---|---|
 | Frontend | React 19 (JavaScript), Vite, Zustand, React Router, ECharts |
 | Backend | Spring Boot 4.1, Java 17, Gradle, Spring Data JPA |
-| Database | PostgreSQL 17 (Docker) |
+| Database | PostgreSQL (Supabase, 팀 공용) |
 | API 문서 | Swagger (springdoc-openapi) |
+
+## 아키텍처
+
+![아키텍처](docs/architecture.png)
+
+자세한 결정 사항과 데이터 흐름은 [결정 사항](docs/decisions.md)을 참고하세요.
 
 ## 빠른 시작
 
 > 처음이라면 [개발 환경 세팅 가이드](docs/1-getting-started.md)부터 읽어주세요.
 
 ```bash
-# 1. DB 실행 (프로젝트 루트에서)
-docker compose up -d
+# 1. DB 접속 정보 넣기 (처음 한 번)
+#    backend/.env.example 을 복사해서 backend/.env 로 만들고 값 채우기
 
 # 2. 백엔드 실행 → http://localhost:8080
 cd backend
@@ -37,8 +43,7 @@ npm run dev
 .
 ├── backend/              # Spring Boot 서버
 ├── frontend/             # React 웹 화면
-├── docs/                 # 팀 가이드 문서
-└── docker-compose.yml    # 로컬 DB (PostgreSQL)
+└── docs/                 # 팀 가이드 문서
 ```
 
 ## 가이드 문서

@@ -22,15 +22,15 @@
   - `backend/build.gradle`, `backend/src/main/resources/application.properties`
   - `backend/src/main/java/com/smartfactory/energy/global/**`
   - `frontend/package.json`, `frontend/vite.config.js`, `frontend/src/api/client.js`, `frontend/src/components/Chart.jsx`, `frontend/src/styles/reset.css`
-  - `docker-compose.yml`
-- 비밀번호, API 키를 코드에 넣지 않습니다.
+- 비밀번호, API 키를 코드에 넣지 않습니다. `backend/.env` 파일을 읽어서 내용을 출력하거나 커밋하지 않습니다.
+- 공용 DB이므로 테이블/데이터를 삭제하는 SQL을 실행하지 않습니다. Entity를 새로 만들거나 필드를 바꿀 때는 사용자에게 팀 공유가 필요하다고 알립니다.
 - `git push --force`, `main` 브랜치 직접 push를 하지 않습니다.
 
 ## 기술 스택 (변경 금지)
 
 - Frontend: React 19 + JavaScript, Vite, Zustand(상태 관리), React Router, ECharts(차트)
 - Backend: Spring Boot 4, Java 17, Gradle, Spring Data JPA, Lombok, Swagger(springdoc)
-- DB: PostgreSQL 17 (Docker, `localhost:5433`)
+- DB: Supabase(PostgreSQL) **팀 공용 DB 1개**. Supabase는 DB로만 사용하며 Supabase 클라이언트 라이브러리, Supabase Auth, 자동 API는 사용하지 않습니다. 접속 정보는 `backend/.env`(Git 제외)에 있습니다.
 
 ## 백엔드 규칙
 
@@ -47,6 +47,8 @@
 - Service 클래스에 `@Transactional(readOnly = true)`, 저장/수정/삭제 메서드에 `@Transactional`을 붙입니다.
 - 의존성 주입은 `private final` 필드 + `@RequiredArgsConstructor`를 사용합니다.
 - 날짜/시간은 `LocalDateTime`을 사용합니다. (서버/DB 모두 한국 시간)
+- 주기 실행 작업은 `@Scheduled`를 사용합니다. `@EnableScheduling`은 `global/config/SchedulingConfig`에 이미 있으므로 다시 붙이지 않습니다. 이 작업은 `.env`의 `SIMULATOR_ENABLED=true`인 PC에서만 실행됩니다. (공용 DB에 중복 저장 방지)
+- 아키텍처와 데이터 흐름(공공데이터 CSV → 원본 테이블 → 시뮬레이터 → 실시간 테이블 → 폴링 조회)은 `docs/decisions.md`를 따릅니다.
 
 ## 프론트엔드 규칙
 
@@ -63,7 +65,7 @@
 
 ## 작업 후 확인
 
-- 백엔드: `cd backend && ./gradlew build` 가 통과해야 합니다. (DB 실행 필요: `docker compose up -d`)
+- 백엔드: `cd backend && ./gradlew build` 가 통과해야 합니다. (`backend/.env` 필요)
 - 프론트엔드: `cd frontend && npm run format && npm run lint && npm run build` 가 통과해야 합니다.
 
 ## 커밋 컨벤션
