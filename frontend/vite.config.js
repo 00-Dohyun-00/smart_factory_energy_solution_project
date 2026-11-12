@@ -11,6 +11,10 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  build: {
+    // ECharts(차트 라이브러리)가 커서 나오는 용량 경고 기준을 올림
+    chunkSizeWarningLimit: 1500,
+  },
   server: {
     // /api 로 시작하는 요청은 백엔드(8080)로 전달
     proxy: {
