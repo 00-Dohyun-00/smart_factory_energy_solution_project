@@ -1,6 +1,6 @@
 # Frontend
 
-React (JavaScript) + Vite + Zustand + React Router + ECharts
+Vue 3 (JavaScript) + Vite + Pinia + Vue Router + ECharts
 
 ```bash
 npm install
