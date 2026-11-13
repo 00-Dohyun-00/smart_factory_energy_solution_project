@@ -6,7 +6,7 @@
 
 | 구분 | 기술 |
 |---|---|
-| Frontend | React 19 (JavaScript), Vite, Zustand, React Router, ECharts |
+| Frontend | Vue 3 (JavaScript), Vite, Pinia, Vue Router, ECharts |
 | Backend | Spring Boot 4.1, Java 17, Gradle, Spring Data JPA |
 | Database | PostgreSQL (Supabase, 팀 공용) |
 | API 문서 | Swagger (springdoc-openapi) |
@@ -42,7 +42,7 @@ npm run dev
 ```
 .
 ├── backend/              # Spring Boot 서버
-├── frontend/             # React 웹 화면
+├── frontend/             # Vue 웹 화면
 └── docs/                 # 팀 가이드 문서
 ```
 

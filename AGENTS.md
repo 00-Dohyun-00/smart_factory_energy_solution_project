@@ -17,18 +17,18 @@
 ## 하지 말 것
 
 - **새 라이브러리 설치 금지.** 필요하면 설치하지 말고 사용자에게 먼저 제안합니다.
-- **TypeScript 사용 금지.** 프론트엔드는 JavaScript(`.js`, `.jsx`)입니다.
+- **TypeScript 사용 금지.** 프론트엔드는 JavaScript(`.js`, `.vue`)입니다.
 - 아래 공통 파일은 수정하지 않습니다. 수정이 꼭 필요하면 이유를 설명하고 사용자에게 먼저 확인합니다.
   - `backend/build.gradle`, `backend/src/main/resources/application.properties`
   - `backend/src/main/java/com/smartfactory/energy/global/**`
-  - `frontend/package.json`, `frontend/vite.config.js`, `frontend/src/api/client.js`, `frontend/src/components/Chart.jsx`, `frontend/src/styles/reset.css`
+  - `frontend/package.json`, `frontend/vite.config.js`, `frontend/src/api/client.js`, `frontend/src/components/Chart.vue`, `frontend/src/styles/reset.css`
 - 비밀번호, API 키를 코드에 넣지 않습니다. `backend/.env` 파일을 읽어서 내용을 출력하거나 커밋하지 않습니다.
 - 공용 DB이므로 테이블/데이터를 삭제하는 SQL을 실행하지 않습니다. Entity를 새로 만들거나 필드를 바꿀 때는 사용자에게 팀 공유가 필요하다고 알립니다.
 - `git push --force`, `main` 브랜치 직접 push를 하지 않습니다.
 
 ## 기술 스택 (변경 금지)
 
-- Frontend: React 19 + JavaScript, Vite, Zustand(상태 관리), React Router, ECharts(차트)
+- Frontend: Vue 3 + JavaScript, Vite, Pinia(상태 관리), Vue Router, ECharts(차트)
 - Backend: Spring Boot 4, Java 17, Gradle, Spring Data JPA, Lombok, Swagger(springdoc)
 - DB: Supabase(PostgreSQL) **팀 공용 DB 1개**. Supabase는 DB로만 사용하며 Supabase 클라이언트 라이브러리, Supabase Auth, 자동 API는 사용하지 않습니다. 접속 정보는 `backend/.env`(Git 제외)에 있습니다.
 
@@ -52,16 +52,18 @@
 
 ## 프론트엔드 규칙
 
-- 폴더: `api/`(백엔드 호출), `stores/`(Zustand), `pages/`(화면), `components/`(재사용 UI), `layouts/`(공통 틀)
-- 파일 이름: 컴포넌트는 PascalCase `.jsx` (예: `DevicePage.jsx`), 그 외는 camelCase `.js` (예: `deviceApi.js`)
+- 폴더: `api/`(백엔드 호출), `stores/`(Pinia), `pages/`(화면), `components/`(재사용 UI), `layouts/`(공통 틀), `router/`(페이지 목록)
+- 파일 이름: 컴포넌트는 PascalCase `.vue` (예: `DevicePage.vue`), 그 외는 camelCase `.js` (예: `deviceApi.js`)
+- 컴포넌트는 `<script setup>`(Composition API)으로만 작성합니다. Options API(`export default { data(), methods }`)는 쓰지 않습니다.
 - import는 항상 `@/` 경로를 사용합니다. (예: `import { api } from '@/api/client'`)
+- `.vue` 파일을 import할 때는 확장자까지 씁니다. (예: `import Chart from '@/components/Chart.vue'`)
 - 백엔드 호출은 반드시 `src/api/client.js`의 `api()` 함수를 사용합니다. `fetch`나 `axios`를 직접 쓰지 않고, `http://localhost:8080`을 코드에 쓰지 않습니다.
 - 기능별 API 함수는 `src/api/{기능}Api.js`에 만듭니다.
-- 여러 화면에서 쓰는 데이터와 백엔드 데이터는 Zustand Store(`src/stores/use{기능}Store.js`)에, 한 컴포넌트에서만 쓰는 값은 `useState`에 둡니다.
-- Store 값은 `useXxxStore((state) => state.값)` 형태로 필요한 것만 꺼냅니다.
-- 새 페이지는 `src/App.jsx`에 `<Route>`로 등록합니다. 내부 이동은 `<a>` 대신 `Link` / `useNavigate`를 씁니다.
+- 여러 화면에서 쓰는 데이터와 백엔드 데이터는 Pinia Store(`src/stores/use{기능}Store.js`, `defineStore`의 setup 방식)에, 한 컴포넌트에서만 쓰는 값은 `ref`에 둡니다.
+- Store는 `const xxxStore = useXxxStore()`로 가져와 `xxxStore.값`으로 씁니다. 구조 분해(`const { 값 } = useXxxStore()`)하지 않습니다.
+- 새 페이지는 `src/router/index.js`의 `routes`에 등록합니다. 내부 이동은 `<a>` 대신 `RouterLink` / `useRouter().push()`를 씁니다.
 - API 에러는 `try-catch`로 잡아 `error.message`를 사용자에게 보여줍니다.
-- 차트는 반드시 `@/components/Chart`(`<Chart option={...} height={...} />`)를 사용합니다. 다른 차트 라이브러리나 `echarts-for-react`를 설치하지 않습니다.
+- 차트는 반드시 `@/components/Chart.vue`(`<Chart :option="option" :height="300" />`)를 사용합니다. 다른 차트 라이브러리나 `vue-echarts`를 설치하지 않습니다.
 
 ## 작업 후 확인
 

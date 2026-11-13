@@ -9,8 +9,8 @@
 | 항목 | 결정 | 비고 |
 |---|---|---|
 | 실행 환경 | **로컬 실행 (localhost)** | 프론트 :5173, 백엔드 :8080, DB는 Supabase |
-| 프론트엔드 | React 19 (JavaScript), Vite, Zustand, React Router, ECharts | TypeScript, Docker 사용 안 함 |
-| 서버 데이터 관리 | Zustand + `client.js` (fetch) | TanStack Query 사용 안 함 |
+| 프론트엔드 | Vue 3 (JavaScript, `<script setup>`), Vite, Pinia, Vue Router, ECharts | 강사님 안내로 React에서 Vue로 변경. TypeScript, Docker 사용 안 함 |
+| 서버 데이터 관리 | Pinia + `client.js` (fetch) | |
 | 화면 실시간 갱신 | **폴링** (주기적으로 API 재요청) | |
 | 백엔드 | Spring Boot 4.1, Java 17, Gradle, Spring Data JPA | API 문서는 Swagger |
 | DB | **Supabase (PostgreSQL) 팀 공용 DB 1개** | 접속 정보는 `backend/.env` (Git 제외). Supabase는 DB로만 사용 (Supabase 로그인/자동 API 사용 안 함) |
