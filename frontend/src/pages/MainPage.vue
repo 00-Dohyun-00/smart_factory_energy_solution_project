@@ -180,6 +180,7 @@ const socOption = computed(() => {
       <section class="card visual">
         <div class="visual-head">
           <h2 class="card-title">{{ view === 'layout' ? '공장 레이아웃' : '전력 흐름' }}</h2>
+          <span class="visual-sub">열관리 부품 공장 (가상)</span>
           <ul class="legend">
             <li><span class="dot grid" aria-hidden="true"></span>한전</li>
             <li><span class="dot solar" aria-hidden="true"></span>태양광</li>
@@ -283,6 +284,9 @@ const socOption = computed(() => {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+.visual-sub {
+  color: var(--mute);
 }
 .legend {
   display: flex;

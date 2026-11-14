@@ -9,6 +9,26 @@ const TARGET_PEAK_KW = 1800 // 목표 피크
 const WARN_KW = 1746 // 주의선 (목표의 97%, 기준은 확인 필요)
 const MAX_DISCHARGE_KW = 500 // ESS 최대 방전 출력
 
+// 공장 컨셉: 전기차 열관리 부품 공장 (가상). 설비 구성과 전력 비중은 임시로 정한 값입니다.
+// share = 평소 공장 전력에서 그 설비가 차지하는 비중 (합계 1.0)
+const EQUIPMENTS = [
+  { id: 'Z1-FIN', name: '핀 성형기', share: 0.05 },
+  { id: 'Z1-TUBE', name: '튜브 가공기', share: 0.04 },
+  { id: 'Z1-CORE', name: '코어 조립기', share: 0.03 },
+  { id: 'Z2-FURN', name: '브레이징로', share: 0.3 },
+  { id: 'Z2-DRY', name: '탈지·건조기', share: 0.06 },
+  { id: 'Z3-INJ1', name: '사출기 1호', share: 0.1 },
+  { id: 'Z3-INJ2', name: '사출기 2호', share: 0.1 },
+  { id: 'Z3-TEMP', name: '금형 온조기', share: 0.04 },
+  { id: 'Z4-MOTOR1', name: '1번 모터', share: 0 }, // 실측 설비 (조립 라인 컨베이어)
+  { id: 'Z4-ROBOT', name: '체결 로봇', share: 0.02 },
+  { id: 'Z5-LEAK', name: '기밀 검사기', share: 0.03 },
+  { id: 'Z5-EOL', name: '성능 시험기', share: 0.05 },
+  { id: 'U-COMP', name: '공기압축기', share: 0.08 },
+  { id: 'U-CHIL', name: '냉각 칠러', share: 0.06 },
+  { id: 'U-HVAC', name: '공조·조명', share: 0.04 },
+]
+
 let currentDecision = null // 가장 최근 추천 1건
 let nextDecisionId = 1
 let appliedDischargeKw = 0 // 운영자가 "적용"한 방전 전력
@@ -27,9 +47,20 @@ function solarAt(hour) {
   return Math.max(0, Math.sin(((hour - 6) / 12) * Math.PI)) * 600
 }
 
-// ESS가 없을 때 한전에서 사야 하는 전력. 목표 피크(1,800kW)를 약 4분 주기로 넘나들게 만든 값
+// 브레이징로가 승온할 때 늘어나는 전력 (약 4분 주기로 반복되게 만든 값)
+function furnaceSwingAt(seconds) {
+  return 330 * Math.sin(seconds / 40)
+}
+
+// 사출기가 한 사이클 돌 때마다 출렁이는 전력
+function injectionSwingAt(seconds) {
+  return 40 * Math.sin(seconds / 7)
+}
+
+// ESS가 없을 때 한전에서 사야 하는 전력.
+// 브레이징로 승온과 사출기 가동이 겹치면 목표 피크(1,800kW)를 넘도록 만든 값
 function gridWithoutEssAt(seconds) {
-  return 1700 + 330 * Math.sin(seconds / 40) + 40 * Math.sin(seconds / 7)
+  return 1700 + furnaceSwingAt(seconds) + injectionSwingAt(seconds)
 }
 
 function round1(value) {
@@ -55,7 +86,7 @@ function updateDecision(now, predictedWithoutEss, socPercent) {
     durationMinutes: action === 'DISCHARGE' ? 10 : null,
     reason:
       action === 'DISCHARGE'
-        ? '현재 15분 구간의 예상 평균이 목표 피크를 넘을 것으로 보입니다.'
+        ? '브레이징로 승온과 사출기 가동이 겹쳐, 이번 15분 구간의 예상 평균이 목표 피크를 넘을 것으로 보입니다.'
         : '피크 여유가 있고, 충전에 쓸 남는 태양광이 없습니다.',
     usedValues: [
       { label: '예상 평균', value: Math.round(predictedWithoutEss), unit: 'kW' },
@@ -96,16 +127,23 @@ export async function fakeGetLatestStatus() {
   windowStart.setMinutes(Math.floor(now.getMinutes() / 15) * 15, 0, 0)
   const windowEnd = new Date(windowStart.getTime() + 15 * 60 * 1000)
 
-  // 1번 모터만 실측이라고 가정. 나머지는 전체 부하를 비율로 나눈 시뮬레이션 값
-  const motorKw = 2.2 + 0.3 * Math.sin(seconds / 5)
-  const restKw = loadKw - motorKw
-  const equipments = [
-    { id: 'Z1-MOTOR1', name: '1번 모터', loadKw: round1(motorKw), origin: 'MEASURED' },
-    { id: 'Z1-PRESS', name: '프레스 라인', loadKw: round1(restKw * 0.4), origin: 'SIMULATED' },
-    { id: 'Z1-COMP', name: '공기압축기', loadKw: round1(restKw * 0.25), origin: 'SIMULATED' },
-    { id: 'Z1-HVAC', name: '공조기', loadKw: round1(restKw * 0.2), origin: 'SIMULATED' },
-    { id: 'Z1-ETC', name: '조명·기타', loadKw: round1(restKw * 0.15), origin: 'SIMULATED' },
-  ]
+  // 설비별 전력: 평소 전력을 비중대로 나누고, 브레이징로와 사출기에는 변동분을 더함
+  // (태양광을 더하는 것은 어느 시간대에 열어도 피크 장면이 나오게 하려는 가짜 데이터용 처리)
+  const baseKw = 1700 + solarKw
+  const motorKw = 2.2 + 0.3 * Math.sin(seconds / 5) // 1번 모터만 실측이라고 가정
+  const extraKw = {
+    'Z2-FURN': furnaceSwingAt(seconds),
+    'Z3-INJ1': injectionSwingAt(seconds) * 0.6,
+    'Z3-INJ2': injectionSwingAt(seconds) * 0.4,
+    'Z4-MOTOR1': motorKw,
+    'U-HVAC': -motorKw,
+  }
+  const equipments = EQUIPMENTS.map((item) => ({
+    id: item.id,
+    name: item.name,
+    loadKw: round1(baseKw * item.share + (extraKw[item.id] ?? 0)),
+    origin: item.id === 'Z4-MOTOR1' ? 'MEASURED' : 'SIMULATED',
+  }))
 
   return {
     recordedAt: toLocalDateTime(now),
@@ -116,6 +154,9 @@ export async function fakeGetLatestStatus() {
     gridKw: round1(gridKw),
     socPercent: round1(socPercent),
     batteryTempC: round1(24 + Math.sin(seconds / 200)),
+    // ESS 전력변환장치(PCS) 상태와 배터리 건강 상태(SOH). 필드는 확인 필요
+    pcsStatus: dischargeKw > 0 ? 'DISCHARGING' : 'STANDBY',
+    sohPercent: 98.2,
     weather: { text: '맑음', tempC: 18 },
     // 15분 피크
     windowStart: toLocalDateTime(windowStart),
