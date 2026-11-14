@@ -29,6 +29,18 @@ const EQUIPMENTS = [
   { id: 'U-HVAC', name: '공조·조명', share: 0.04 },
 ]
 
+// 실패 상황을 화면에서 확인하기 위한 장치. 주소 뒤에 붙여서 씁니다.
+//   http://localhost:5173/?fake=offline      → 화면을 연 지 10초 뒤부터 서버 연결 끊김 흉내
+//   http://localhost:5173/?fake=chart-error  → 오늘 그래프 불러오기 실패 흉내
+const fakeMode = new URLSearchParams(window.location.search).get('fake')
+const openedAt = Date.now()
+
+function failIfOffline() {
+  if (fakeMode === 'offline' && Date.now() - openedAt > 10000) {
+    throw new Error('서버에 연결할 수 없습니다.')
+  }
+}
+
 let currentDecision = null // 가장 최근 추천 1건
 let nextDecisionId = 1
 let appliedDischargeKw = 0 // 운영자가 "적용"한 방전 전력
@@ -48,8 +60,9 @@ function solarAt(hour) {
 }
 
 // 브레이징로가 승온할 때 늘어나는 전력 (약 4분 주기로 반복되게 만든 값)
+// 뒤쪽 항은 15분 구간마다 평균이 조금씩 달라지게 하는 느린 변화
 function furnaceSwingAt(seconds) {
-  return 330 * Math.sin(seconds / 40)
+  return 330 * Math.sin(seconds / 40) + 110 * Math.sin(seconds / 700)
 }
 
 // 사출기가 한 사이클 돌 때마다 출렁이는 전력
@@ -67,8 +80,68 @@ function round1(value) {
   return Math.round(value * 10) / 10
 }
 
+// ---- 15분 구간(수요시한) 안에서 전력이 쌓이는 과정 ----
+// demandKw = 구간 시작부터 지금까지 쓴 전력량을 "15분 평균 전력"으로 바꾼 값.
+// 0에서 시작해 계속 올라가고, 15분이 끝났을 때의 값이 그 구간의 수요전력(피크)이 됩니다.
+const WINDOW_MS = 15 * 60 * 1000
+let windowState = null // { startMs, lastMs, demandKw, points: [{ minute, demandKw }] }
+
+function windowStartOf(ms) {
+  return Math.floor(ms / WINDOW_MS) * WINDOW_MS
+}
+
+// 지금까지의 누적값을 갱신. gridKw = 지금 한전에서 사고 있는 전력
+function updateWindow(nowMs, gridKw) {
+  const startMs = windowStartOf(nowMs)
+
+  if (!windowState || windowState.startMs !== startMs) {
+    // 새 구간 시작. 화면을 구간 중간에 열었다면 그 전까지는 15초 간격으로 계산해 채움
+    windowState = { startMs, lastMs: startMs, demandKw: 0, points: [{ minute: 0, demandKw: 0 }] }
+    for (let ms = startMs + 15000; ms < nowMs; ms += 15000) {
+      addWindowPoint(ms, gridWithoutEssAt(ms / 1000))
+    }
+  }
+  addWindowPoint(nowMs, gridKw)
+}
+
+function addWindowPoint(ms, gridKw) {
+  windowState.demandKw += (gridKw * (ms - windowState.lastMs)) / WINDOW_MS
+  windowState.lastMs = ms
+  windowState.points.push({
+    minute: Math.round(((ms - windowState.startMs) / 60000) * 100) / 100,
+    demandKw: Math.round(windowState.demandKw),
+  })
+}
+
+// ---- 요금 시간대 ----
+// 산업용 계절별·시간대별 요금제의 겨울철 시간대를 흉내 낸 임시 값입니다. (실제 구분과 단가는 확인 필요)
+const TARIFF_LABELS = { LIGHT: '경부하', MID: '중간부하', PEAK: '최대부하' }
+const TARIFF_PERIODS = [
+  { from: '00:00', to: '08:00', period: 'LIGHT' },
+  { from: '08:00', to: '09:00', period: 'MID' },
+  { from: '09:00', to: '12:00', period: 'PEAK' },
+  { from: '12:00', to: '16:00', period: 'MID' },
+  { from: '16:00', to: '19:00', period: 'PEAK' },
+  { from: '19:00', to: '22:00', period: 'MID' },
+  { from: '22:00', to: '24:00', period: 'LIGHT' },
+]
+
+function tariffAt(now) {
+  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`
+  const index = TARIFF_PERIODS.findIndex((item) => item.from <= time && time < item.to)
+  const current = TARIFF_PERIODS[index]
+  const next = TARIFF_PERIODS[(index + 1) % TARIFF_PERIODS.length]
+  return {
+    period: current.period,
+    label: TARIFF_LABELS[current.period],
+    until: current.to === '24:00' ? '00:00' : current.to, // 이 시간대가 끝나는 시각
+    nextLabel: TARIFF_LABELS[next.period],
+    periods: TARIFF_PERIODS.map((item) => ({ ...item, label: TARIFF_LABELS[item.period] })),
+  }
+}
+
 // 추천 판단 흉내: 피크 초과가 예상되면 방전, 아니면 대기
-function updateDecision(now, predictedWithoutEss, socPercent) {
+function updateDecision(now, predictedWithoutEss, socPercent, remainingMinutes) {
   const overKw = predictedWithoutEss - TARGET_PEAK_KW
   const action = overKw > 0 ? 'DISCHARGE' : 'IDLE'
 
@@ -83,7 +156,7 @@ function updateDecision(now, predictedWithoutEss, socPercent) {
     ruleNo: action === 'DISCHARGE' ? 2 : 6,
     action,
     powerKw,
-    durationMinutes: action === 'DISCHARGE' ? 10 : null,
+    durationMinutes: action === 'DISCHARGE' ? Math.max(1, Math.ceil(remainingMinutes)) : null,
     reason:
       action === 'DISCHARGE'
         ? '브레이징로 승온과 사출기 가동이 겹쳐, 이번 15분 구간의 예상 평균이 목표 피크를 넘을 것으로 보입니다.'
@@ -102,30 +175,36 @@ function updateDecision(now, predictedWithoutEss, socPercent) {
 
 // GET /api/battery-statuses/latest 흉내
 export async function fakeGetLatestStatus() {
+  failIfOffline()
   const now = new Date()
   const seconds = now.getTime() / 1000
   const hour = now.getHours() + now.getMinutes() / 60
 
   const solarKw = solarAt(hour)
   const gridWithoutEss = gridWithoutEssAt(seconds)
-  const predictedWithoutEss = gridWithoutEssAt(seconds - 10)
   const socPercent = 60 + 15 * Math.sin(seconds / 300)
 
-  updateDecision(now, predictedWithoutEss, socPercent)
+  // 현재 15분 구간 (예: 14:00~14:15)
+  const windowStart = new Date(windowStartOf(now.getTime()))
+  const windowEnd = new Date(windowStart.getTime() + WINDOW_MS)
+  const remainingMinutes = (windowEnd.getTime() - now.getTime()) / 60000
+
+  // 지금까지 쌓인 값에 "남은 시간 동안 지금 전력이 계속된다"고 보고 더한 것이 예상 평균
+  // (회의록의 예측 예시 식을 단순하게 흉내 낸 것. 실제 예측은 백엔드가 합니다)
+  updateWindow(now.getTime(), gridWithoutEss - appliedDischargeKw)
+  const demandSoFar = windowState.demandKw
+  const predictedWithoutEss = demandSoFar + (gridWithoutEss * remainingMinutes) / 15
+
+  updateDecision(now, predictedWithoutEss, socPercent, remainingMinutes)
 
   const dischargeKw = appliedDischargeKw
   const gridKw = gridWithoutEss - dischargeKw
   const loadKw = gridWithoutEss + solarKw
-  const predictedKw = predictedWithoutEss - dischargeKw
+  const predictedKw = demandSoFar + (gridKw * remainingMinutes) / 15
 
   let peakStatus = 'NORMAL'
   if (predictedKw > TARGET_PEAK_KW) peakStatus = 'CRITICAL'
   else if (predictedKw >= WARN_KW) peakStatus = 'WARNING'
-
-  // 현재 15분 구간 (예: 14:00~14:15)
-  const windowStart = new Date(now)
-  windowStart.setMinutes(Math.floor(now.getMinutes() / 15) * 15, 0, 0)
-  const windowEnd = new Date(windowStart.getTime() + 15 * 60 * 1000)
 
   // 설비별 전력: 평소 전력을 비중대로 나누고, 브레이징로와 사출기에는 변동분을 더함
   // (태양광을 더하는 것은 어느 시간대에 열어도 피크 장면이 나오게 하려는 가짜 데이터용 처리)
@@ -167,6 +246,13 @@ export async function fakeGetLatestStatus() {
     warnKw: WARN_KW,
     peakStatus,
     defenseKw: Math.max(0, Math.ceil(predictedKw - TARGET_PEAK_KW)),
+    // 구간 시작부터 지금까지 쌓인 값 (그래프용). 필드는 확인 필요
+    windowPoints: windowState.points.slice(),
+    // 지금까지의 최대 피크 (고정된 예시 값). 필드는 확인 필요
+    todayPeakKw: 1768,
+    monthPeakKw: 1792,
+    // 요금 시간대
+    tariff: tariffAt(now),
     // 공급원 비율 (공장 전체 기준, 계산 방식은 확인 필요)
     sourceRatio: {
       gridPercent: round1((gridKw / loadKw) * 100),
@@ -179,6 +265,9 @@ export async function fakeGetLatestStatus() {
 
 // GET /api/battery-statuses?from=&to= 흉내: 오늘 00시부터 지금까지 15분 간격
 export async function fakeGetTodayStatuses() {
+  if (fakeMode === 'chart-error') {
+    throw new Error('서버에 연결할 수 없습니다.')
+  }
   const now = new Date()
   const time = new Date(now)
   time.setHours(0, 0, 0, 0)
@@ -206,6 +295,7 @@ export async function fakeGetLatestDecision() {
 
 // PATCH /api/battery-decisions/{id} 흉내 (status: 'APPLIED' 또는 'IGNORED')
 export async function fakeUpdateDecision(id, status) {
+  failIfOffline()
   if (!currentDecision || currentDecision.id !== id) {
     throw new Error('이미 지난 추천입니다. 최신 추천을 확인해 주세요.')
   }

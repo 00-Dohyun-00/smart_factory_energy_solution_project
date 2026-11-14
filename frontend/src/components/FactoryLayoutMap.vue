@@ -74,12 +74,11 @@ const SOLAR_PANELS = [0, 1].flatMap((row) =>
 const BATTERY_RACKS = [990, 1024, 1058, 1092]
 const RACK_HEIGHT = 58
 
-const ORIGIN_LABELS = { MEASURED: '실측', SIMULATED: '시뮬레이션', CALCULATED: '계산값' }
 const PCS_LABELS = { DISCHARGING: '방전 중', CHARGING: '충전 중', STANDBY: '대기' }
 
 const selectedId = ref('Z4-MOTOR1')
 
-// 위치 정보에 백엔드 값(이름, kW, 출처)을 합침. 값을 못 받은 설비는 '—'로 표시
+// 위치 정보에 백엔드 값(이름, kW)을 합침. 값을 못 받은 설비는 '—'로 표시
 const equipments = computed(() =>
   EQUIPMENT_SPOTS.map((spot) => {
     const data = props.status?.equipments.find((item) => item.id === spot.id)
@@ -90,7 +89,6 @@ const equipments = computed(() =>
       zoneName: zone.name,
       name: data?.name ?? spot.id,
       loadKw: data?.loadKw ?? null,
-      originLabel: ORIGIN_LABELS[data?.origin] ?? '—',
     }
   }),
 )
@@ -190,6 +188,7 @@ const essFlowing = computed(
         :aria-label="`${item.name} 선택`"
         @click="selectedId = item.id"
         @keydown.enter="selectedId = item.id"
+        @keydown.space.prevent="selectedId = item.id"
       >
         <rect
           class="equipment-area"
@@ -207,7 +206,6 @@ const essFlowing = computed(
         />
         <text class="equipment-name" :x="item.centerX" :y="item.top + 76" text-anchor="middle">
           {{ item.name }}
-          <tspan v-if="item.originLabel === '실측'" class="origin">(실측)</tspan>
         </text>
         <text class="equipment-value" :x="item.centerX" :y="item.top + 96" text-anchor="middle">
           {{ formatKw(item.loadKw) }}
@@ -215,10 +213,10 @@ const essFlowing = computed(
         </text>
       </g>
 
-      <!-- 옥상 태양광 (가상) -->
+      <!-- 옥상 태양광 -->
       <g class="solar">
         <rect class="zone" x="836" y="8" width="296" height="92" rx="3" />
-        <text class="zone-name" x="846" y="27">옥상 태양광 (가상)</text>
+        <text class="zone-name" x="846" y="27">옥상 태양광</text>
         <rect
           v-for="panel in SOLAR_PANELS"
           :key="`${panel.x}-${panel.y}`"
@@ -258,14 +256,14 @@ const essFlowing = computed(
           {{ formatKw(status?.gridKw) }}
           <tspan class="unit" dx="2">kW</tspan>
         </text>
-        <text class="hint" x="1046" y="202">한전 · 계산값</text>
+        <text class="hint" x="1046" y="202">한전</text>
       </g>
 
-      <!-- ESS실 (가상): PCS + 배터리 랙 -->
+      <!-- ESS실: PCS + 배터리 랙 -->
       <g class="ess">
         <path class="wire" :class="{ flowing: essFlowing }" d="M 880 238 V 224" />
         <rect class="zone" x="836" y="238" width="296" height="134" rx="3" />
-        <text class="zone-name" x="846" y="257">ESS실 (가상)</text>
+        <text class="zone-name" x="846" y="257">ESS실</text>
         <text class="hint" x="1122" y="257" text-anchor="end">
           배터리실 {{ formatOneDecimal(status?.batteryTempC) }} ℃
         </text>
@@ -300,7 +298,6 @@ const essFlowing = computed(
       <p class="detail-title">
         <span class="detail-zone">{{ selected.zoneName }}</span>
         <strong>{{ selected.name }}</strong>
-        <span class="tag">{{ selected.originLabel }}</span>
         <span class="num detail-value">{{ formatKw(selected.loadKw) }} kW</span>
       </p>
       <div class="detail-bar" aria-hidden="true">
@@ -318,7 +315,6 @@ const essFlowing = computed(
           {{ part.name }}
           <span class="num">{{ formatOneDecimal(part.percent) }}%</span>
         </li>
-        <li><span class="tag">배분 계산값</span></li>
       </ul>
     </div>
   </div>
@@ -419,9 +415,13 @@ const essFlowing = computed(
   stroke: transparent;
   transition: stroke 0.15s;
 }
-.equipment:hover .equipment-area,
-.equipment:focus-visible .equipment-area {
+.equipment:hover .equipment-area {
   stroke: var(--line-strong);
+}
+/* 키보드로 이동했을 때는 위치가 분명히 보이도록 진한 테두리 */
+.equipment:focus-visible .equipment-area {
+  stroke: var(--ink);
+  stroke-width: 2;
 }
 .equipment.selected .equipment-area {
   fill: var(--bg);
@@ -432,11 +432,6 @@ const essFlowing = computed(
   font-size: 13px;
   font-weight: 700;
   fill: var(--ink);
-}
-.origin {
-  font-size: 11px;
-  font-weight: 400;
-  fill: var(--mute);
 }
 .equipment-value {
   font-size: 16px;
@@ -479,8 +474,9 @@ const essFlowing = computed(
 /* 아래 자세한 값 */
 .detail {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 8px 16px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -500,7 +496,7 @@ const essFlowing = computed(
 .detail-bar {
   display: flex;
   flex: 1;
-  min-width: 80px;
+  min-width: 120px;
   height: 10px;
   background: var(--line);
 }
@@ -510,8 +506,9 @@ const essFlowing = computed(
 }
 .detail-list {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 4px 14px;
   white-space: nowrap;
 }
 .detail-list li {

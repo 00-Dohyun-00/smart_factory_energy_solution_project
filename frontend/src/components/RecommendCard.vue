@@ -33,7 +33,6 @@ const needsAnswer = computed(
   <section class="card reco">
     <div class="reco-head">
       <h2 class="card-title">ESS 추천</h2>
-      <span class="tag">가상</span>
       <span class="mode">운영자 승인 모드</span>
     </div>
 
@@ -66,7 +65,7 @@ const needsAnswer = computed(
           <button class="button" :disabled="busy" @click="emit('ignore')">무시</button>
         </div>
         <p v-else-if="decision.status === 'APPLIED'" class="result applied">
-          적용함 (시뮬레이션) · {{ decision.appliedBy }}
+          적용함 · {{ decision.appliedBy }}
           <span class="num">{{ formatClock(decision.appliedAt) }}</span>
         </p>
         <p v-else-if="decision.status === 'IGNORED'" class="result">무시함</p>
@@ -115,6 +114,8 @@ const needsAnswer = computed(
   margin-left: 2px;
   font-size: 15px;
   font-weight: 400;
+  /* 작은 글자는 ESS 색으로 쓰면 대비가 부족해 기본 글자색을 씀 */
+  color: var(--ink-2);
 }
 .duration {
   margin-left: 10px;
@@ -181,7 +182,7 @@ const needsAnswer = computed(
 }
 .result.applied {
   font-weight: 700;
-  color: var(--src-ess);
+  color: var(--ink);
 }
 .decided {
   margin-left: auto;

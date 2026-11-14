@@ -8,6 +8,8 @@ export const useRealtimeStore = defineStore('realtime', () => {
   const status = ref(null) // 최신 상태 1건 (아직 못 받았으면 null)
   const decision = ref(null) // 최신 추천 1건
   const todayStatuses = ref([]) // 오늘 그래프용 목록
+  const todayLoading = ref(true) // 그래프를 불러오는 중 (처음에는 아직 받기 전이라 true)
+  const todayError = ref('') // 그래프를 불러오지 못했을 때의 메시지
 
   const connected = ref(true) // 서버 연결 표시등
   const failCount = ref(0)
@@ -36,7 +38,15 @@ export const useRealtimeStore = defineStore('realtime', () => {
   }
 
   async function fetchToday() {
-    todayStatuses.value = await getTodayBatteryStatuses()
+    todayLoading.value = true
+    todayError.value = ''
+    try {
+      todayStatuses.value = await getTodayBatteryStatuses()
+    } catch (error) {
+      todayError.value = error.message
+    } finally {
+      todayLoading.value = false
+    }
   }
 
   // 추천 적용 / 무시
@@ -49,6 +59,8 @@ export const useRealtimeStore = defineStore('realtime', () => {
     status,
     decision,
     todayStatuses,
+    todayLoading,
+    todayError,
     connected,
     errorMessage,
     fetchLatest,

@@ -24,7 +24,6 @@ const sources = computed(() => [
   {
     key: 'solar',
     name: '태양광',
-    tag: '가상',
     y: 28,
     // 선이 꺾이는 x 위치와 공장에 닿는 y 위치 (선끼리 겹치지 않게 서로 다르게)
     bendX: 520,
@@ -36,7 +35,6 @@ const sources = computed(() => [
   {
     key: 'ess',
     name: 'ESS',
-    tag: '가상',
     y: 163,
     bendX: 500,
     entryY: 215,
@@ -47,7 +45,6 @@ const sources = computed(() => [
   {
     key: 'grid',
     name: '한전',
-    tag: '계산값',
     y: 298,
     bendX: 520,
     entryY: 245,
@@ -73,7 +70,6 @@ const sources = computed(() => [
       <rect class="box" x="40" :y="source.y" width="260" height="104" rx="4" />
       <rect class="mark" x="40" :y="source.y" width="6" height="104" />
       <text class="name" x="60" :y="source.y + 30">{{ source.name }}</text>
-      <text class="small" x="288" :y="source.y + 30" text-anchor="end">{{ source.tag }}</text>
       <text class="value" x="60" :y="source.y + 72">
         {{ formatKw(source.kw) }}
         <tspan class="unit" dx="4">kW</tspan>
@@ -84,7 +80,6 @@ const sources = computed(() => [
     <!-- 공장 -->
     <rect class="box factory" x="660" y="135" width="260" height="160" rx="4" />
     <text class="name" x="680" y="167">공장 소비전력</text>
-    <text class="small" x="908" y="167" text-anchor="end">시뮬레이션</text>
     <text class="value factory-value" x="680" y="225">
       {{ formatKw(status?.loadKw) }}
       <tspan class="unit" dx="4">kW</tspan>
