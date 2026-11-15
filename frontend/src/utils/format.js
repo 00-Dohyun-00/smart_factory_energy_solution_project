@@ -31,6 +31,11 @@ export function formatHourMinute(dateTime) {
   return dateTime ? dateTime.slice(11, 16) : EMPTY
 }
 
+// '2026-11-14T14:07:32' → '11-14 14:07:32'
+export function formatMonthDayTime(dateTime) {
+  return dateTime ? `${dateTime.slice(5, 10)} ${dateTime.slice(11, 19)}` : EMPTY
+}
+
 // 448 → '7분 28초'
 export function formatRemaining(seconds) {
   if (seconds === null || seconds === undefined) return EMPTY

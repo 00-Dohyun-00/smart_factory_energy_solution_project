@@ -1,6 +1,6 @@
 <!-- 실시간 관제 (메인 화면) -->
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import Chart from '@/components/Chart.vue'
 import FactoryLayoutMap from '@/components/FactoryLayoutMap.vue'
 import PeakGauge from '@/components/PeakGauge.vue'
@@ -12,22 +12,13 @@ import { formatClock, formatHourMinute } from '@/utils/format'
 
 const realtimeStore = useRealtimeStore()
 
-const POLL_INTERVAL_MS = 5000 // 폴링 주기 (시뮬레이터 주기와 같음, 확인 필요)
-
 const view = ref('layout') // 가운데 영역: 'layout'(공장 레이아웃) | 'flow'(전력 흐름)
 const busy = ref(false) // 적용/무시 요청 중
 const actionError = ref('') // 적용/무시 실패 메시지
-let timer = null
 
+// 최신 상태·추천은 공통 틀(MainLayout)이 5초마다 받아 오므로, 여기서는 오늘 그래프만 받음
 onMounted(() => {
-  realtimeStore.fetchLatest()
   realtimeStore.fetchToday()
-  timer = setInterval(() => realtimeStore.fetchLatest(), POLL_INTERVAL_MS)
-})
-
-// 화면을 떠날 때 폴링을 반드시 멈춤
-onBeforeUnmount(() => {
-  clearInterval(timer)
 })
 
 async function answerDecision(newStatus) {

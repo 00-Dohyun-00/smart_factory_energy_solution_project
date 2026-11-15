@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '@/layouts/MainLayout.vue'
+import HistoryPage from '@/pages/HistoryPage.vue'
 import MainPage from '@/pages/MainPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
 
@@ -9,7 +10,10 @@ const routes = [
     // MainLayout 안에 들어가는 페이지들 (공통 헤더/사이드바 공유)
     path: '/',
     component: MainLayout,
-    children: [{ path: '', component: MainPage }],
+    children: [
+      { path: '', component: MainPage }, // 실시간 관제
+      { path: 'history', component: HistoryPage }, // 운영 이력
+    ],
   },
 
   // 위에 없는 주소로 들어오면 404 페이지

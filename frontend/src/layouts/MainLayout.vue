@@ -1,9 +1,24 @@
 <!-- 여러 페이지가 공유하는 공통 틀: 위쪽 헤더 + 아래 페이지 내용 -->
 <script setup>
+import { onBeforeUnmount, onMounted } from 'vue'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { formatClock } from '@/utils/format'
 
 const realtimeStore = useRealtimeStore()
+
+const POLL_INTERVAL_MS = 5000 // 폴링 주기 (시뮬레이터 주기와 같음, 확인 필요)
+let timer = null
+
+// 최신 상태는 헤더(시각, 날씨, 연결 표시등)가 모든 화면에서 쓰므로 여기서 한 번만 폴링함
+onMounted(() => {
+  realtimeStore.fetchLatest()
+  timer = setInterval(() => realtimeStore.fetchLatest(), POLL_INTERVAL_MS)
+})
+
+// 화면을 떠날 때 폴링을 반드시 멈춤
+onBeforeUnmount(() => {
+  clearInterval(timer)
+})
 
 const menus = [
   { to: '/', label: '실시간 관제' },

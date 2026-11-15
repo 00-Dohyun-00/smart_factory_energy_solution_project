@@ -150,10 +150,18 @@ function updateDecision(now, predictedWithoutEss, socPercent, remainingMinutes) 
   // 추천 내용이 바뀌면 새 추천을 만들고, 이전에 적용한 방전은 끝냄
   appliedDischargeKw = 0
   const powerKw = action === 'DISCHARGE' ? MAX_DISCHARGE_KW : 0
+  const windowStartMs = windowStartOf(now.getTime())
   currentDecision = {
     id: nextDecisionId++,
     decidedAt: toLocalDateTime(now),
+    windowStart: toLocalDateTime(new Date(windowStartMs)),
+    windowEnd: toLocalDateTime(new Date(windowStartMs + WINDOW_MS)),
     ruleNo: action === 'DISCHARGE' ? 2 : 6,
+    ruleLabel: action === 'DISCHARGE' ? '피크 방어' : '조치 없음',
+    predictedKw: Math.round(predictedWithoutEss),
+    targetPeakKw: TARGET_PEAK_KW,
+    resultPeakKw: null, // 구간이 끝나야 알 수 있음
+    resultStatus: null,
     action,
     powerKw,
     durationMinutes: action === 'DISCHARGE' ? Math.max(1, Math.ceil(remainingMinutes)) : null,
@@ -171,6 +179,204 @@ function updateDecision(now, predictedWithoutEss, socPercent, remainingMinutes) 
     appliedBy: null,
     appliedAt: null,
   }
+  // 운영 이력 화면에 보이도록 기록 (대기 추천은 너무 많아져서 뺌)
+  if (action !== 'IDLE') {
+    sessionDecisions.push(currentDecision)
+  }
+}
+
+// ---- 운영 이력 ----
+// 화면을 켠 뒤에 실제로 나온 추천들 (실시간 관제에서 적용/무시하면 여기에도 반영됨)
+const sessionDecisions = []
+
+const PEAK_REASON =
+  '브레이징로 승온과 사출기 가동이 겹쳐, 이번 15분 구간의 예상 평균이 목표 피크를 넘을 것으로 보입니다.'
+
+// 하루치 이력의 뼈대. 날짜마다 일부를 빼고 값을 조금씩 바꿔서 씁니다.
+const HISTORY_TEMPLATES = [
+  {
+    time: '02:15',
+    action: 'CHARGE',
+    ruleNo: 4,
+    ruleLabel: '저요금 충전',
+    powerKw: 300,
+    status: 'AUTO',
+    reason: '경부하 시간대이고 배터리 잔량이 낮아 충전을 추천합니다.',
+  },
+  {
+    time: '09:30',
+    action: 'DISCHARGE',
+    ruleNo: 2,
+    ruleLabel: '피크 방어',
+    powerKw: 500,
+    status: 'APPLIED',
+    reason: PEAK_REASON,
+  },
+  {
+    time: '10:15',
+    action: 'DISCHARGE',
+    ruleNo: 2,
+    ruleLabel: '피크 방어',
+    powerKw: 400,
+    status: 'IGNORED',
+    reason: PEAK_REASON,
+  },
+  {
+    time: '11:00',
+    action: 'IDLE',
+    ruleNo: 1,
+    ruleLabel: '안전 제한',
+    powerKw: 0,
+    status: 'AUTO',
+    reason: '배터리실 온도가 제한값에 가까워 방전을 멈추고 대기합니다.',
+  },
+  {
+    time: '14:45',
+    action: 'DISCHARGE',
+    ruleNo: 2,
+    ruleLabel: '피크 방어',
+    powerKw: 350,
+    status: 'APPLIED',
+    reason: PEAK_REASON,
+  },
+  {
+    time: '16:30',
+    action: 'DISCHARGE',
+    ruleNo: 2,
+    ruleLabel: '피크 방어',
+    powerKw: 500,
+    status: 'APPLIED',
+    reason: PEAK_REASON,
+  },
+  {
+    time: '17:15',
+    action: 'DISCHARGE',
+    ruleNo: 5,
+    ruleLabel: '고요금 방전',
+    powerKw: 200,
+    status: 'IGNORED',
+    reason: '최대부하 시간대라 방전하면 전력량 요금을 줄일 수 있습니다.',
+  },
+  {
+    time: '18:00',
+    action: 'DISCHARGE',
+    ruleNo: 2,
+    ruleLabel: '피크 방어',
+    powerKw: 450,
+    status: 'AUTO',
+    reason: PEAK_REASON,
+  },
+  {
+    time: '23:00',
+    action: 'CHARGE',
+    ruleNo: 4,
+    ruleLabel: '저요금 충전',
+    powerKw: 300,
+    status: 'AUTO',
+    reason: '경부하 시간대이고 배터리 잔량이 낮아 충전을 추천합니다.',
+  },
+]
+
+// 같은 숫자를 넣으면 항상 같은 값(0~1)이 나오는 가짜 난수. 새로고침해도 이력이 바뀌지 않게 하려고 씀
+function fakeRandom(seed) {
+  const x = Math.sin(seed * 12.9898) * 43758.5453
+  return x - Math.floor(x)
+}
+
+function tariffLabelAt(time) {
+  const found = TARIFF_PERIODS.find((item) => item.from <= time && time < item.to)
+  return TARIFF_LABELS[found.period]
+}
+
+// 하루치 이력 만들기 (date 예: '2026-11-14')
+function buildHistoryOfDay(date, now) {
+  const daySeed = Number(date.replaceAll('-', ''))
+  const list = []
+
+  HISTORY_TEMPLATES.forEach((template, index) => {
+    const random = (n) => fakeRandom(daySeed + index * 17 + n)
+    if (random(0) < 0.2) return // 날마다 일부 추천은 없는 것으로
+
+    const decided = new Date(`${date}T${template.time}:00`)
+    decided.setSeconds(Math.floor(random(1) * 600)) // 구간 안에서 조금 늦게 나온 것처럼
+    if (decided > now) return // 아직 오지 않은 시각
+
+    const windowStartMs = windowStartOf(decided.getTime())
+    const windowEnd = new Date(windowStartMs + WINDOW_MS)
+    const isPeak = template.ruleLabel === '피크 방어'
+    const predictedKw = Math.round(
+      isPeak ? TARGET_PEAK_KW + 30 + random(2) * 250 : 1480 + random(2) * 260,
+    )
+
+    // 결과: 구간이 끝났을 때의 실제 피크
+    let resultPeakKw = null
+    if (windowEnd <= now) {
+      if (isPeak && template.status === 'IGNORED') {
+        resultPeakKw = Math.round(predictedKw - random(3) * 25) // 무시하면 그대로 초과
+      } else if (isPeak) {
+        resultPeakKw = Math.round(TARGET_PEAK_KW - 15 - random(3) * 110) // 방전해서 목표 이내
+      } else {
+        resultPeakKw = Math.round(predictedKw - random(3) * 40)
+      }
+    }
+
+    const soc = round1(35 + random(4) * 50)
+    const loadKw = Math.round(predictedKw + solarAt(decided.getHours()) + random(5) * 60)
+    const answeredAt = new Date(decided.getTime() + (20 + Math.floor(random(6) * 70)) * 1000)
+
+    list.push({
+      id: daySeed * 100 + index,
+      decidedAt: toLocalDateTime(decided),
+      windowStart: toLocalDateTime(new Date(windowStartMs)),
+      windowEnd: toLocalDateTime(windowEnd),
+      ruleNo: template.ruleNo,
+      ruleLabel: template.ruleLabel,
+      action: template.action,
+      powerKw: template.powerKw,
+      reason: template.reason,
+      predictedKw,
+      targetPeakKw: TARGET_PEAK_KW,
+      usedValues: [
+        { label: '예상 평균', value: predictedKw, unit: 'kW' },
+        { label: '목표 피크', value: TARGET_PEAK_KW, unit: 'kW' },
+        { label: '공장 소비', value: loadKw, unit: 'kW' },
+        { label: '태양광 발전', value: Math.round(solarAt(decided.getHours())), unit: 'kW' },
+        { label: 'SOC', value: soc, unit: '%' },
+        { label: '최대 출력', value: MAX_DISCHARGE_KW, unit: 'kW' },
+        { label: '요금 시간대', value: tariffLabelAt(template.time), unit: '' },
+        { label: '배터리실 온도', value: round1(22 + random(7) * 9), unit: '℃' },
+        { label: '날씨', value: random(8) < 0.6 ? '맑음' : '흐림', unit: '' },
+      ],
+      status: template.status,
+      appliedBy: template.status === 'AUTO' ? '자동 모드' : '운영자',
+      appliedAt: toLocalDateTime(answeredAt),
+      resultPeakKw,
+      resultStatus:
+        resultPeakKw === null ? null : resultPeakKw > TARGET_PEAK_KW ? 'EXCEEDED' : 'DEFENDED',
+    })
+  })
+  return list
+}
+
+// GET /api/battery-decisions?from=&to= 흉내 (from, to 예: '2026-11-14'). 최신 순으로 돌려줌
+export async function fakeGetDecisions(from, to) {
+  failIfOffline()
+  const now = new Date()
+  let list = []
+
+  const day = new Date(`${from}T00:00:00`)
+  const lastDay = new Date(`${to}T00:00:00`)
+  for (let count = 0; day <= lastDay && count < 62; count++) {
+    list = list.concat(buildHistoryOfDay(toLocalDateTime(day).slice(0, 10), now))
+    day.setDate(day.getDate() + 1)
+  }
+
+  // 화면을 켠 뒤에 나온 추천도 기간 안에 있으면 함께 보여 줌
+  const live = sessionDecisions
+    .filter((item) => from <= item.decidedAt.slice(0, 10) && item.decidedAt.slice(0, 10) <= to)
+    .map((item) => ({ ...item }))
+
+  return list.concat(live).sort((a, b) => (a.decidedAt < b.decidedAt ? 1 : -1))
 }
 
 // GET /api/battery-statuses/latest 흉내
