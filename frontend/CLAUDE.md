@@ -67,11 +67,11 @@ src/
 |---|---|---|---|
 | `/` | `MainPage.vue` | 실시간 관제 | 지표 4개, 15분 피크 게이지, 추천 카드, 레이아웃/전력 흐름 전환, 오늘 그래프 |
 | `/history` | `HistoryPage.vue` | 운영 이력 | 추천·적용·결과 로그 표, 기간·상태 필터, 검색 |
-| `/report` | `ReportPage.vue` | 성적표 | 피크 방어 실적, 운영 방식별 요금 비교, 탄소, ESS 충·방전 이력 |
+| `/report` | `ReportPage.vue` | 성적표 | 피크 방어 실적과 저감량, 피크 시간대, 전기요금 추정, 목표 초과 구간, ESS 운용, 태양광·탄소 |
 | `/settings` | `SettingsPage.vue` | 설정 | 목표 피크, 요금 시간대·단가, ESS 사양, 온도 제한, 운영 모드, 갱신 주기 |
 | `/login` | `LoginPage.vue` | 로그인 | 회원가입 없이 로그인만. 백엔드(세션·쿠키 방식) 미구현 |
 
-- 현재는 `MainPage.vue`, `HistoryPage.vue`, `NotFoundPage.vue`가 있다. 나머지는 만들 때 `router/index.js`에 등록한다.
+- 현재는 `MainPage.vue`, `HistoryPage.vue`, `ReportPage.vue`, `NotFoundPage.vue`가 있다. 설정과 로그인은 만들 때 `router/index.js`에 등록한다.
 - 헤더(`MainLayout.vue`): 왼쪽 `WATTever`, 메뉴 `실시간 관제 | 운영 이력 | 성적표 | 설정`, 현재 시각, 날씨, 서버 연결 표시등.
 - 화면 시안은 메인 화면 1장과 회의록의 글 설명뿐이다. 배치가 애매하면 회의록 5번의 순서(위→아래)를 따른다.
 - 회의록의 예시값(공장 2,570kW, 목표 1,800kW 등)은 UI 예시일 뿐 실제 값이 아니다.
@@ -84,6 +84,15 @@ src/
 - "오늘"은 서버가 보낸 시각(`status.recordedAt`)에서 구한다. 조회 기간에 오늘이 들어 있으면 5초마다 조용히 다시 받는다.
 - 이력 화면에서는 적용/무시를 하지 않는다(읽기 전용). 처리는 실시간 관제에서 한다.
 - 이력용으로 가짜 데이터에 넣은 값(백엔드와 확정 필요): `windowStart`, `windowEnd`, `ruleLabel`, `predictedKw`, `resultPeakKw`, `resultStatus`(`DEFENDED`/`EXCEEDED`).
+
+### 성적표 세부
+
+- 주제는 "한 달 동안 ESS 추천 운영이 실제로 어땠나"이다. 달은 ◀ ▶로 고르고, 이번 달은 오늘까지의 값만 보여 준다. "이번 달"은 서버 시각에서 구한다.
+- 구성: 핵심 숫자 4개(피크 방어 성공률, 최대 피크, 평균 피크 저감량, 전기요금 추정) → 일별 최대 피크와 저감량(예상 막대 위에 실제 막대를 겹침) · 피크 시간대 히트맵(날짜 × 시각) / 전기요금 카드(`BillCard.vue`) · 목표를 넘은 구간 표 → ESS 운용 · 태양광·탄소.
+- 금액은 백엔드가 원 단위로 주고, 화면에서 만원 단위로 바꿔 보여 준다(`formatManwon`). 요금·저감량·탄소는 모두 추정값이라고 제목 줄에 적는다.
+- 피크 저감량은 "방전하지 않았을 때의 예상 피크 − 실제 피크"이고, 두 값 모두 백엔드가 준다.
+- 히트맵의 색 단계는 목표 피크 대비 비율로 화면에서 나눈다(표시용). 목표를 넘은 칸은 경고색이다.
+- 성적표용으로 가짜 데이터에 넣은 값(백엔드와 확정 필요): `summary`, `dailyPeaks[{ date, peakKw, expectedKw }]`, `heatmap[{ date, hour, peakKw }]`, `bill{ total, energyCharge, baseCharge, baseChargeOverTarget, monthEndEstimate, lastMonthTotal, byTariff[] }`, `exceeded[]`, `ess{}`, `solar{}`. 단가와 배출계수는 임시 값이다.
 
 ### 실시간 관제 세부
 
@@ -156,7 +165,7 @@ src/
 - 배터리실 온도, 날씨, 값의 출처 구분, 설비별 소비전력·공급원 비율 필드는 확인 필요.
 - 가짜 데이터에 임시로 넣어 쓰는 값(백엔드와 확정 필요): 15분 구간 누적 `windowPoints[{ minute, demandKw }]`, 최대 피크 `todayPeakKw`·`monthPeakKw`, 요금 시간대 `tariff{ period, label, until, nextLabel, periods[] }`, ESS `pcsStatus`·`sohPercent`.
 
-성적표의 운영 방식 비교는 **3가지(한전 100% / 태양광 자가소비 / 태양광+ESS 추천 운영)로 확정**이다. 다만 화면은 개수를 코드에 박지 않고 API가 주는 배열을 `v-for`로 그대로 그린다.
+성적표의 운영 방식 비교(한전 100% / 태양광 자가소비 / 태양광+ESS 추천 운영)는 **지금 성적표 화면에 넣지 않는다** (2026-11-15 결정). 나중에 백엔드의 가상 시나리오 시뮬레이션이 연결되면 그때 비교 화면을 만든다. 만들 때는 개수를 코드에 박지 않고 API가 주는 배열을 `v-for`로 그대로 그린다.
 
 ## 8. 코드 규칙
 
