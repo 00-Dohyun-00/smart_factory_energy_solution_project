@@ -21,6 +21,17 @@ export function formatOneDecimal(value) {
   return formatNumber(value, 1)
 }
 
+// 정수로 표시 (예: 212,000). 큰 전력량(kWh)이나 횟수에 씀
+export function formatInteger(value) {
+  return formatNumber(value, 0)
+}
+
+// 원 → 만원 단위 정수 (예: 84,280,000 → '8,428'). 큰 금액을 읽기 쉽게 하려는 단위 변환
+export function formatManwon(won) {
+  if (won === null || won === undefined) return EMPTY
+  return formatNumber(Math.round(won / 10000), 0)
+}
+
 // '2026-11-14T14:07:32' → '14:07:32'
 export function formatClock(dateTime) {
   return dateTime ? dateTime.slice(11, 19) : EMPTY

@@ -3,6 +3,7 @@ import MainLayout from '@/layouts/MainLayout.vue'
 import HistoryPage from '@/pages/HistoryPage.vue'
 import MainPage from '@/pages/MainPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
+import ReportPage from '@/pages/ReportPage.vue'
 
 // 페이지(URL) 목록. 새 페이지를 만들면 여기에 추가합니다.
 const routes = [
@@ -13,6 +14,7 @@ const routes = [
     children: [
       { path: '', component: MainPage }, // 실시간 관제
       { path: 'history', component: HistoryPage }, // 운영 이력
+      { path: 'report', component: ReportPage }, // 성적표
     ],
   },
 

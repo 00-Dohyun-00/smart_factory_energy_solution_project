@@ -513,3 +513,167 @@ export async function fakeUpdateDecision(id, status) {
   }
   return { ...currentDecision }
 }
+
+// ---- 성적표 (GET /api/reports?month= 흉내) ----
+// 단가와 배출계수는 화면 확인용으로 넣은 임시 값입니다. 실제 계산은 백엔드가 합니다.
+const BASE_PRICE_PER_KW = 8320 // 기본요금 단가 (원/kW)
+const ENERGY_PRICES = { LIGHT: 87, MID: 110, PEAK: 172 } // 전력량요금 단가 (원/kWh)
+const EMISSION_FACTOR = 0.4594 // 탄소 배출계수 (kgCO2/kWh, 확인 필요)
+const BUSY_HOURS = [9, 10, 11, 16, 17, 18] // 피크가 잘 생기는 시각
+const ESS_CAPACITY_KWH = 1000
+
+// month 예: '2026-11'. 이번 달이면 오늘까지, 지난 달이면 한 달 전체를 돌려줌
+export async function fakeGetReport(month) {
+  failIfOffline()
+  const now = new Date()
+  const thisMonth = toLocalDateTime(now).slice(0, 7)
+  const [year, monthNumber] = month.split('-').map(Number)
+  const daysInMonth = new Date(year, monthNumber, 0).getDate()
+
+  let lastDay = daysInMonth
+  if (month === thisMonth) lastDay = now.getDate()
+  if (month > thisMonth) lastDay = 0 // 아직 오지 않은 달은 기록 없음
+
+  // 아직 기록이 없는 달
+  if (lastDay === 0) {
+    return { month, hasData: false, targetPeakKw: TARGET_PEAK_KW }
+  }
+
+  const dailyPeaks = []
+  const heatmap = []
+  const exceeded = []
+  const dailyDischarge = []
+  const tariffKwh = { LIGHT: 0, MID: 0, PEAK: 0 }
+  let defenseTotal = 0
+  let solarKwh = 0
+
+  for (let day = 1; day <= lastDay; day++) {
+    const date = `${month}-${pad(day)}`
+    const seed = year * 10000 + monthNumber * 100 + day
+    const random = (n) => fakeRandom(seed + n * 7)
+    const weekDay = new Date(year, monthNumber - 1, day).getDay()
+    const weekend = weekDay === 0 || weekDay === 6
+    const over = !weekend && random(1) < 0.12 // 가끔 목표를 넘는 날
+
+    // 그날의 최대 피크와, 방전하지 않았을 때 예상했던 피크
+    let peakKw = (weekend ? 1560 : 1690) + random(2) * 105
+    if (over) peakKw = TARGET_PEAK_KW + 3 + random(2) * 40
+    peakKw = Math.round(peakKw)
+    let expectedKw = peakKw + 80 + random(3) * 240
+    if (over) expectedKw = peakKw + 15 + random(3) * 60
+    if (weekend) expectedKw = peakKw + random(3) * 40
+    dailyPeaks.push({ date, peakKw, expectedKw: Math.round(expectedKw) })
+
+    // 시각별 최대 15분 피크 (히트맵용) + 요금 시간대별 구매전력량
+    const peakHour = BUSY_HOURS[Math.floor(random(4) * BUSY_HOURS.length)]
+    for (let hour = 0; hour < 24; hour++) {
+      let low = 0.82
+      let high = 0.9
+      if (hour < 7 || hour >= 21) {
+        low = 0.7
+        high = 0.78
+      } else if (BUSY_HOURS.includes(hour)) {
+        low = 0.9
+        high = 0.985
+      }
+      const ratio = hour === peakHour ? 1 : low + random(10 + hour) * (high - low)
+      const hourPeakKw = Math.round(peakKw * ratio)
+      heatmap.push({ date, hour, peakKw: hourPeakKw })
+
+      const time = `${pad(hour)}:00`
+      const period = TARIFF_PERIODS.find((item) => item.from <= time && time < item.to).period
+      tariffKwh[period] += hourPeakKw * 0.93 // 1시간 평균은 최대값보다 조금 낮다고 가정
+    }
+
+    if (!weekend) defenseTotal += 2 + Math.floor(random(5) * 3)
+    if (over) {
+      const minute = [0, 15, 30, 45][Math.floor(random(6) * 4)]
+      const start = new Date(year, monthNumber - 1, day, peakHour, minute)
+      const lowBattery = random(7) < 0.25
+      exceeded.push({
+        windowStart: toLocalDateTime(start),
+        windowEnd: toLocalDateTime(new Date(start.getTime() + WINDOW_MS)),
+        resultPeakKw: peakKw,
+        overKw: peakKw - TARGET_PEAK_KW,
+        action: 'DISCHARGE',
+        powerKw: [350, 400, 500][Math.floor(random(8) * 3)],
+        status: lowBattery ? 'APPLIED' : 'IGNORED',
+        cause: lowBattery ? '잔량 부족으로 방전 중단' : '추천을 무시함',
+      })
+    }
+
+    dailyDischarge.push({
+      date,
+      kwh: Math.round(weekend ? 250 + random(9) * 200 : 550 + random(9) * 500),
+    })
+    solarKwh += 4800 + random(30) * 1500
+  }
+
+  const sum = (list) => list.reduce((total, value) => total + value, 0)
+  const topDay = dailyPeaks.reduce((best, item) => (item.peakKw > best.peakKw ? item : best))
+  const topHour = heatmap.find((item) => item.date === topDay.date && item.peakKw === topDay.peakKw)
+  const reductions = dailyPeaks.map((item) => item.expectedKw - item.peakKw)
+
+  // 전기요금 (원)
+  const energyCharge = Math.round(
+    sum(Object.keys(tariffKwh).map((key) => tariffKwh[key] * ENERGY_PRICES[key])),
+  )
+  const baseCharge = topDay.peakKw * BASE_PRICE_PER_KW
+  const totalKwh = sum(Object.values(tariffKwh))
+  const dischargeKwh = sum(dailyDischarge.map((item) => item.kwh))
+  const selfUseKwh = Math.round(solarKwh * 0.995)
+
+  return {
+    month,
+    hasData: true,
+    periodStart: `${month}-01`,
+    periodEnd: `${month}-${pad(lastDay)}`,
+    targetPeakKw: TARGET_PEAK_KW,
+    summary: {
+      defenseTotal,
+      defenseSuccess: defenseTotal - exceeded.length,
+      defenseSuccessPercent: round1(((defenseTotal - exceeded.length) / defenseTotal) * 100),
+      monthPeakKw: topDay.peakKw,
+      monthPeakAt: `${topDay.date}T${pad(topHour.hour)}:00:00`,
+      avgReductionKw: Math.round(sum(reductions) / reductions.length),
+      maxReductionKw: Math.max(...reductions),
+    },
+    dailyPeaks,
+    heatmap,
+    bill: {
+      total: energyCharge + baseCharge,
+      energyCharge,
+      baseCharge,
+      // 목표 피크를 넘어서 더 내게 된 기본요금 (넘지 않았으면 0)
+      baseChargeOverTarget: Math.max(0, topDay.peakKw - TARGET_PEAK_KW) * BASE_PRICE_PER_KW,
+      monthEndEstimate: Math.round((energyCharge / lastDay) * daysInMonth) + baseCharge,
+      lastMonthTotal: Math.round(150000000 + fakeRandom(year * 100 + monthNumber) * 12000000),
+      byTariff: Object.keys(tariffKwh).map((key) => ({
+        period: key,
+        label: TARIFF_LABELS[key],
+        kwh: Math.round(tariffKwh[key]),
+        percent: round1((tariffKwh[key] / totalKwh) * 100),
+        charge: Math.round(tariffKwh[key] * ENERGY_PRICES[key]),
+      })),
+    },
+    exceeded: exceeded.reverse(), // 최신 순
+    ess: {
+      dailyDischarge,
+      dischargeKwh,
+      chargeKwh: Math.round(dischargeKwh / 0.895),
+      efficiencyPercent: 89.5,
+      cycles: round1(dischargeKwh / ESS_CAPACITY_KWH),
+      avgSocPercent: 58.3,
+      minSocPercent: 22.4,
+      blockedCount: exceeded.filter((item) => item.status === 'APPLIED').length,
+    },
+    solar: {
+      generationKwh: Math.round(solarKwh),
+      selfUseKwh,
+      selfUsePercent: 99.5,
+      gridReductionKwh: selfUseKwh,
+      emissionFactor: EMISSION_FACTOR,
+      carbonTon: round1((selfUseKwh * EMISSION_FACTOR) / 1000),
+    },
+  }
+}
