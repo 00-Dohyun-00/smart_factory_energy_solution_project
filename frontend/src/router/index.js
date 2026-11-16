@@ -6,6 +6,7 @@ import MonitoringPage from '@/pages/MonitoringPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
 import PowerDiagramPage from '@/pages/PowerDiagramPage.vue'
 import ReportPage from '@/pages/ReportPage.vue'
+import SettingsPage from '@/pages/SettingsPage.vue'
 import TrendAnalysisPage from '@/pages/TrendAnalysisPage.vue'
 
 // 페이지(URL) 목록. 새 페이지를 만들면 여기에 추가하고, 왼쪽 메뉴(MainLayout.vue의 menus)에도 추가합니다.
@@ -40,10 +41,10 @@ const routes = [
       // 운영 로그
       { path: 'logs', component: HistoryPage, meta: { parent: '운영 로그', title: '추천 이력' } },
       { path: 'history', redirect: '/logs' }, // 예전 주소로 들어와도 열리게 함
-      // 환경 설정 (아직 준비 중)
+      // 환경 설정
       {
         path: 'settings',
-        component: ComingSoonPage,
+        component: SettingsPage,
         meta: { parent: '환경 설정', title: '기준값' },
       },
 

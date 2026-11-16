@@ -5,9 +5,10 @@
 // - 이 파일은 batteryStatusApi.js, batteryDecisionApi.js 에서만 불러옵니다. (Store, 화면에서 직접 쓰지 않음)
 // - 이 파일은 서버 역할이라 "서버 시각"을 직접 만듭니다(아래 simNow). 화면 코드에서는 new Date()를 쓰지 않습니다.
 
-const TARGET_PEAK_KW = 1800 // 목표 피크
-const WARN_KW = 1746 // 주의선 (목표의 97%, 기준은 확인 필요)
-const MAX_DISCHARGE_KW = 500 // ESS 최대 방전 출력
+// 아래 기준값들은 환경 설정 화면에서 바꾸면 applySettings()가 고쳐 씁니다. 그래서 const가 아니라 let입니다.
+let TARGET_PEAK_KW = 1800 // 목표 피크
+let WARN_KW = 1746 // 주의선 (목표의 97%, 기준은 확인 필요)
+let MAX_DISCHARGE_KW = 500 // ESS 최대 방전 출력
 
 // 공장 컨셉: 전기차 열관리 부품 공장 (가상). 설비 구성과 전력 비중은 임시로 정한 값입니다.
 // share = 평소 공장 전력에서 그 설비가 차지하는 비중 (합계 1.0)
@@ -250,6 +251,14 @@ function updateDecision(now, predictedWithoutEss, socPercent, remainingMinutes) 
   if (action !== 'IDLE') {
     sessionDecisions.push(currentDecision)
     addEvent('CRITICAL', `목표 초과 예상, 방전 ${powerKw} kW 추천`, now)
+    // 자동 모드면 사람이 누르지 않아도 바로 반영한 것으로 처리 (실제 제어가 아니라 시뮬레이션)
+    if (settings.operationMode === 'AUTO') {
+      currentDecision.status = 'AUTO'
+      currentDecision.appliedBy = '자동 모드 (시뮬레이션)'
+      currentDecision.appliedAt = toLocalDateTime(now)
+      appliedDischargeKw = powerKw
+      addEvent('INFO', `방전 ${powerKw} kW 자동 적용 (시뮬레이션)`, now)
+    }
   }
 }
 
@@ -667,11 +676,11 @@ export async function fakeGetZoneRecent(zoneId) {
 
 // ---- 성적표 (GET /api/reports?month= 흉내) ----
 // 단가와 배출계수는 화면 확인용으로 넣은 임시 값입니다. 실제 계산은 백엔드가 합니다.
-const BASE_PRICE_PER_KW = 8320 // 기본요금 단가 (원/kW)
+let BASE_PRICE_PER_KW = 8320 // 기본요금 단가 (원/kW)
 const ENERGY_PRICES = { LIGHT: 87, MID: 110, PEAK: 172 } // 전력량요금 단가 (원/kWh)
 const EMISSION_FACTOR = 0.4594 // 탄소 배출계수 (kgCO2/kWh, 확인 필요)
 const BUSY_HOURS = [9, 10, 11, 16, 17, 18] // 피크가 잘 생기는 시각
-const ESS_CAPACITY_KWH = 1000
+let ESS_CAPACITY_KWH = 1000
 
 // month 예: '2026-11'. 이번 달이면 오늘까지, 지난 달이면 한 달 전체를 돌려줌
 export async function fakeGetReport(month) {
@@ -833,9 +842,9 @@ export async function fakeGetReport(month) {
 // 날씨에 따라 태양광이 덜 나오게 하는 비율 (가짜 데이터용)
 const WEATHER_TEXTS = ['맑음', '맑음', '흐림', '맑음', '비', '흐림', '맑음']
 const SOLAR_BY_WEATHER = { 맑음: 1, 흐림: 0.55, 비: 0.2 }
-const SOC_LOW_LIMIT = 20 // 잔량 하한 (%)
-const SOC_HIGH_LIMIT = 90 // 잔량 상한 (%)
-const ROOM_TEMP_LIMIT_C = 35 // 배터리실 온도 제한 (℃)
+let SOC_LOW_LIMIT = 20 // 잔량 하한 (%)
+let SOC_HIGH_LIMIT = 90 // 잔량 상한 (%)
+let ROOM_TEMP_LIMIT_C = 35 // 배터리실 온도 제한 (℃)
 const SLOTS_PER_INTERVAL = { QUARTER: 1, HOUR: 4, DAY: 96 } // 15분 칸 몇 개를 하나로 묶는지
 
 // GET /api/analyses/trend?from=&to=&interval= 흉내 (주소와 필드는 확인 필요)
@@ -1046,4 +1055,173 @@ export async function fakeGetTrendAnalysis(from, to, interval) {
     byStatus,
     highlights,
   }
+}
+
+// ---- 환경 설정 ----
+// 기준값 모음. 화면을 새로 고치면 처음 값으로 돌아갑니다 (가짜 서버라 저장해 둘 곳이 없음).
+const settings = {
+  // 피크 · 요금
+  targetPeakKw: 1800,
+  warnPercent: 97,
+  priceLightWon: 87,
+  priceMidWon: 110,
+  pricePeakWon: 172,
+  basePriceWon: 8320,
+  // ESS
+  capacityKwh: 1000,
+  maxPowerKw: 500,
+  socLowPercent: 20,
+  socHighPercent: 90,
+  efficiencyPercent: 89.5,
+  roomTempLimitC: 35,
+  // 운영
+  operationMode: 'MANUAL', // MANUAL(운영자 승인) | AUTO(자동 모드, 시뮬레이션)
+  pollSeconds: 5,
+  decisionValidMinutes: 15,
+}
+// 이벤트 로그에 남길 때 쓰는 항목 이름
+const SETTING_LABELS = {
+  targetPeakKw: '목표 피크',
+  warnPercent: '주의선',
+  priceLightWon: '경부하 단가',
+  priceMidWon: '중간부하 단가',
+  pricePeakWon: '최대부하 단가',
+  basePriceWon: '기본요금 단가',
+  capacityKwh: '배터리 용량',
+  maxPowerKw: '최대 충·방전 출력',
+  socLowPercent: '잔량 하한',
+  socHighPercent: '잔량 상한',
+  efficiencyPercent: '충·방전 효율',
+  roomTempLimitC: '배터리실 온도 제한',
+  operationMode: '운영 모드',
+  pollSeconds: '화면 갱신 주기',
+  decisionValidMinutes: '추천 유효 시간',
+}
+const MODE_LABELS = { MANUAL: '운영자 승인', AUTO: '자동 모드 (시뮬레이션)' }
+
+const settingSavedAt = {} // 항목별 마지막 저장 시각
+const settingHistory = [] // 변경 기록 (최신 순)
+let nextSettingHistoryId = 1
+let settingsSeeded = false
+
+// 처음 부를 때 "예전에 저장해 둔 것처럼" 저장 시각과 변경 기록 몇 건을 만들어 둠
+function seedSettingsOnce() {
+  if (settingsSeeded) return
+  settingsSeeded = true
+  const now = simNow()
+  const daysAgo = (days, hour, minute) => {
+    const date = new Date(now)
+    date.setDate(date.getDate() - days)
+    date.setHours(hour, minute, 0, 0)
+    return toLocalDateTime(date)
+  }
+  const savedAtByGroup = {
+    peak: daysAgo(2, 16, 20),
+    ess: daysAgo(6, 9, 5),
+    operation: daysAgo(8, 11, 42),
+  }
+  const groupOf = (key) => {
+    if (['operationMode', 'pollSeconds', 'decisionValidMinutes'].includes(key)) return 'operation'
+    if (key.startsWith('price') || key === 'targetPeakKw' || key === 'warnPercent') return 'peak'
+    if (key === 'basePriceWon') return 'peak'
+    return 'ess'
+  }
+  for (const key of Object.keys(settings)) settingSavedAt[key] = savedAtByGroup[groupOf(key)]
+
+  const past = [
+    [daysAgo(2, 16, 20), 'targetPeakKw', 1850, 1800],
+    [daysAgo(2, 16, 20), 'warnPercent', 95, 97],
+    [daysAgo(6, 9, 5), 'socLowPercent', 15, 20],
+    [daysAgo(8, 11, 42), 'operationMode', 'AUTO', 'MANUAL'],
+    [daysAgo(13, 14, 10), 'roomTempLimitC', 40, 35],
+  ]
+  for (const [changedAt, key, before, after] of past) {
+    settingHistory.push({
+      id: nextSettingHistoryId++,
+      changedAt,
+      key,
+      before,
+      after,
+      changedBy: '운영자',
+    })
+  }
+}
+
+// 바뀐 기준값을 가짜 서버의 계산에 반영 (목표 피크를 바꾸면 통합 화면의 단계도 바뀜)
+function applySettings() {
+  TARGET_PEAK_KW = settings.targetPeakKw
+  WARN_KW = Math.round((settings.targetPeakKw * settings.warnPercent) / 100)
+  MAX_DISCHARGE_KW = settings.maxPowerKw
+  ENERGY_PRICES.LIGHT = settings.priceLightWon
+  ENERGY_PRICES.MID = settings.priceMidWon
+  ENERGY_PRICES.PEAK = settings.pricePeakWon
+  BASE_PRICE_PER_KW = settings.basePriceWon
+  ESS_CAPACITY_KWH = settings.capacityKwh
+  SOC_LOW_LIMIT = settings.socLowPercent
+  SOC_HIGH_LIMIT = settings.socHighPercent
+  ROOM_TEMP_LIMIT_C = settings.roomTempLimitC
+}
+
+// GET /api/energy-settings 흉내: 기준값 목록
+export async function fakeGetSettings() {
+  failIfOffline()
+  seedSettingsOnce()
+  return Object.keys(settings).map((key) => ({
+    key,
+    value: settings[key],
+    updatedAt: settingSavedAt[key],
+    updatedBy: '운영자',
+  }))
+}
+
+// PUT /api/energy-settings/{key} 흉내: 기준값 하나 바꾸기
+// 잘못된 값이면 오류를 던짐 (실제 백엔드라면 400 응답)
+export async function fakeUpdateSetting(key, value) {
+  failIfOffline()
+  seedSettingsOnce()
+  if (!(key in settings)) {
+    throw new Error('없는 설정 항목입니다.')
+  }
+  if (key === 'operationMode') {
+    if (!MODE_LABELS[value]) throw new Error('운영 모드 값이 올바르지 않습니다.')
+  } else {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      throw new Error(`${SETTING_LABELS[key]}에는 0보다 큰 숫자를 넣어야 합니다.`)
+    }
+    const low = key === 'socLowPercent' ? value : settings.socLowPercent
+    const high = key === 'socHighPercent' ? value : settings.socHighPercent
+    if (low >= high) throw new Error('잔량 하한은 잔량 상한보다 작아야 합니다.')
+  }
+
+  const before = settings[key]
+  const now = simNow()
+  settings[key] = value
+  settingSavedAt[key] = toLocalDateTime(now)
+  settingHistory.unshift({
+    id: nextSettingHistoryId++,
+    changedAt: toLocalDateTime(now),
+    key,
+    before,
+    after: value,
+    changedBy: '운영자',
+  })
+  applySettings()
+
+  // 이벤트 로그에도 남김
+  const text = (item) =>
+    key === 'operationMode' ? MODE_LABELS[item] : item.toLocaleString('ko-KR')
+  addEvent(
+    'INFO',
+    `설정 변경: ${SETTING_LABELS[key]} ${text(before)} → ${text(value)} (운영자)`,
+    now,
+  )
+
+  return { key, value, updatedAt: settingSavedAt[key], updatedBy: '운영자' }
+}
+
+// GET /api/energy-settings/history 흉내: 변경 기록 (최신 순). 주소와 필드는 확인 필요
+export async function fakeGetSettingHistory(limit = 20) {
+  failIfOffline()
+  seedSettingsOnce()
+  return settingHistory.slice(0, limit).map((item) => ({ ...item }))
 }

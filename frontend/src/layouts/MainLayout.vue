@@ -3,19 +3,32 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
+import { useSettingsStore } from '@/stores/useSettingsStore'
 import { formatClock } from '@/utils/format'
 
 const realtimeStore = useRealtimeStore()
 const route = useRoute()
 
-const POLL_INTERVAL_MS = 5000 // 폴링 주기 (시뮬레이터 주기와 같음, 확인 필요)
+const settingsStore = useSettingsStore()
+
+// 폴링 주기(초). 환경 설정의 "화면 갱신 주기"를 쓰고, 아직 못 받았으면 5초
+const pollSeconds = computed(() => settingsStore.values.pollSeconds ?? 5)
 let timer = null
+
+// 주기에 맞춰 최신 상태를 반복해서 받음. 주기가 바뀌면 이전 반복을 멈추고 새로 시작함
+function startPolling() {
+  clearInterval(timer)
+  timer = setInterval(() => realtimeStore.fetchLatest(), pollSeconds.value * 1000)
+}
 
 // 최신 상태는 왼쪽 메뉴(시각, 날씨, 연결 표시등)가 모든 화면에서 쓰므로 여기서 한 번만 폴링함
 onMounted(() => {
   realtimeStore.fetchLatest()
-  timer = setInterval(() => realtimeStore.fetchLatest(), POLL_INTERVAL_MS)
+  settingsStore.fetchSettings()
+  startPolling()
 })
+
+watch(pollSeconds, startPolling)
 
 // 화면을 떠날 때 폴링을 반드시 멈춤
 onBeforeUnmount(() => {
@@ -198,6 +211,10 @@ const peakMark = computed(() => {
         <!-- 시계가 실제보다 빨리 가는 이유를 알려 줌 (시뮬레이션이 배속으로 돌 때만) -->
         <p v-if="realtimeStore.status?.simulationSpeed > 1" class="speed">
           시뮬레이션 <span class="num">{{ realtimeStore.status.simulationSpeed }}</span>배속
+        </p>
+        <!-- 자동 모드는 실제 제어가 아니라는 점을 모든 화면에서 알려 줌 -->
+        <p v-if="settingsStore.values.operationMode === 'AUTO'" class="speed">
+          자동 모드 (시뮬레이션)
         </p>
         <p v-if="realtimeStore.status" class="weather">
           {{ realtimeStore.status.weather.text }}

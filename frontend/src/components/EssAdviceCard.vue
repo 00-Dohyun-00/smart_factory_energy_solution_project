@@ -13,6 +13,8 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
   // 서버 연결이 끊겨 버튼을 누를 수 없으면 true
   offline: { type: Boolean, default: false },
+  // 운영 모드가 자동이면 true (실제 제어가 아니라 시뮬레이션)
+  auto: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['apply', 'ignore'])
@@ -40,7 +42,7 @@ const usedValues = computed(() =>
   <section class="card advice">
     <div class="head">
       <h2 class="card-title">ESS 추천</h2>
-      <span class="mode">운영자 승인 모드</span>
+      <span class="mode">{{ auto ? '자동 모드 (시뮬레이션)' : '운영자 승인 모드' }}</span>
     </div>
 
     <p v-if="!decision" class="empty">아직 받은 추천이 없습니다.</p>
@@ -88,6 +90,10 @@ const usedValues = computed(() =>
           <span class="done-sub">
             <span class="num">{{ formatClock(decision.appliedAt) }}</span>, {{ decision.appliedBy }}
           </span>
+        </p>
+        <p v-else-if="decision.status === 'AUTO'" class="done">
+          자동으로 적용했습니다 (시뮬레이션)
+          <span class="done-sub num">{{ formatClock(decision.appliedAt) }}</span>
         </p>
         <p v-else-if="decision.status === 'IGNORED'" class="done quiet">이번 추천은 넘겼습니다</p>
         <p v-else class="done quiet">지금은 할 일이 없습니다</p>

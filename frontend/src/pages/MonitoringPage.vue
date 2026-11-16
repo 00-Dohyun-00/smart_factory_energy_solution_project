@@ -10,9 +10,11 @@ import Chart from '@/components/Chart.vue'
 import EssAdviceCard from '@/components/EssAdviceCard.vue'
 import PeakWindowCard from '@/components/PeakWindowCard.vue'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
+import { useSettingsStore } from '@/stores/useSettingsStore'
 import { formatHourMinute, formatKw, formatOneDecimal } from '@/utils/format'
 
 const realtimeStore = useRealtimeStore()
+const settingsStore = useSettingsStore() // 운영 모드를 알기 위해 (값은 공통 틀이 받아 둠)
 
 // ESS 카드의 숫자 앞에 붙이는 말
 const PCS_SHORT = { DISCHARGING: '방전', CHARGING: '충전', STANDBY: '대기' }
@@ -288,6 +290,7 @@ const trendOption = computed(() => {
           :decision="realtimeStore.decision"
           :busy="busy"
           :offline="!realtimeStore.connected"
+          :auto="settingsStore.values.operationMode === 'AUTO'"
           @apply="answerDecision('APPLIED')"
           @ignore="answerDecision('IGNORED')"
         />
