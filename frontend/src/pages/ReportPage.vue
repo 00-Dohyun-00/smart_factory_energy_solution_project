@@ -57,6 +57,88 @@ function printReport() {
   window.print()
 }
 
+// ---- CSV 저장 (엑셀에서 열 수 있는 표 파일) ----
+// 표 한 줄을 CSV 한 줄로 바꿈. 값에 쉼표·따옴표·줄바꿈이 있으면 따옴표로 감쌈
+function csvLine(cells) {
+  return cells
+    .map((cell) => {
+      const text = String(cell ?? '')
+      return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
+    })
+    .join(',')
+}
+
+// 지금 보고 있는 달의 성적표를 CSV 파일로 내려받음
+// 엑셀에서 계산에 쓸 수 있도록 숫자는 화면용으로 꾸미지 않고 받은 값 그대로 넣음
+function downloadCsv() {
+  const data = report.value
+  const summary = data.summary
+  const dischargeByDate = {}
+  for (const item of data.ess.dailyDischarge) dischargeByDate[item.date] = item.kwh
+
+  const lines = [
+    csvLine(['WATTever 월간 성적표', monthLabel.value, periodLabel.value]),
+    csvLine(['피크 저감량은 방전하지 않았을 때의 예상과 비교한 값이고 금액과 탄소는 추정값입니다']),
+    '',
+    csvLine(['항목', '값', '단위']),
+    csvLine(['목표 피크', data.targetPeakKw, 'kW']),
+    csvLine(['피크 방어 성공률', summary.defenseSuccessPercent, '%']),
+    csvLine(['방전 추천 횟수', summary.defenseTotal, '회']),
+    csvLine(['목표 이내 횟수', summary.defenseSuccess, '회']),
+    csvLine(['최대 피크', summary.monthPeakKw, 'kW']),
+    csvLine(['최대 피크 시각', summary.monthPeakAt, '']),
+    csvLine(['평균 피크 저감량', summary.avgReductionKw, 'kW']),
+    csvLine(['전기요금 추정', data.bill.total, '원']),
+    csvLine(['전력량요금 추정', data.bill.energyCharge, '원']),
+    csvLine(['기본요금 추정', data.bill.baseCharge, '원']),
+    csvLine(['월말 예상 요금', data.bill.monthEndEstimate, '원']),
+    csvLine(['ESS 충전량', data.ess.chargeKwh, 'kWh']),
+    csvLine(['ESS 방전량', data.ess.dischargeKwh, 'kWh']),
+    csvLine(['태양광 발전량', data.solar.generationKwh, 'kWh']),
+    csvLine(['탄소 절감 추정', data.solar.carbonTon, 'tCO2']),
+    '',
+    csvLine(['날짜', '최대 피크 (kW)', '방전하지 않았을 때 예상 (kW)', 'ESS 방전량 (kWh)']),
+    ...data.dailyPeaks.map((item) =>
+      csvLine([item.date, item.peakKw, item.expectedKw, dischargeByDate[item.date]]),
+    ),
+    '',
+    csvLine(['요금 시간대', '구매전력 (kWh)', '비중 (%)', '전력량요금 (원)']),
+    ...data.bill.byTariff.map((item) => csvLine([item.label, item.kwh, item.percent, item.charge])),
+    '',
+    csvLine([
+      '목표를 넘은 구간 시작',
+      '끝',
+      '결과 피크 (kW)',
+      '초과 (kW)',
+      '추천 방전 (kW)',
+      '처리',
+      '원인',
+    ]),
+    ...data.exceeded.map((item) =>
+      csvLine([
+        item.windowStart,
+        item.windowEnd,
+        item.resultPeakKw,
+        item.overKw,
+        item.powerKw,
+        STATUS_LABELS[item.status],
+        item.cause,
+      ]),
+    ),
+  ]
+
+  // 맨 앞의 \uFEFF는 엑셀이 한글을 깨뜨리지 않게 하는 표시(BOM), 줄 사이는 엑셀이 쓰는 줄바꿈(\r\n)
+  const text = '\uFEFF' + lines.join('\r\n')
+  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  // 내려받기는 보이지 않는 링크를 만들어 누르는 방식으로 함 (브라우저에서 파일을 저장하는 표준 방법)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `WATTever_월간성적표_${month.value}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 // 달이 바뀌면 다시 조회
 watch(month, (value) => {
   if (value) reportStore.fetchReport(value)
@@ -289,13 +371,16 @@ const essOption = computed(() => ({
         </button>
       </div>
       <span class="period">{{ periodLabel }}</span>
-      <!-- 브라우저의 인쇄 창을 엶. 인쇄 창에서 "PDF로 저장"을 고르면 파일로 남길 수 있음 -->
-      <button class="print" :disabled="!report || !report.hasData" @click="printReport">
-        인쇄 · PDF 저장
-      </button>
-      <span class="caution">
-        피크 저감량은 "방전하지 않았을 때의 예상"과 비교한 값이고, 금액과 탄소는 추정값입니다.
-      </span>
+      <div class="actions">
+        <!-- 브라우저의 인쇄 창을 엶. 인쇄 창에서 "PDF로 저장"을 고르면 파일로 남길 수 있음 -->
+        <button class="action" :disabled="!report || !report.hasData" @click="printReport">
+          인쇄 · PDF 저장
+        </button>
+        <!-- 엑셀에서 열 수 있는 표 파일로 내려받음 -->
+        <button class="action" :disabled="!report || !report.hasData" @click="downloadCsv">
+          CSV 저장
+        </button>
+      </div>
     </div>
 
     <p v-if="reportStore.errorMessage" class="state error" role="alert">
@@ -460,6 +545,10 @@ const essOption = computed(() => ({
           </dl>
         </section>
       </div>
+
+      <p class="caution">
+        피크 저감량은 "방전하지 않았을 때의 예상"과 비교한 값이고, 금액과 탄소는 추정값입니다.
+      </p>
     </template>
   </div>
 </template>
@@ -514,7 +603,12 @@ const essOption = computed(() => ({
 .period {
   color: var(--mute);
 }
-.print {
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.action {
   height: 36px;
   padding: 0 14px;
   background: var(--card);
@@ -522,15 +616,15 @@ const essOption = computed(() => ({
   border-radius: 4px;
   color: var(--ink);
 }
-.print:hover:not(:disabled) {
+.action:hover:not(:disabled) {
   border-color: var(--ink);
 }
-.print:disabled {
+.action:disabled {
   opacity: 0.45;
   cursor: default;
 }
+/* 화면 맨 아래의 주의 문구 */
 .caution {
-  margin-left: auto;
   font-size: 13px;
   color: var(--mute);
 }
@@ -730,7 +824,7 @@ const essOption = computed(() => ({
 
 /* 인쇄할 때: 누르는 것들은 숨기고, 안내 문구는 줄을 바꿔 다 보이게 함 */
 @media print {
-  .print,
+  .actions,
   .month button,
   .retry,
   .link {
