@@ -417,7 +417,7 @@ function buildHistoryOfDay(date, now) {
         { label: '기온', value: Math.round(9 + random(9) * 11), unit: '℃' },
       ],
       status: template.status,
-      appliedBy: template.status === 'AUTO' ? '자동 모드' : '운영자',
+      appliedBy: template.status === 'AUTO' ? '자동 모드 (시뮬레이션)' : '운영자',
       appliedAt: toLocalDateTime(answeredAt),
       resultPeakKw,
       resultStatus:

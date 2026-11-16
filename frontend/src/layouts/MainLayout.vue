@@ -39,7 +39,7 @@ const menus = [
     ],
   },
   { label: '보고서', children: [{ label: '월간 성적표', to: '/report' }] },
-  { label: '로그', children: [{ label: '추천 이력', to: '/logs' }] },
+  { label: '운영 로그', children: [{ label: '추천 이력', to: '/logs' }] },
   { label: '환경 설정', children: [{ label: '기준값', to: '/settings' }] },
 ]
 

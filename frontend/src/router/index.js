@@ -37,8 +37,8 @@ const routes = [
       },
       // 보고서
       { path: 'report', component: ReportPage, meta: { parent: '보고서', title: '월간 성적표' } },
-      // 로그
-      { path: 'logs', component: HistoryPage, meta: { parent: '로그', title: '추천 이력' } },
+      // 운영 로그
+      { path: 'logs', component: HistoryPage, meta: { parent: '운영 로그', title: '추천 이력' } },
       { path: 'history', redirect: '/logs' }, // 예전 주소로 들어와도 열리게 함
       // 환경 설정 (아직 준비 중)
       {

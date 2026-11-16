@@ -29,7 +29,7 @@ const ITEMS = [
   { key: 'soc', label: '배터리 잔량' },
   { key: 'temp', label: '온도·날씨' },
 ]
-// 처리 상태는 색만으로 구분하지 않도록 도형 + 글자로 표시 (로그 화면과 같은 표시)
+// 처리 상태는 색만으로 구분하지 않도록 도형 + 글자로 표시 (운영 로그 화면과 같은 표시)
 const STATUS_INFO = {
   APPLIED: { shape: '●', label: '적용' },
   AUTO: { shape: '◇', label: '자동' },

@@ -140,7 +140,7 @@ function toggle(id) {
   <div class="page">
     <div class="head">
       <div class="crumb">
-        <span class="crumb-parent">로그</span>
+        <span class="crumb-parent">운영 로그</span>
         <span class="crumb-parent" aria-hidden="true">›</span>
         <h1 class="crumb-title">추천 이력</h1>
       </div>
@@ -149,6 +149,7 @@ function toggle(id) {
           {{ item.label }} <strong class="num">{{ item.value }}</strong>
         </li>
       </ul>
+      <button class="reset head-reset" @click="resetFilters">조건 초기화</button>
     </div>
 
     <!-- 조회 조건 -->
@@ -196,7 +197,7 @@ function toggle(id) {
           <option value="ALL">전체</option>
           <option value="RECOMMENDED">추천 중</option>
           <option value="APPLIED">적용</option>
-          <option value="AUTO">자동</option>
+          <option value="AUTO">자동 (시뮬레이션)</option>
           <option value="IGNORED">넘김</option>
         </select>
       </label>
@@ -213,8 +214,6 @@ function toggle(id) {
         <span class="field-label">검색</span>
         <input v-model="keyword" type="search" class="input" placeholder="이유, 근거, 처리자" />
       </label>
-
-      <button class="reset" @click="resetFilters">조건 초기화</button>
 
       <p v-if="dateError" class="date-error" role="alert">{{ dateError }}</p>
     </section>
@@ -339,8 +338,11 @@ function toggle(id) {
 
 .head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 24px;
+}
+.head-reset {
+  margin-left: auto;
 }
 .title {
   font-size: 20px;
@@ -362,7 +364,7 @@ function toggle(id) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px 24px;
+  gap: 12px 20px;
   flex: none;
 }
 .field {
@@ -376,7 +378,7 @@ function toggle(id) {
 }
 .search {
   flex: 1;
-  min-width: 220px;
+  min-width: 180px;
 }
 .search .input {
   flex: 1;
@@ -388,6 +390,10 @@ function toggle(id) {
   border: 1px solid var(--line-strong);
   border-radius: 4px;
   color: var(--ink);
+}
+/* 고르는 상자는 가장 긴 항목만큼 넓어지므로, 조건 줄이 두 줄로 넘어가지 않게 폭을 묶어 둠 */
+select.input {
+  max-width: 132px;
 }
 .presets {
   display: flex;
