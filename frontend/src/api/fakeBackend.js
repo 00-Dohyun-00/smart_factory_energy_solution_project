@@ -194,6 +194,15 @@ function gridWithoutEssAt(time) {
   return factoryLoadAt(time) - solarKwAt(time)
 }
 
+// 최근 약 4분(10초 간격 25번)의 평균. 브레이징로 출렁임 한 주기(약 4분)를 덮어서 평균하면 출렁임이 지워짐
+function recentAverageWithoutEss(now) {
+  let total = 0
+  for (let step = 0; step < 25; step++) {
+    total += gridWithoutEssAt(new Date(now.getTime() - step * 10000))
+  }
+  return total / 25
+}
+
 // 바깥 기온 (오후 3시 무렵 가장 높고, 비 오는 날은 4℃ 낮음)
 function outsideTempAt(time) {
   const hour = time.getHours() + time.getMinutes() / 60
@@ -214,21 +223,31 @@ function windowStartOf(ms) {
   return Math.floor(ms / WINDOW_MS) * WINDOW_MS
 }
 
-// 지금까지의 누적값을 갱신. gridKw = 지금 한전에서 사고 있는 전력
-function updateWindow(nowMs, gridKw) {
+// 지금까지의 누적값을 갱신. gridWithoutEss = ESS가 없을 때 지금 한전에서 사야 하는 전력
+function updateWindow(nowMs, gridWithoutEss) {
   const startMs = windowStartOf(nowMs)
 
   if (!windowState || windowState.startMs !== startMs) {
-    // 방금 끝난 구간이 있으면 결과를 이벤트로 남김
+    // 방금 끝난 구간이 있으면 결과를 이벤트와 그 구간의 추천에 남김
     if (windowState) {
+      // 마지막 조회부터 구간이 끝날 때까지 빠진 몇십 초를 지금 전력으로 채워 구간을 닫음
+      addWindowPoint(windowState.startMs + WINDOW_MS, gridWithoutEss - appliedDischargeKw)
       const endedKw = Math.round(windowState.demandKw)
-      const from = toLocalDateTime(new Date(windowState.startMs)).slice(11, 16)
+      const endedStart = toLocalDateTime(new Date(windowState.startMs))
+      const from = endedStart.slice(11, 16)
       const to = toLocalDateTime(new Date(startMs)).slice(11, 16)
       addEvent(
         endedKw > TARGET_PEAK_KW ? 'CRITICAL' : 'NORMAL',
         `${from}–${to} 구간 ${endedKw.toLocaleString('ko-KR')} kW로 종료`,
         new Date(startMs),
       )
+      for (const item of sessionDecisions) {
+        if (item.windowStart !== endedStart) continue
+        item.resultPeakKw = endedKw
+        item.resultStatus = endedKw > TARGET_PEAK_KW ? 'EXCEEDED' : 'DEFENDED'
+      }
+      // 방전은 그 구간을 지키려고 한 것이므로 구간이 끝나면 멈춤
+      appliedDischargeKw = 0
     }
     // 새 구간 시작. 화면을 구간 중간에 열었다면 그 전까지는 15초 간격으로 계산해 채움
     windowState = { startMs, lastMs: startMs, demandKw: 0, points: [{ minute: 0, demandKw: 0 }] }
@@ -236,7 +255,7 @@ function updateWindow(nowMs, gridKw) {
       addWindowPoint(ms, gridWithoutEssAt(new Date(ms)))
     }
   }
-  addWindowPoint(nowMs, gridKw)
+  addWindowPoint(nowMs, gridWithoutEss - appliedDischargeKw)
 }
 
 function addWindowPoint(ms, gridKw) {
@@ -325,38 +344,95 @@ function tariffAt(now) {
   }
 }
 
-// 추천 판단 흉내: 피크 초과가 예상되면 방전, 아니면 대기
+// ---- 추천 판단 흉내 ----
+// 1) 이번 15분 구간이 목표 피크를 넘을 것 같으면 "필요한 만큼만" 방전을 추천 (최대 출력까지)
+// 2) 한 구간에는 방전 추천을 한 번만 내고 구간이 끝날 때까지 유지 (방전 → 대기 → 방전 깜빡임 방지)
+// 3) 적용한 뒤에는 구간이 끝날 때까지 필요한 양에 맞춰 출력을 조절 (시뮬레이션)
+const MIN_ADVICE_KW = 10 // 이보다 작은 방전은 추천하지 않음 (의미 없이 버튼만 늘어남)
+
+// 이번 구간 평균이 목표 피크를 넘을 것 같을 때, 남은 시간 동안 얼마나 방전해야 하는지 (kW)
+// 15분 평균을 X kW 낮추려면 X × 15분만큼의 전력량을 빼야 하고, 그걸 남은 시간에 나눠 냄
+// 목표(1,800)에 딱 맞추면 예측이 조금만 틀려도 1,801~1,820으로 넘어서, 주의선(1,746)까지 낮춤 (안전 여유)
+// 예: 예상 1,830, 10분 남음 → (1,830 − 1,746) × 15 ÷ 10 = 126 kW
+function neededDischargeKw(predictedKw, remainingMinutes) {
+  if (predictedKw <= TARGET_PEAK_KW) return 0
+  return ((predictedKw - WARN_KW) * 15) / Math.max(remainingMinutes, 0.5)
+}
+
+// predictedWithoutEss = 지금부터 방전을 하지 않으면 이번 구간이 끝날 때 될 평균
 function updateDecision(now, predictedWithoutEss, socPercent, remainingMinutes) {
-  const overKw = predictedWithoutEss - TARGET_PEAK_KW
-  const action = overKw > 0 ? 'DISCHARGE' : 'IDLE'
-
-  if (currentDecision && currentDecision.action === action) return
-
-  // 추천 내용이 바뀌면 새 추천을 만들고, 이전에 적용한 방전은 끝냄
-  appliedDischargeKw = 0
-  const powerKw = action === 'DISCHARGE' ? MAX_DISCHARGE_KW : 0
   const windowStartMs = windowStartOf(now.getTime())
+  const windowStart = toLocalDateTime(new Date(windowStartMs))
+
+  // 방전할 수 있는 최대: 최대 출력, 그리고 잔량 하한까지 남은 양을 남은 시간에 나눈 값
+  const usableKwh = Math.max(0, ((socPercent - SOC_LOW_LIMIT) / 100) * ESS_CAPACITY_KWH)
+  const batteryLimitKw = usableKwh / (Math.max(remainingMinutes, 0.5) / 60)
+  const needKw = neededDischargeKw(predictedWithoutEss, remainingMinutes)
+  const powerKw = Math.round(Math.min(MAX_DISCHARGE_KW, needKw, batteryLimitKw))
+
+  const sameWindow = currentDecision?.windowStart === windowStart
+  if (sameWindow && currentDecision.action === 'DISCHARGE') {
+    if (currentDecision.status === 'RECOMMENDED' && powerKw >= MIN_ADVICE_KW) {
+      // 아직 답하지 않은 추천이면 지금 필요한 양으로 숫자를 고쳐 둠
+      currentDecision.powerKw = powerKw
+      currentDecision.predictedKw = Math.round(predictedWithoutEss)
+    }
+    if (currentDecision.status === 'APPLIED' || currentDecision.status === 'AUTO') {
+      appliedDischargeKw = powerKw // 넘김(IGNORED)이면 이 구간에는 방전하지 않음
+    }
+    return
+  }
+
+  let advice = null
+  if (powerKw >= MIN_ADVICE_KW) {
+    advice = {
+      action: 'DISCHARGE',
+      ruleNo: 2,
+      ruleLabel: '피크 방어',
+      powerKw,
+      reason: `이번 15분 구간 예상 평균이 목표 피크를 넘을 것으로 보여, 남은 ${Math.ceil(remainingMinutes)}분 동안 ${powerKw.toLocaleString('ko-KR')} kW만 방전하면 목표 안으로 들어옵니다.`,
+    }
+  } else if (needKw >= MIN_ADVICE_KW) {
+    // 방전이 필요하지만 잔량이 하한에 닿아 쓸 수 없음
+    advice = {
+      action: 'IDLE',
+      ruleNo: 1,
+      ruleLabel: '안전 제한',
+      powerKw: 0,
+      reason: `목표 피크를 넘을 것으로 보이지만, 배터리 잔량이 하한(${SOC_LOW_LIMIT}%)에 닿아 방전할 수 없습니다.`,
+    }
+  } else if (!sameWindow) {
+    advice = {
+      action: 'IDLE',
+      ruleNo: 6,
+      ruleLabel: '조치 없음',
+      powerKw: 0,
+      reason: '이번 구간은 목표 피크 안으로 들어올 것으로 보입니다.',
+    }
+  }
+  // 같은 구간에서 같은 대기 추천이면 새로 만들지 않음
+  if (!advice || (sameWindow && currentDecision.ruleNo === advice.ruleNo)) return
+
   currentDecision = {
     id: nextDecisionId++,
     decidedAt: toLocalDateTime(now),
-    windowStart: toLocalDateTime(new Date(windowStartMs)),
+    windowStart,
     windowEnd: toLocalDateTime(new Date(windowStartMs + WINDOW_MS)),
-    ruleNo: action === 'DISCHARGE' ? 2 : 6,
-    ruleLabel: action === 'DISCHARGE' ? '피크 방어' : '조치 없음',
+    ruleNo: advice.ruleNo,
+    ruleLabel: advice.ruleLabel,
     predictedKw: Math.round(predictedWithoutEss),
     targetPeakKw: TARGET_PEAK_KW,
     resultPeakKw: null, // 구간이 끝나야 알 수 있음
     resultStatus: null,
-    action,
-    powerKw,
-    durationMinutes: action === 'DISCHARGE' ? Math.max(1, Math.ceil(remainingMinutes)) : null,
-    reason:
-      action === 'DISCHARGE'
-        ? '브레이징로 승온과 사출기 가동이 겹쳐, 이번 15분 구간의 예상 평균이 목표 피크를 넘을 것으로 보입니다.'
-        : '피크 여유가 있고, 충전에 쓸 남는 태양광이 없습니다.',
+    action: advice.action,
+    powerKw: advice.powerKw,
+    durationMinutes: advice.action === 'DISCHARGE' ? Math.ceil(remainingMinutes) : null,
+    reason: advice.reason,
     usedValues: [
       { label: '예상 평균', value: Math.round(predictedWithoutEss), unit: 'kW' },
       { label: '목표 피크', value: TARGET_PEAK_KW, unit: 'kW' },
+      { label: '필요 방전', value: Math.round(needKw), unit: 'kW' },
+      { label: '남은 시간', value: Math.ceil(remainingMinutes), unit: '분' },
       { label: 'SOC', value: round1(socPercent), unit: '%' },
       { label: '최대 출력', value: MAX_DISCHARGE_KW, unit: 'kW' },
       {
@@ -372,17 +448,16 @@ function updateDecision(now, predictedWithoutEss, socPercent, remainingMinutes) 
     appliedAt: null,
   }
   // 운영 이력 화면에 보이도록 기록 (대기 추천은 너무 많아져서 뺌)
-  if (action !== 'IDLE') {
-    sessionDecisions.push(currentDecision)
-    addEvent('CRITICAL', `목표 초과 예상, 방전 ${powerKw} kW 추천`, now)
-    // 자동 모드면 사람이 누르지 않아도 바로 반영한 것으로 처리 (실제 제어가 아니라 시뮬레이션)
-    if (settings.operationMode === 'AUTO') {
-      currentDecision.status = 'AUTO'
-      currentDecision.appliedBy = '자동 모드 (시뮬레이션)'
-      currentDecision.appliedAt = toLocalDateTime(now)
-      appliedDischargeKw = powerKw
-      addEvent('INFO', `방전 ${powerKw} kW 자동 적용 (시뮬레이션)`, now)
-    }
+  if (advice.action === 'IDLE') return
+  sessionDecisions.push(currentDecision)
+  addEvent('CRITICAL', `목표 초과 예상, 방전 ${advice.powerKw} kW 추천`, now)
+  // 자동 모드면 사람이 누르지 않아도 바로 반영한 것으로 처리 (실제 제어가 아니라 시뮬레이션)
+  if (settings.operationMode === 'AUTO') {
+    currentDecision.status = 'AUTO'
+    currentDecision.appliedBy = '자동 모드 (시뮬레이션)'
+    currentDecision.appliedAt = toLocalDateTime(now)
+    appliedDischargeKw = advice.powerKw
+    addEvent('INFO', `방전 ${advice.powerKw} kW 자동 적용 (시뮬레이션)`, now)
   }
 }
 
@@ -601,8 +676,8 @@ function equipmentsAt(time) {
 
 // ---- 하루 시뮬레이션 (15분 칸 96개) ----
 // 오늘 전력 추이와 추이 분석이 같은 하루를 보도록, 하루치를 한 번 계산해 두고 같이 씁니다.
-// ESS는 "지금 추천 방식"을 흉내 냄: 15분 평균이 목표 피크를 넘으면 최대 출력으로 방전, 경부하에는 충전.
-// (다음 단계에서 이 부분을 새 추천 방식으로 바꿔 두 방식을 비교합니다)
+// ESS는 실시간 추천과 같은 규칙을 흉내 냄: 15분 평균이 목표 피크를 넘으면 넘는 만큼만 방전(최대 출력까지),
+// 경부하에는 충전. (다음 단계에서 하루를 미리 보는 계획 방식을 넣어 두 방식을 비교합니다)
 const START_SOC_PERCENT = 50 // 하루 시작(0시) 잔량
 const NIGHT_CHARGE_KW = 250 // 경부하 시간대 충전 전력
 const dayCache = new Map() // 같은 날·같은 설정이면 다시 계산하지 않음
@@ -637,7 +712,7 @@ function simulateDay(dateKey) {
     let essKw = 0
     if (netKw > TARGET_PEAK_KW) {
       const usableKwh = ((socPercent - SOC_LOW_LIMIT) / 100) * ESS_CAPACITY_KWH
-      essKw = Math.max(0, Math.min(MAX_DISCHARGE_KW, usableKwh / 0.25))
+      essKw = Math.max(0, Math.min(MAX_DISCHARGE_KW, netKw - TARGET_PEAK_KW, usableKwh / 0.25))
     } else if (periodAt(middle) === 'LIGHT') {
       const emptyKwh = ((SOC_HIGH_LIMIT - socPercent) / 100) * ESS_CAPACITY_KWH
       // 충전하면 한전에서 더 사므로, 충전 때문에 목표 피크를 넘지 않게 함
@@ -747,18 +822,22 @@ export async function fakeGetLatestStatus() {
   const windowEnd = new Date(windowStart.getTime() + WINDOW_MS)
   const remainingMinutes = (windowEnd.getTime() - now.getTime()) / 60000
 
-  // 지금까지 쌓인 값에 "남은 시간 동안 지금 전력이 계속된다"고 보고 더한 것이 예상 평균
+  // 지금까지 쌓인 값에 "남은 시간 동안 최근 전력이 계속된다"고 보고 더한 것이 예상 평균
   // (회의록의 예측 예시 식을 단순하게 흉내 낸 것. 실제 예측은 백엔드가 합니다)
-  updateWindow(now.getTime(), gridWithoutEss - appliedDischargeKw)
+  // 순간값 대신 최근 약 4분 평균을 씀: 브레이징로가 4분 주기로 ±330kW씩 출렁여서,
+  // 순간값을 쓰면 필요한 방전량이 몇 초 사이에 수백 kW씩 바뀜
+  updateWindow(now.getTime(), gridWithoutEss)
   const demandSoFar = windowState.demandKw
-  const predictedWithoutEss = demandSoFar + (gridWithoutEss * remainingMinutes) / 15
+  const recentWithoutEss = recentAverageWithoutEss(now)
+  const predictedWithoutEss = demandSoFar + (recentWithoutEss * remainingMinutes) / 15
 
   updateDecision(now, predictedWithoutEss, socPercent, remainingMinutes)
 
   const dischargeKw = appliedDischargeKw
   const gridKw = gridWithoutEss - dischargeKw
   const loadKw = gridWithoutEss + solarKw
-  const predictedKw = demandSoFar + (gridKw * remainingMinutes) / 15
+  // 게이지의 예상 평균도 같은 방식 (지금 방전 중인 양을 뺀 값)
+  const predictedKw = demandSoFar + ((recentWithoutEss - dischargeKw) * remainingMinutes) / 15
 
   let peakStatus = 'NORMAL'
   if (predictedKw > TARGET_PEAK_KW) peakStatus = 'CRITICAL'
@@ -796,7 +875,8 @@ export async function fakeGetLatestStatus() {
     targetPeakKw: TARGET_PEAK_KW,
     warnKw: WARN_KW,
     peakStatus,
-    defenseKw: Math.max(0, Math.ceil(predictedKw - TARGET_PEAK_KW)),
+    // 방어 필요 전력: 목표 안으로 들어오려면 지금보다 더 방전해야 하는 전력 (kW)
+    defenseKw: Math.ceil(neededDischargeKw(predictedKw, remainingMinutes)),
     // 구간 시작부터 지금까지 쌓인 값 (그래프용). 필드는 확인 필요
     windowPoints: windowState.points.slice(),
     // 지금까지의 최대 피크. 필드는 확인 필요
