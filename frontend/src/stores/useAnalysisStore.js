@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import { getTrendAnalysis } from '@/api/analysisApi'
+import { getPeakAnalysis, getTrendAnalysis } from '@/api/analysisApi'
 
 // 분석 화면이 쓰는 데이터
 export const useAnalysisStore = defineStore('analysis', () => {
@@ -25,5 +25,35 @@ export const useAnalysisStore = defineStore('analysis', () => {
     }
   }
 
-  return { trend, loading, errorMessage, fetchTrend }
+  // ---- 피크 분석 ----
+  const peak = ref(null) // 피크 분석 결과 (아직 못 받았으면 null)
+  const peakLoading = ref(false)
+  const peakError = ref('')
+
+  // 피크 분석 조회 (from, to 예: '2026-11-01')
+  async function fetchPeak(from, to, showLoading = true) {
+    if (showLoading) {
+      peakLoading.value = true
+    }
+    try {
+      peak.value = await getPeakAnalysis(from, to)
+      peakError.value = ''
+    } catch (error) {
+      // 실패해도 이미 받아 둔 결과는 지우지 않음
+      peakError.value = error.message
+    } finally {
+      peakLoading.value = false
+    }
+  }
+
+  return {
+    trend,
+    loading,
+    errorMessage,
+    fetchTrend,
+    peak,
+    peakLoading,
+    peakError,
+    fetchPeak,
+  }
 })

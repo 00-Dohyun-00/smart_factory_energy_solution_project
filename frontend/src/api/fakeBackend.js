@@ -794,7 +794,10 @@ export async function fakeGetReport(month) {
       defenseSuccess: defenseTotal - exceeded.length,
       defenseSuccessPercent: round1(((defenseTotal - exceeded.length) / defenseTotal) * 100),
       monthPeakKw: topDay.peakKw,
-      monthPeakAt: `${topDay.date}T${pad(topHour.hour)}:00:00`,
+      // 목표를 넘은 날이면 그 15분 구간의 시작 시각을, 아니면 그 시각(정시)을 줌
+      monthPeakAt:
+        exceeded.find((item) => item.windowStart.slice(0, 10) === topDay.date)?.windowStart ??
+        `${topDay.date}T${pad(topHour.hour)}:00:00`,
       avgReductionKw: Math.round(sum(reductions) / reductions.length),
       maxReductionKw: Math.max(...reductions),
     },
@@ -1224,4 +1227,112 @@ export async function fakeGetSettingHistory(limit = 20) {
   failIfOffline()
   seedSettingsOnce()
   return settingHistory.slice(0, limit).map((item) => ({ ...item }))
+}
+
+// ---- 분석 > 피크 분석 ----
+// GET /api/analyses/peak?from=&to= 흉내 (주소와 필드는 확인 필요). from, to 예: '2026-11-01'
+// 월간 성적표(fakeGetReport)와 같은 데이터에서 기간만 잘라 만듭니다. 그래서 같은 달이면 두 화면의 숫자가 같습니다.
+export async function fakeGetPeakAnalysis(from, to) {
+  failIfOffline()
+
+  // 1) 기간에 걸친 달들의 성적표를 받아, 기간 안의 날짜만 모음
+  const dailyPeaks = []
+  const heatmap = []
+  const exceeded = []
+  const inRange = (date) => from <= date && date <= to
+  const cursor = new Date(`${from.slice(0, 7)}-01T00:00:00`)
+  for (let count = 0; count < 24; count++) {
+    const month = toLocalDateTime(cursor).slice(0, 7)
+    if (month > to.slice(0, 7)) break
+    const report = await fakeGetReport(month)
+    if (report.hasData) {
+      dailyPeaks.push(...report.dailyPeaks.filter((item) => inRange(item.date)))
+      heatmap.push(...report.heatmap.filter((item) => inRange(item.date)))
+      exceeded.push(...report.exceeded.filter((item) => inRange(item.windowStart.slice(0, 10))))
+    }
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+
+  if (!dailyPeaks.length) {
+    return { from, to, hasData: false, targetPeakKw: TARGET_PEAK_KW }
+  }
+
+  // 2) 날마다 피크가 가장 높았던 15분 구간과, 그때 추천을 어떻게 처리했는지
+  const windows = dailyPeaks.map((day) => {
+    const over = exceeded.find((item) => item.windowStart.slice(0, 10) === day.date)
+    if (over) {
+      return {
+        windowStart: over.windowStart,
+        windowEnd: over.windowEnd,
+        peakKw: day.peakKw,
+        status: over.status,
+        note: over.cause,
+      }
+    }
+    const seed = Number(day.date.replaceAll('-', ''))
+    const hour = heatmap.find((item) => item.date === day.date && item.peakKw === day.peakKw).hour
+    const minute = [0, 15, 30, 45][Math.floor(fakeRandom(seed + 42) * 4)]
+    const start = new Date(`${day.date}T${pad(hour)}:${pad(minute)}:00`)
+    // 예상과 실제가 거의 같으면 방전 추천이 없었던 날로 봄
+    const noAdvice = day.expectedKw - day.peakKw < 45
+    const auto = fakeRandom(seed + 77) < 0.3
+    let status = auto ? 'AUTO' : 'APPLIED'
+    let note = auto ? '자동 방전 (시뮬레이션)' : '방전 적용'
+    if (noAdvice) {
+      status = null
+      note = '방전 추천 없음'
+    }
+    return {
+      windowStart: toLocalDateTime(start),
+      windowEnd: toLocalDateTime(new Date(start.getTime() + WINDOW_MS)),
+      peakKw: day.peakKw,
+      status,
+      note,
+    }
+  })
+  const topWindows = [...windows].sort((a, b) => b.peakKw - a.peakKw).slice(0, 8)
+
+  // 3) 피크가 잦은 시간대: 요금 시간대 묶음마다 평균을 내어 가장 높은 묶음을 고름
+  let busiest = null
+  for (const block of TARIFF_PERIODS) {
+    const list = heatmap.filter((item) => {
+      const clock = `${pad(item.hour)}:00`
+      return block.from <= clock && clock < block.to
+    })
+    if (!list.length) continue
+    const avgKw = list.reduce((sum, item) => sum + item.peakKw, 0) / list.length
+    if (!busiest || avgKw > busiest.avgKw) busiest = { ...block, avgKw }
+  }
+
+  // 4) 기간 안의 15분 구간 수 (오늘은 지금까지 지난 구간만 셈)
+  const now = simNow()
+  const today = toLocalDateTime(now).slice(0, 10)
+  let windowCount = dailyPeaks.length * 96
+  if (dailyPeaks[dailyPeaks.length - 1].date === today) {
+    windowCount += Math.floor((now.getHours() * 60 + now.getMinutes()) / 15) - 96
+  }
+
+  const reductions = dailyPeaks.map((item) => item.expectedKw - item.peakKw)
+  return {
+    from,
+    to,
+    hasData: true,
+    targetPeakKw: TARGET_PEAK_KW,
+    summary: {
+      maxPeakKw: topWindows[0].peakKw,
+      maxPeakAt: topWindows[0].windowStart,
+      exceededCount: exceeded.length,
+      windowCount,
+      avgReductionKw: Math.round(
+        reductions.reduce((sum, value) => sum + value, 0) / reductions.length,
+      ),
+      maxReductionKw: Math.max(...reductions),
+      busyFrom: busiest.from,
+      busyTo: busiest.to,
+      busyPeriodLabel: TARIFF_LABELS[busiest.period],
+    },
+    dailyPeaks,
+    heatmap,
+    topWindows,
+  }
 }

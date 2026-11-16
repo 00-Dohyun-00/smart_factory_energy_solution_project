@@ -1,9 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import MainLayout from '@/layouts/MainLayout.vue'
-import ComingSoonPage from '@/pages/ComingSoonPage.vue'
 import HistoryPage from '@/pages/HistoryPage.vue'
 import MonitoringPage from '@/pages/MonitoringPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
+import PeakAnalysisPage from '@/pages/PeakAnalysisPage.vue'
 import PowerDiagramPage from '@/pages/PowerDiagramPage.vue'
 import ReportPage from '@/pages/ReportPage.vue'
 import SettingsPage from '@/pages/SettingsPage.vue'
@@ -30,10 +30,9 @@ const routes = [
         component: TrendAnalysisPage,
         meta: { parent: '분석', title: '추이 분석' },
       },
-      // 피크 분석은 아직 준비 중
       {
         path: 'analysis/peak',
-        component: ComingSoonPage,
+        component: PeakAnalysisPage,
         meta: { parent: '분석', title: '피크 분석' },
       },
       // 보고서
