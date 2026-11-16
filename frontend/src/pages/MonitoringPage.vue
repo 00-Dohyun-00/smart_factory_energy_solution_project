@@ -1,8 +1,8 @@
 <!--
   모니터링 > 통합
-  1줄: KPI 4개 (공장 소비전력 · 태양광 발전량 · 배터리 잔량 · 한전 구매전력)
+  1줄: KPI 5개 (공장 소비전력 · 한전 구매전력 · 태양광 발전량 · ESS 충·방전 · 배터리 잔량)
   2줄: 지금 15분 구간(피크 게이지) · ESS 추천
-  3줄: 오늘 전력 추이 · 공급원 흐름
+  3줄: 오늘 전력 추이 · 이벤트 로그
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
@@ -10,11 +10,12 @@ import Chart from '@/components/Chart.vue'
 import EssAdviceCard from '@/components/EssAdviceCard.vue'
 import PeakWindowCard from '@/components/PeakWindowCard.vue'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
-import { formatHourMinute, formatInteger, formatKw, formatOneDecimal } from '@/utils/format'
+import { formatHourMinute, formatKw, formatOneDecimal } from '@/utils/format'
 
 const realtimeStore = useRealtimeStore()
 
-const PCS_LABELS = { DISCHARGING: '방전 중', CHARGING: '충전 중', STANDBY: '대기' }
+// ESS 카드의 숫자 앞에 붙이는 말
+const PCS_SHORT = { DISCHARGING: '방전', CHARGING: '충전', STANDBY: '대기' }
 
 const busy = ref(false) // 적용/넘기기 요청 중
 const actionError = ref('') // 적용/넘기기 실패 메시지
@@ -46,7 +47,9 @@ async function answerDecision(newStatus) {
   }
 }
 
-// ---- KPI 4개 ----
+// ---- KPI 5개 ----
+// 왼쪽부터 "공장 소비 = 한전 + 태양광 + ESS" 순서로 읽히게 놓고, 마지막에 배터리 잔량을 둠
+
 // 한전 구매전력이 목표 피크의 몇 %인지 (표시용 비율: 백엔드 값 두 개를 나눈 것)
 const gridPercent = computed(() =>
   status.value ? (status.value.gridKw / status.value.targetPeakKw) * 100 : null,
@@ -55,15 +58,16 @@ const gridPercent = computed(() =>
 const kpis = computed(() => {
   const s = status.value
   const over = gridPercent.value > 100
+  // ESS는 충전 중이면 충전 전력을, 그 밖에는 방전 전력을 보여 줌
+  const charging = s?.pcsStatus === 'CHARGING'
+  const discharging = s?.pcsStatus === 'DISCHARGING'
   return [
     {
       key: 'load',
       name: '공장 소비전력',
       value: formatKw(s?.loadKw),
       unit: 'kW',
-      sub: s
-        ? `한전 ${formatKw(s.gridKw)} + 태양광 ${formatKw(s.solarKw)} + ESS ${formatKw(s.dischargeKw)}`
-        : '',
+      sub: '한전 + 태양광 + ESS',
       // 막대: 공급원 비율 (백엔드가 준 값)
       bars: s
         ? [
@@ -72,6 +76,16 @@ const kpis = computed(() => {
             { source: 'ess', width: s.sourceRatio.essPercent },
           ]
         : [],
+    },
+    {
+      key: 'grid',
+      name: '한전 구매전력',
+      value: formatKw(s?.gridKw),
+      unit: 'kW',
+      sub: s ? `목표 ${formatKw(s.targetPeakKw)} kW의 ${formatOneDecimal(gridPercent.value)}%` : '',
+      over, // 목표 피크를 넘으면 경고색
+      // 막대: 목표 피크를 100%로 봤을 때 지금 얼마나 찼는지
+      bars: s ? [{ source: over ? 'over' : 'grid', width: Math.min(100, gridPercent.value) }] : [],
     },
     {
       key: 'solar',
@@ -83,59 +97,33 @@ const kpis = computed(() => {
     },
     {
       key: 'ess',
+      name: 'ESS 충·방전',
+      // 숫자 앞에 지금 무엇을 하는 중인지 적음 (방전 500 kW / 충전 300 kW / 대기 0.0 kW)
+      prefix: s ? (PCS_SHORT[s.pcsStatus] ?? '') : '',
+      value: formatKw(s ? (charging ? s.chargeKw : s.dischargeKw) : null),
+      unit: 'kW',
+      sub: discharging ? `공장 소비의 ${formatOneDecimal(s.sourceRatio.essPercent)}%` : '',
+      bars: discharging ? [{ source: 'ess', width: s.sourceRatio.essPercent }] : [],
+    },
+    {
+      key: 'soc',
       name: '배터리 잔량 (SOC)',
       value: formatOneDecimal(s?.socPercent),
       unit: '%',
-      sub: s
-        ? `PCS ${PCS_LABELS[s.pcsStatus] ?? '—'}, 배터리실 ${formatOneDecimal(s.batteryTempC)}℃`
-        : '',
+      sub: s ? `배터리실 ${formatOneDecimal(s.batteryTempC)}℃` : '',
       bars: s ? [{ source: 'ess', width: s.socPercent }] : [],
     },
-    {
-      key: 'grid',
-      name: '한전 구매전력',
-      value: formatKw(s?.gridKw),
-      unit: 'kW',
-      sub: s
-        ? `목표 피크 ${formatKw(s.targetPeakKw)} kW의 ${formatOneDecimal(gridPercent.value)}%`
-        : '',
-      over, // 목표 피크를 넘으면 경고색
-      bars: s ? [{ source: over ? 'over' : 'grid', width: Math.min(100, gridPercent.value) }] : [],
-    },
   ]
 })
 
-// ---- 공급원 흐름 ----
-const sources = computed(() => {
-  const s = status.value
-  return [
-    { key: 'grid', name: '한전', kw: s?.gridKw, percent: s?.sourceRatio.gridPercent, note: '구매' },
-    {
-      key: 'solar',
-      name: '태양광',
-      kw: s?.solarKw,
-      percent: s?.sourceRatio.solarPercent,
-      note: '발전',
-    },
-    {
-      key: 'ess',
-      name: 'ESS',
-      kw: s?.dischargeKw,
-      percent: s?.sourceRatio.essPercent,
-      note: PCS_LABELS[s?.pcsStatus] ?? '—',
-    },
-  ]
-})
-
-const totals = computed(() => {
-  const energy = status.value?.todayEnergy
-  return [
-    { label: '한전 구매', kwh: energy?.gridKwh },
-    { label: '태양광 발전', kwh: energy?.solarKwh },
-    { label: 'ESS 방전', kwh: energy?.dischargeKwh },
-    { label: 'ESS 충전', kwh: energy?.chargeKwh },
-  ]
-})
+// ---- 이벤트 로그 ----
+// 단계는 색만으로 구분하지 않도록 도형을 함께 표시
+const EVENT_INFO = {
+  CRITICAL: { shape: '■', className: 'crit' },
+  WARNING: { shape: '▲', className: 'warn' },
+  NORMAL: { shape: '●', className: 'ok' },
+  INFO: { shape: '○', className: 'info' },
+}
 
 // ---- 오늘 전력 추이 ----
 // ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
@@ -210,7 +198,12 @@ const trendOption = computed(() => {
       silent: true,
       symbol: 'none',
       lineStyle: { color: COLOR.ink2, width: 1, type: 'solid' },
-      label: { formatter: `지금 ${lastTime}`, position: 'end', color: COLOR.ink },
+      // 세로선은 지금 구간의 칸에 긋고, 글자에는 서버가 보낸 지금 시각을 적음
+      label: {
+        formatter: `지금 ${formatHourMinute(status.value?.recordedAt)}`,
+        position: 'end',
+        color: COLOR.ink,
+      },
       data: [{ xAxis: lastTime }],
     }
   }
@@ -260,7 +253,7 @@ const trendOption = computed(() => {
 
     <!-- 서버 연결이 끊겼다는 알림은 공통 틀(MainLayout)이 모든 화면에 띄움 -->
 
-    <!-- 1줄: KPI 4개 -->
+    <!-- 1줄: KPI 5개 -->
     <div class="row kpis">
       <section v-for="kpi in kpis" :key="kpi.key" class="card kpi" :class="kpi.key">
         <div class="kpi-top">
@@ -268,6 +261,7 @@ const trendOption = computed(() => {
           <h2 class="kpi-name">{{ kpi.name }}</h2>
         </div>
         <p class="kpi-value" :class="{ over: kpi.over }">
+          <span v-if="kpi.prefix" class="kpi-prefix">{{ kpi.prefix }}</span>
           <span class="num">{{ kpi.value }}</span>
           <span class="kpi-unit">{{ kpi.unit }}</span>
         </p>
@@ -301,7 +295,7 @@ const trendOption = computed(() => {
       </div>
     </div>
 
-    <!-- 3줄: 오늘 전력 추이 + 공급원 흐름 -->
+    <!-- 3줄: 오늘 전력 추이 + 이벤트 로그 -->
     <div class="row bottom">
       <section class="card trend">
         <div class="card-head">
@@ -317,46 +311,22 @@ const trendOption = computed(() => {
         <p v-else class="empty">오늘 기록이 아직 없습니다.</p>
       </section>
 
-      <section class="card flow">
+      <section class="card events-card">
         <div class="card-head">
-          <h2 class="card-title">공급원 흐름</h2>
-          <span class="note">지금 공장으로 들어오는 전기</span>
+          <h2 class="card-title">이벤트 로그</h2>
+          <span class="note">단계 변화, 추천, 적용·넘김, 구간 종료</span>
         </div>
-
-        <ul class="sources">
-          <li v-for="source in sources" :key="source.key" :class="source.key">
-            <span class="dot" aria-hidden="true"></span>
-            <strong class="source-name">{{ source.name }}</strong>
-            <span class="source-kw"
-              ><span class="num">{{ formatKw(source.kw) }}</span> kW</span
-            >
-            <span class="track thick" aria-hidden="true">
-              <span class="bar" :class="source.key" :style="{ width: `${source.percent ?? 0}%` }">
-              </span>
+        <ul v-if="realtimeStore.events.length" class="events">
+          <li v-for="event in realtimeStore.events" :key="event.id">
+            <span class="event-time num">{{ formatHourMinute(event.occurredAt) }}</span>
+            <span class="event-text" :class="EVENT_INFO[event.level].className">
+              <span aria-hidden="true">{{ EVENT_INFO[event.level].shape }}</span>
+              {{ event.message }}
             </span>
-            <span class="source-percent num">{{ formatOneDecimal(source.percent) }}%</span>
-            <span class="source-note">{{ source.note }}</span>
           </li>
         </ul>
-
-        <p class="join" aria-hidden="true">▼ 합쳐서</p>
-        <p class="factory">
-          <strong>공장 소비전력</strong>
-          <span class="factory-value num">{{ formatKw(status?.loadKw) }}</span>
-          <span>kW</span>
-        </p>
-
-        <div class="totals-wrap">
-          <h3 class="totals-title">오늘 누적 (00:00부터)</h3>
-          <dl class="totals">
-            <div v-for="item in totals" :key="item.label">
-              <dt>{{ item.label }}</dt>
-              <dd>
-                <span class="num">{{ formatInteger(item.kwh) }}</span> kWh
-              </dd>
-            </div>
-          </dl>
-        </div>
+        <p v-else class="empty">아직 기록된 이벤트가 없습니다.</p>
+        <RouterLink to="/logs" class="more">추천 이력 보기</RouterLink>
       </section>
     </div>
   </div>
@@ -426,7 +396,8 @@ const trendOption = computed(() => {
 .solar {
   --source: var(--src-solar);
 }
-.ess {
+.ess,
+.soc {
   --source: var(--src-ess);
 }
 
@@ -435,9 +406,6 @@ const trendOption = computed(() => {
   display: flex;
   height: 8px;
   background: var(--line);
-}
-.track.thick {
-  height: 12px;
 }
 .bar {
   display: block;
@@ -449,7 +417,7 @@ const trendOption = computed(() => {
   background: var(--crit);
 }
 
-/* 1줄: KPI 4개. 낮게 잡아 아래 줄이 첫 화면에 들어오게 함 */
+/* 1줄: KPI 5개. 낮게 잡아 아래 줄이 첫 화면에 들어오게 함 */
 .kpi {
   display: flex;
   flex: 1;
@@ -474,6 +442,7 @@ const trendOption = computed(() => {
   white-space: nowrap;
 }
 .kpi-sub {
+  min-height: 18px;
   margin-bottom: 6px;
   overflow: hidden;
   font-size: 12px;
@@ -495,6 +464,9 @@ const trendOption = computed(() => {
 }
 .kpi-value.over {
   color: var(--crit);
+}
+.kpi-prefix {
+  font-size: 18px;
 }
 .kpi-unit {
   font-size: 15px;
@@ -529,101 +501,51 @@ const trendOption = computed(() => {
   flex: 1;
   min-width: 0;
 }
-.flow {
+.events-card {
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 12px;
   width: 600px;
 }
-.flow .card-head {
-  margin-bottom: 0;
-}
-.sources {
+.events li {
   display: flex;
-  flex-direction: column;
   gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
 }
-.sources li {
-  display: grid;
-  grid-template-columns: 10px 52px 104px minmax(0, 1fr) 52px 52px;
-  align-items: center;
-  gap: 12px;
+.events li:last-child {
+  border-bottom: 0;
 }
-.source-name {
-  font-size: 15px;
-}
-.source-kw {
-  font-size: 18px;
+.event-time {
+  flex: none;
   font-weight: 700;
-  white-space: nowrap;
 }
-.source-percent {
-  text-align: right;
+.event-text.crit {
+  color: var(--crit);
 }
-.source-note {
-  font-size: 12px;
-  color: var(--mute);
-  text-align: right;
-  white-space: nowrap;
+.event-text.warn {
+  color: var(--warn);
 }
-.join {
-  font-size: 12px;
-  color: var(--mute);
+.event-text.ok {
+  color: var(--ok);
 }
-.factory {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 12px 16px;
-  background: var(--bg);
-  border: 2px solid var(--ink);
+.event-text.info {
+  color: var(--ink-2);
 }
-.factory strong {
-  font-size: 15px;
-}
-.factory-value {
-  margin-left: auto;
-  font-size: 30px;
-  font-weight: 700;
-  line-height: 1.2;
-}
-.totals-wrap {
+/* 카드 맨 아래 오른쪽의 링크 */
+.more {
+  align-self: flex-end;
   margin-top: auto;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-.totals-title {
-  margin-bottom: 4px;
+  border-bottom: 1px solid var(--ink-2);
   font-size: 13px;
-  font-weight: 700;
-}
-.totals {
-  display: flex;
-  gap: 12px;
-}
-.totals div {
-  flex: 1;
-}
-.totals dt {
-  font-size: 12px;
-  color: var(--mute);
-}
-.totals dd {
-  font-size: 15px;
-  font-weight: 700;
-  white-space: nowrap;
+  color: var(--ink-2);
 }
 
 /* 화면이 좁으면 오른쪽 카드 폭을 줄여 왼쪽 그래프와 게이지 자리를 남김 */
 @media (max-width: 1600px) {
   .advice-wrap,
-  .flow {
+  .events-card {
     width: 480px;
-  }
-  .sources li {
-    grid-template-columns: 10px 48px 92px minmax(0, 1fr) 48px 44px;
-    gap: 8px;
   }
 }
 

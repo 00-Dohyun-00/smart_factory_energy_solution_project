@@ -470,23 +470,6 @@ function equipmentsAt(seconds, solarKw) {
   }))
 }
 
-// 오늘 0시부터 지금까지 쌓인 양 흉내: 15분마다의 값을 더해 kWh로 바꿈 (15분 = 0.25시간)
-// ESS 충전·방전량은 고정된 예시 값
-function todayEnergyAt(hour) {
-  let gridKwh = 0
-  let solarKwh = 0
-  for (let i = 0; i * 0.25 < hour; i++) {
-    gridKwh += (1570 + 165 * Math.sin(i / 5) + 45 * Math.sin(i / 2)) * 0.25
-    solarKwh += solarAt(i * 0.25) * 0.25
-  }
-  return {
-    gridKwh: Math.round(gridKwh),
-    solarKwh: Math.round(solarKwh),
-    dischargeKwh: 250,
-    chargeKwh: 300,
-  }
-}
-
 // GET /api/battery-statuses/latest 흉내
 export async function fakeGetLatestStatus() {
   failIfOffline()
@@ -567,8 +550,6 @@ export async function fakeGetLatestStatus() {
       solarPercent: round1((solarKw / loadKw) * 100),
       essPercent: round1((dischargeKw / loadKw) * 100),
     },
-    // 오늘 0시부터 지금까지 쌓인 양 (kWh). 필드는 확인 필요
-    todayEnergy: todayEnergyAt(hour),
     equipments,
   }
 }
@@ -638,7 +619,7 @@ export async function fakeGetRecentStatuses() {
 }
 
 // GET /api/events?limit= 흉내: 최근 이벤트 (최신 순). 주소와 필드는 확인 필요
-export async function fakeGetRecentEvents(limit = 6) {
+export async function fakeGetRecentEvents(limit = 10) {
   failIfOffline()
   return events.slice(0, limit).map((item) => ({ ...item }))
 }

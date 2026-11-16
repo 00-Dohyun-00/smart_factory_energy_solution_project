@@ -33,7 +33,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
       const [latestStatus, latestDecision, latestEvents] = await Promise.all([
         getLatestBatteryStatus(),
         getLatestBatteryDecision(),
-        getRecentEvents(6),
+        getRecentEvents(10),
       ])
       status.value = latestStatus
       decision.value = latestDecision
