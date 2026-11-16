@@ -20,7 +20,8 @@ export const useRealtimeStore = defineStore('realtime', () => {
   const todayError = ref('')
 
   const recentStatuses = ref([]) // 최근 1시간 목록 (실시간 전력 추세용)
-  const zoneDetail = ref(null) // 계통도에서 고른 구역의 상세
+  const zoneDetail = ref(null) // 설비 모니터링 화면에서 고른 구역의 상세
+  const zoneError = ref('') // 구역 상세를 받지 못했을 때의 메시지
 
   const connected = ref(true) // 서버 연결 표시등
   const failCount = ref(0)
@@ -71,11 +72,13 @@ export const useRealtimeStore = defineStore('realtime', () => {
     }
   }
 
+  // 실패하면 이전 값은 그대로 두고 메시지만 남김 (화면에서 "다시 시도"를 보여 주기 위해)
   async function fetchZoneDetail(zoneId) {
+    zoneError.value = ''
     try {
       zoneDetail.value = await getZoneRecent(zoneId)
-    } catch {
-      // 위와 같음
+    } catch (error) {
+      zoneError.value = error.message
     }
   }
 
@@ -94,6 +97,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
     todayError,
     recentStatuses,
     zoneDetail,
+    zoneError,
     connected,
     errorMessage,
     fetchLatest,

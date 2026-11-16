@@ -20,7 +20,7 @@ const routes = [
       {
         path: 'monitoring/diagram',
         component: PowerDiagramPage,
-        meta: { parent: '모니터링', title: '계통도' },
+        meta: { parent: '모니터링', title: '설비 모니터링' },
       },
       // 분석 (아직 준비 중)
       {

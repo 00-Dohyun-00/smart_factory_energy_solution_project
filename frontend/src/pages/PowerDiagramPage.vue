@@ -1,5 +1,5 @@
 <!--
-  모니터링 > 계통도
+  모니터링 > 설비 모니터링
   요약 줄 → 가운데 전력 계통도 + 오른쪽에 고른 구역의 상세
 -->
 <script setup>
@@ -37,6 +37,12 @@ const STATE_LABELS = { RUNNING: '운전', HEATING: '승온 중', STOPPED: '정�
 const zoneInAddress = route.query.zone
 const selectedZone = ref(ZONE_LABELS[zoneInAddress] ? zoneInAddress : 'Z2')
 const status = computed(() => realtimeStore.status)
+
+// ESS는 충전 중이면 충전 전력을, 그 밖에는 방전 전력을 보여 줌
+const essKw = computed(() => {
+  if (!status.value) return null
+  return status.value.pcsStatus === 'CHARGING' ? status.value.chargeKw : status.value.dischargeKw
+})
 
 // 구역을 고르면 그 구역의 상세(최근 1시간, 오늘 요약)를 받고 주소도 바꿈
 onMounted(() => {
@@ -102,7 +108,7 @@ const trendOption = computed(() => ({
   },
   yAxis: {
     type: 'value',
-    scale: true, // 0부터가 아니라 값이 있는 범위에 맞춤 (선 그래프라 변화를 보기 쉽게)
+    min: 0, // 0부터 그림. 범위를 좁히면 작은 변화가 크게 오르내리는 것처럼 보이기 때문
     axisLabel: { color: COLOR.mute },
     splitLine: { lineStyle: { color: COLOR.line } },
   },
@@ -124,7 +130,7 @@ const trendOption = computed(() => ({
     <div class="crumb">
       <span class="crumb-parent">모니터링</span>
       <span class="crumb-parent" aria-hidden="true">›</span>
-      <h1 class="crumb-title">계통도</h1>
+      <h1 class="crumb-title">설비 모니터링</h1>
       <p class="legend"><span class="box" aria-hidden="true"></span>차단기</p>
     </div>
 
@@ -153,7 +159,7 @@ const trendOption = computed(() => ({
       <div>
         <dt><span class="dot ess" aria-hidden="true"></span>ESS</dt>
         <dd>
-          <span class="num">{{ formatKw(status?.dischargeKw) }}</span> kW,
+          <span class="num">{{ formatKw(essKw) }}</span> kW,
           {{ PCS_LABELS[status?.pcsStatus] ?? '—' }}
         </dd>
       </div>
@@ -197,6 +203,12 @@ const trendOption = computed(() => ({
 
         <h3 class="sub-title">최근 1시간</h3>
         <Chart v-if="detail" :option="trendOption" :height="150" />
+        <p v-else-if="realtimeStore.zoneError" class="empty" role="alert">
+          불러오지 못했습니다.
+          <button class="text-button" @click="realtimeStore.fetchZoneDetail(selectedZone)">
+            다시 시도
+          </button>
+        </p>
         <p v-else class="empty">불러오는 중입니다.</p>
 
         <h3 class="sub-title">이 구역의 설비</h3>
@@ -374,8 +386,17 @@ const trendOption = computed(() => ({
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 10px;
   height: 150px;
   color: var(--mute);
+}
+.text-button {
+  padding: 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--ink-2);
+  font-size: 13px;
+  color: var(--ink-2);
 }
 .equipments {
   display: flex;

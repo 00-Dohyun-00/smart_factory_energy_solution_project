@@ -41,31 +41,38 @@ const EQUIPMENT_WIDTH = 210
 const EQUIPMENT_GAP = 40
 
 // 위쪽 공급원 3곳
-const sources = computed(() => [
-  {
-    key: 'grid',
-    name: '한전 수전',
-    centerX: 205,
-    kw: props.status?.gridKw ?? null,
-    sub: '사 오는 전기',
-  },
-  {
-    key: 'solar',
-    name: '태양광 인버터',
-    centerX: 595,
-    kw: props.status?.solarKw ?? null,
-    sub: '옥상 발전',
-  },
-  {
-    key: 'ess',
-    name: 'ESS (PCS)',
-    centerX: 985,
-    kw: props.status?.dischargeKw ?? null,
-    sub: props.status
-      ? `${PCS_LABELS[props.status.pcsStatus] ?? '—'}, 잔량 ${formatOneDecimal(props.status.socPercent)}%`
-      : '—',
-  },
-])
+const sources = computed(() => {
+  const status = props.status
+  // 공장 전체에서 차지하는 비율은 백엔드가 준 값(sourceRatio)을 그대로 씀
+  const share = (percent) => (status ? `공장의 ${formatOneDecimal(percent)}%` : '—')
+  // ESS는 충전 중이면 충전 전력을, 그 밖에는 방전 전력을 보여 줌
+  const charging = status?.pcsStatus === 'CHARGING'
+  return [
+    {
+      key: 'grid',
+      name: '한전 수전',
+      centerX: 205,
+      kw: status?.gridKw ?? null,
+      sub: share(status?.sourceRatio.gridPercent),
+    },
+    {
+      key: 'solar',
+      name: '태양광 인버터',
+      centerX: 595,
+      kw: status?.solarKw ?? null,
+      sub: share(status?.sourceRatio.solarPercent),
+    },
+    {
+      key: 'ess',
+      name: 'ESS (PCS)',
+      centerX: 985,
+      kw: status ? (charging ? status.chargeKw : status.dischargeKw) : null,
+      sub: status
+        ? `${PCS_LABELS[status.pcsStatus] ?? '—'}, 잔량 ${formatOneDecimal(status.socPercent)}%`
+        : '—',
+    },
+  ]
+})
 
 // 구역 6곳: 그 구역 설비들의 전력을 더하고, 공장 전체에서 차지하는 비율을 구함 (표시용 합계·비율)
 const zones = computed(() =>

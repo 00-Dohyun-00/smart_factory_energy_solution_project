@@ -28,7 +28,7 @@ const menus = [
     label: '모니터링',
     children: [
       { label: '통합', to: '/' },
-      { label: '계통도', to: '/monitoring/diagram' },
+      { label: '설비 모니터링', to: '/monitoring/diagram' },
     ],
   },
   { label: '분석', children: [{ label: '피크 분석', to: '/analysis/peak' }] },

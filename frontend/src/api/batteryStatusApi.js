@@ -17,5 +17,5 @@ export const getTodayBatteryStatuses = () => fakeGetTodayStatuses()
 // 최근 1시간, 1분 간격 상태 목록 (실시간 전력 추세용)
 export const getRecentBatteryStatuses = () => fakeGetRecentStatuses()
 
-// 구역 한 곳의 최근 1시간 전력과 오늘 요약 (계통도의 상세용, zoneId 예: 'Z2')
+// 구역 한 곳의 최근 1시간 전력과 오늘 요약 (설비 모니터링 화면의 상세용, zoneId 예: 'Z2')
 export const getZoneRecent = (zoneId) => fakeGetZoneRecent(zoneId)
