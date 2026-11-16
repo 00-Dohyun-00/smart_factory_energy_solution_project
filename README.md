@@ -15,6 +15,10 @@
 
 ![아키텍처](docs/architecture.png)
 
+### 시스템 구성도
+
+![시스템 구성도](docs/system-config.png)
+
 자세한 결정 사항과 데이터 흐름은 [결정 사항](docs/decisions.md)을 참고하세요.
 
 ## 빠른 시작

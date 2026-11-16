@@ -4,6 +4,8 @@
 
 ![아키텍처](architecture.png)
 
+![시스템 구성도](system-config.png)
+
 ## 확정
 
 | 항목 | 결정 | 비고 |
