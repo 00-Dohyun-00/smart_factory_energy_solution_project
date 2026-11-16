@@ -70,7 +70,7 @@ src/
 | 모니터링 | 통합 | `/` | `MonitoringPage.vue` | 있음 |
 | 모니터링 | 설비 모니터링 | `/monitoring/diagram` | `PowerDiagramPage.vue` | 있음 |
 | 분석 | 추이 분석 | `/analysis/trend` | `TrendAnalysisPage.vue` | 있음 |
-| 분석 | 피크 분석 | `/analysis/peak` | `ComingSoonPage.vue` | 준비 중 (Figma 시안 있음) |
+| 분석 | 피크 분석 | `/analysis/peak` | `PeakAnalysisPage.vue` | 있음 |
 | 보고서 | 월간 성적표 | `/report` | `ReportPage.vue` | 있음 |
 | 운영 로그 | 추천 이력 | `/logs` | `HistoryPage.vue` | 있음 (`/history`로 들어와도 열림) |
 | 환경 설정 | 기준값 | `/settings` | `SettingsPage.vue` | 있음 |
@@ -114,7 +114,7 @@ src/
 
 위에서 아래로 "지금 값 → 피크와 추천 → 오늘 흐름" 순서다. (2026-11-16, KPI 카드 구성으로 변경. 이전 구성은 커밋 `7677556`에 있다)
 
-- 1줄 KPI 5개: 공장 소비전력(공급원 비율 막대) / 한전 구매전력(목표 피크 대비 %, 넘으면 경고색) / 태양광 발전량 / ESS 충·방전("방전 500 kW", "충전 300 kW", "대기 0.0 kW"처럼 방향을 숫자 앞에 적음) / 배터리 잔량(SOC, 배터리실 온도). 왼쪽부터 "공장 소비 = 한전 + 태양광 + ESS"로 읽히는 순서다. 카드는 낮게 잡아 2줄이 첫 화면에 들어오게 한다. (2026-11-16에 4개에서 5개로 변경)
+- 1줄 KPI 5개: 공장 소비전력(공급원 비율 막대) / 한전 구매전력(목표 피크 대비 %, 넘으면 경고색) / 태양광 발전량 / ESS 충·방전("방전 500 kW", "충전 300 kW", "대기 0.0 kW"처럼 방향을 숫자 앞에 적음) / 배터리 잔량(SOC, 배터리실 온도). 왼쪽부터 "공장 소비 = 한전 + 태양광 + ESS"로 읽히는 순서다. 카드는 낮게 잡아 2줄이 첫 화면에 들어오게 한다. (2026-11-16에 4개에서 5개로 변경) 카드는 `components/KpiCards.vue`에 있고 설비 모니터링 화면도 같은 카드를 쓴다.
 - 2줄: 지금 15분 구간(`PeakWindowCard.vue`) / ESS 추천(`EssAdviceCard.vue`).
   - 지금 15분 구간: 왼쪽에 예상 평균·한 줄 판정·단계, 오른쪽에 피크 게이지(정상·주의·경고 띠 위에 예상 평균 표시), 목표 피크·예상 평균·방어 필요 전력·남은 시간, 구간 진행 막대. 단계와 기준선은 백엔드가 주는 값을 쓴다. 게이지에 그리는 범위만 목표 피크 기준으로 화면에서 정한다(표시용). 주의선 기준(예: 목표의 97%)은 확인 필요.
   - ESS 추천: 행동(충전/방전/대기), 추천 kW, 이유 문장, 판단 근거(백엔드가 준 `usedValues` 목록을 그대로), `[방전 500 kW 적용]` `[넘기기]` 버튼. 기본은 **운영자 승인 모드**다. 추천 만료 규칙은 확인 필요이며, 정해지기 전에는 최신 추천 1건만 버튼을 활성화한다.
@@ -135,6 +135,18 @@ src/
 - `Chart.vue`는 이전 설정에 새 설정을 덮어쓰므로, 선의 개수가 줄어드는 그래프(보기 항목을 끄는 전력 그래프)는 `:key`를 바꿔 새로 만든다.
 - 이 화면용 가짜 데이터(백엔드와 확정 필요): `GET /api/analyses/trend?from=&to=&interval=` → `targetPeakKw`, `socLowLimit`, `socHighLimit`, `roomTempLimitC`, `summary{}`, `points[{ recordedAt, loadKw, gridKw, solarKw, essKw, socPercent, roomTempC, outsideTempC }]`, `weather[{ date, text }]`, `hourly[{ hour, avgGridKw, period }]`, `byStatus[{ status, count, defendedCount, defendedPercent, avgResultPeakKw }]`, `highlights[{ at, label, value, unit, level }]`. `interval`은 `QUARTER`·`HOUR`·`DAY`, `essKw`는 방전이 +, 충전이 −.
 
+### 분석 > 피크 분석 세부
+
+기간을 골라 피크가 언제, 얼마나 높았는지 보는 화면이다.
+
+- 조회 조건: 기간(이번 달·지난 달·최근 7일·직접 입력). 바꾸면 바로 다시 조회한다.
+- 요약 숫자 4개(기간 중 최대 피크, 목표를 넘은 구간 수, 평균 피크 저감, 피크가 잦은 시간대) → 일별 최대 피크와 저감량 → 피크가 몰리는 시간대(날짜 × 시각 히트맵) / 피크가 높았던 구간 8개(그때의 추천 처리 포함).
+- 요약 숫자와 구간 순위는 **백엔드가 계산해 준 값**이다. 히트맵의 색 단계만 목표 피크 대비 비율로 화면에서 나눈다(표시용).
+- 일별 그래프와 히트맵은 월간 성적표에도 있다. 가짜 백엔드는 두 화면이 같은 데이터를 쓰게 해서, 같은 달이면 최대 피크와 평균 저감 숫자가 서로 같다.
+- 히트맵은 날짜 수에 맞춰 높이를 잡고, 날짜 수가 바뀌면 `:key`로 그래프를 새로 만든다.
+- 이 화면용 가짜 데이터(백엔드와 확정 필요): `GET /api/analyses/peak?from=&to=` → `hasData`, `targetPeakKw`, `summary{ maxPeakKw, maxPeakAt, exceededCount, windowCount, avgReductionKw, maxReductionKw, busyFrom, busyTo, busyPeriodLabel }`, `dailyPeaks[{ date, peakKw, expectedKw }]`, `heatmap[{ date, hour, peakKw }]`, `topWindows[{ windowStart, windowEnd, peakKw, status, note }]`.
+- 모든 메뉴에 화면이 생겨 `ComingSoonPage.vue`는 지금 쓰는 곳이 없다. 새 메뉴를 먼저 걸어 둘 때 쓰려고 남겨 두었다.
+
 ### 환경 설정 > 기준값 세부
 
 - 묶음 세 개(피크 · 요금 / ESS / 운영)를 나란히 두고 **묶음마다 저장**한다. 항목 목록(`GROUPS`)은 화면에 있고, `key`는 백엔드 설정 이름과 같아야 한다.
@@ -149,6 +161,7 @@ src/
 
 화면 이름은 "설비 모니터링"이다(2026-11-16에 "계통도"에서 변경). 주소(`/monitoring/diagram`)와 파일 이름(`PowerDiagramPage.vue`, `PowerTree.vue`)은 그대로 두었다. 화면 안의 그림은 "전력 계통"이라고 부른다.
 
+- 맨 위에 통합 화면과 같은 KPI 5개(`KpiCards.vue`)를 둔다. (2026-11-16, 요약 줄을 KPI 카드로 바꿈. 요약 줄에 있던 설비 수와 최근 수신 시각은 뺐다)
 - 위에서 아래로: 공급원 3곳(한전 수전·태양광 인버터·ESS PCS) → 주 모선 → 구역 6곳 → 고른 구역의 설비(`PowerTree.vue`, SVG 직접 그림).
 - 구역을 누르면 그 구역이 선택되고 아래에 설비가 펼쳐진다. 한 번에 한 구역만 펼친다. 고른 구역은 주소에 적는다(`/monitoring/diagram?zone=Z3`).
 - 오른쪽 상세: 고른 구역의 전력과 공장 대비 비율, 최근 1시간 추이, 설비별 전력, 오늘 최대·평균·사용량. 최근 1시간 그래프의 세로축은 0부터 그린다(범위를 좁히면 작은 변화가 크게 보임). 상세를 받지 못하면 `[다시 시도]`를 보여 준다.
@@ -235,7 +248,7 @@ src/
 
 밝고 절제된 톤이다. 그림자, 그라데이션, 글로우를 쓰지 않는다. 카드는 흰 배경에 얇은 테두리만 둔다.
 
-색 변수는 `styles/global.css`의 `:root`에 둔다. (아직 추가 전이다. 첫 화면 작업 때 넣는다)
+색 변수는 `styles/global.css`의 `:root`에 있다. 새 색이 필요하면 여기에 변수로 추가해서 쓴다.
 
 ```css
 :root {
