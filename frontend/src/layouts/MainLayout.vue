@@ -31,7 +31,13 @@ const menus = [
       { label: '설비 모니터링', to: '/monitoring/diagram' },
     ],
   },
-  { label: '분석', children: [{ label: '피크 분석', to: '/analysis/peak' }] },
+  {
+    label: '분석',
+    children: [
+      { label: '추이 분석', to: '/analysis/trend' },
+      { label: '피크 분석', to: '/analysis/peak' },
+    ],
+  },
   { label: '보고서', children: [{ label: '월간 성적표', to: '/report' }] },
   { label: '로그', children: [{ label: '추천 이력', to: '/logs' }] },
   { label: '환경 설정', children: [{ label: '기준값', to: '/settings' }] },

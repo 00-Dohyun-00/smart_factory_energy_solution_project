@@ -6,6 +6,7 @@ import MonitoringPage from '@/pages/MonitoringPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
 import PowerDiagramPage from '@/pages/PowerDiagramPage.vue'
 import ReportPage from '@/pages/ReportPage.vue'
+import TrendAnalysisPage from '@/pages/TrendAnalysisPage.vue'
 
 // 페이지(URL) 목록. 새 페이지를 만들면 여기에 추가하고, 왼쪽 메뉴(MainLayout.vue의 menus)에도 추가합니다.
 // meta의 parent는 메뉴 이름, title은 화면 이름입니다. title은 브라우저 탭 제목에도 쓰입니다.
@@ -22,7 +23,13 @@ const routes = [
         component: PowerDiagramPage,
         meta: { parent: '모니터링', title: '설비 모니터링' },
       },
-      // 분석 (아직 준비 중)
+      // 분석
+      {
+        path: 'analysis/trend',
+        component: TrendAnalysisPage,
+        meta: { parent: '분석', title: '추이 분석' },
+      },
+      // 피크 분석은 아직 준비 중
       {
         path: 'analysis/peak',
         component: ComingSoonPage,
