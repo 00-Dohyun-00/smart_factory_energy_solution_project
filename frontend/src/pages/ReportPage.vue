@@ -17,14 +17,14 @@ import {
 const reportStore = useReportStore()
 const realtimeStore = useRealtimeStore()
 
-const STATUS_LABELS = { RECOMMENDED: '추천 중', APPLIED: '적용', IGNORED: '무시', AUTO: '자동' }
+const STATUS_LABELS = { RECOMMENDED: '추천 중', APPLIED: '적용', IGNORED: '넘김', AUTO: '자동' }
 
 // ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 색 값을 그대로 적습니다.
 const COLOR = {
-  ink: '#1c1c1c', // --ink
-  mute: '#6e6e6a', // --mute
-  line: '#e3e3df', // --line
-  lineStrong: '#d4d4cf', // --line-strong
+  ink: '#14181c', // --ink
+  mute: '#646e77', // --mute
+  line: '#dde1e5', // --line
+  lineStrong: '#b9c0c7', // --line-strong
   crit: '#c8372d', // --crit
   grid: '#5b6472', // --src-grid
   ess: '#0f8f8a', // --src-ess
@@ -50,6 +50,11 @@ function moveMonth(step) {
   const [year, monthNumber] = month.value.split('-').map(Number)
   const moved = new Date(year, monthNumber - 1 + step, 1)
   month.value = `${moved.getFullYear()}-${String(moved.getMonth() + 1).padStart(2, '0')}`
+}
+
+// 인쇄 창 열기 (인쇄할 때의 모양은 아래 @media print와 MainLayout.vue에서 정함)
+function printReport() {
+  window.print()
 }
 
 // 달이 바뀌면 다시 조회
@@ -271,7 +276,11 @@ const essOption = computed(() => ({
   <div class="page">
     <!-- 제목 줄: 달 선택 -->
     <div class="head">
-      <h1 class="title">성적표</h1>
+      <div class="crumb">
+        <span class="crumb-parent">보고서</span>
+        <span class="crumb-parent" aria-hidden="true">›</span>
+        <h1 class="crumb-title">월간 성적표</h1>
+      </div>
       <div class="month" role="group" aria-label="조회할 달">
         <button aria-label="이전 달" :disabled="!month" @click="moveMonth(-1)">◀</button>
         <span class="month-label num">{{ monthLabel }}</span>
@@ -280,6 +289,10 @@ const essOption = computed(() => ({
         </button>
       </div>
       <span class="period">{{ periodLabel }}</span>
+      <!-- 브라우저의 인쇄 창을 엶. 인쇄 창에서 "PDF로 저장"을 고르면 파일로 남길 수 있음 -->
+      <button class="print" :disabled="!report || !report.hasData" @click="printReport">
+        인쇄 · PDF 저장
+      </button>
       <span class="caution">
         피크 저감량은 "방전하지 않았을 때의 예상"과 비교한 값이고, 금액과 탄소는 추정값입니다.
       </span>
@@ -333,7 +346,7 @@ const essOption = computed(() => ({
           <section class="card exceeded">
             <div class="card-head">
               <h2 class="card-title">목표를 넘은 구간 {{ report.exceeded.length }}건</h2>
-              <RouterLink to="/history" class="link">운영 이력에서 보기</RouterLink>
+              <RouterLink to="/logs" class="link">추천 이력에서 보기</RouterLink>
             </div>
             <p v-if="!report.exceeded.length" class="empty">목표를 넘은 구간이 없습니다.</p>
             <div v-else class="table-wrap">
@@ -500,6 +513,21 @@ const essOption = computed(() => ({
 }
 .period {
   color: var(--mute);
+}
+.print {
+  height: 36px;
+  padding: 0 14px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--ink);
+}
+.print:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+.print:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .caution {
   margin-left: auto;
@@ -698,5 +726,22 @@ const essOption = computed(() => ({
 }
 .rows dd {
   font-weight: 700;
+}
+
+/* 인쇄할 때: 누르는 것들은 숨기고, 안내 문구는 줄을 바꿔 다 보이게 함 */
+@media print {
+  .print,
+  .month button,
+  .retry,
+  .link {
+    display: none;
+  }
+  .page {
+    min-height: 0;
+    padding: 0;
+  }
+  .head {
+    flex-wrap: wrap;
+  }
 }
 </style>

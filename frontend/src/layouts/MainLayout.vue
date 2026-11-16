@@ -418,4 +418,19 @@ const peakMark = computed(() => {
   opacity: 0.5;
   cursor: default;
 }
+
+/* 인쇄할 때: 왼쪽 메뉴와 알림은 빼고 화면 내용만, 스크롤로 잘린 부분 없이 끝까지 나오게 함 */
+@media print {
+  .side,
+  .notice {
+    display: none;
+  }
+  .shell {
+    display: block;
+    height: auto;
+  }
+  .content {
+    overflow: visible;
+  }
+}
 </style>
