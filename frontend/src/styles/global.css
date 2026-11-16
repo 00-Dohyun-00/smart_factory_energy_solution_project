@@ -2,20 +2,21 @@
 
 /* 색 변수. 화면에서는 색을 직접 쓰지 않고 var(--이름)으로 씁니다. */
 :root {
-  --bg: #f5f5f3;
+  --bg: #eef0f2;
   --card: #fff;
-  --line: #e3e3df;
-  --line-strong: #d4d4cf;
-  --ink: #1c1c1c;
-  --ink-2: #444;
-  --mute: #6e6e6a;
-  --faint: #9a9a95;
+  --line: #dde1e5;
+  --line-strong: #b9c0c7;
+  --ink: #14181c;
+  --ink-2: #3c444c;
+  --mute: #646e77;
+  --faint: #98a1a9;
   /* 상태색: 정상 / 주의 / 경고 / 통신 단절 */
   --ok: #2f7d4f;
   --warn: #9c5f08; /* 흰 배경에서 글자 대비 4.5:1 이상이 되도록 어둡게 잡은 값 */
   --crit: #c8372d;
-  --lost: #8f8f8a;
-  --accent: #2b59c3;
+  --lost: #8a9299;
+  /* 강조색을 따로 두지 않고 먹색을 씀. 색은 상태와 공급원에만 쓰기 위해서 */
+  --accent: #14181c;
   /* 공급원 색: 임시값, 팀 확정 필요 */
   --src-grid: #5b6472;
   --src-solar: #d19a00;
@@ -71,7 +72,7 @@ img {
 
 /* 키보드로 이동할 때 현재 위치가 보이도록 */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
@@ -79,12 +80,26 @@ img {
 .card {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 4px;
   padding: 14px 16px;
 }
 
 .card-title {
-  font-size: 15px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* 화면 맨 위 제목 줄: "모니터링 › 통합" */
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.crumb-parent {
+  color: var(--mute);
+}
+.crumb-title {
+  font-size: 20px;
   font-weight: 700;
 }
 
@@ -93,7 +108,7 @@ img {
   font-variant-numeric: tabular-nums;
 }
 
-/* 값의 출처 표시 (실측 / 시뮬레이션 / 계산값 / 가상 / 추정) */
+/* 값의 출처 표시 (지금은 화면에서 쓰지 않음) */
 .tag {
   display: inline-block;
   padding: 0 6px;

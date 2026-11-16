@@ -45,6 +45,39 @@ let currentDecision = null // 가장 최근 추천 1건
 let nextDecisionId = 1
 let appliedDischargeKw = 0 // 운영자가 "적용"한 방전 전력
 
+// ---- 최근 이벤트 (모니터링 화면의 "최근 이벤트" 목록용) ----
+// level: CRITICAL(경고) | WARNING(주의) | NORMAL(정상) | INFO(그 밖의 기록)
+const events = []
+let nextEventId = 1
+let lastPeakStatus = null // 단계가 바뀌었는지 알기 위해 직전 단계를 기억
+
+function addEvent(level, message, date = new Date()) {
+  events.unshift({ id: nextEventId++, occurredAt: toLocalDateTime(date), level, message })
+  if (events.length > 50) events.pop()
+}
+
+// 화면을 처음 열었을 때 목록이 비어 있지 않도록, 조금 전에 있었던 일처럼 몇 건을 넣어 둠
+let eventsSeeded = false
+function seedEventsOnce(now) {
+  if (eventsSeeded) return
+  eventsSeeded = true
+  const ago = (minutes) => new Date(now.getTime() - minutes * 60000)
+  addEvent('INFO', '고요금 방전 추천을 넘김 (운영자)', ago(47))
+  addEvent('WARNING', '주의 단계 진입', ago(31))
+  addEvent('CRITICAL', '목표 초과 예상, 방전 500 kW 추천', ago(30))
+  addEvent('INFO', '방전 500 kW 적용 (운영자)', ago(29))
+  addEvent('NORMAL', '정상 단계로 돌아옴', ago(17))
+}
+
+// 1분 평균: 그 시각 직전 1분을 10초 간격으로 여섯 번 재서 평균 냄 (그래프가 톱니처럼 튀지 않게)
+function minuteAverage(valueAt, time) {
+  let total = 0
+  for (let step = 0; step < 6; step++) {
+    total += valueAt(new Date(time.getTime() - step * 10000))
+  }
+  return total / 6
+}
+
 const pad = (n) => String(n).padStart(2, '0')
 
 // 백엔드의 LocalDateTime과 같은 모양 (예: 2026-11-14T14:07:32)
@@ -95,6 +128,17 @@ function updateWindow(nowMs, gridKw) {
   const startMs = windowStartOf(nowMs)
 
   if (!windowState || windowState.startMs !== startMs) {
+    // 방금 끝난 구간이 있으면 결과를 이벤트로 남김
+    if (windowState) {
+      const endedKw = Math.round(windowState.demandKw)
+      const from = toLocalDateTime(new Date(windowState.startMs)).slice(11, 16)
+      const to = toLocalDateTime(new Date(startMs)).slice(11, 16)
+      addEvent(
+        endedKw > TARGET_PEAK_KW ? 'CRITICAL' : 'NORMAL',
+        `${from}–${to} 구간 ${endedKw.toLocaleString('ko-KR')} kW로 종료`,
+        new Date(startMs),
+      )
+    }
     // 새 구간 시작. 화면을 구간 중간에 열었다면 그 전까지는 15초 간격으로 계산해 채움
     windowState = { startMs, lastMs: startMs, demandKw: 0, points: [{ minute: 0, demandKw: 0 }] }
     for (let ms = startMs + 15000; ms < nowMs; ms += 15000) {
@@ -174,6 +218,13 @@ function updateDecision(now, predictedWithoutEss, socPercent, remainingMinutes) 
       { label: '목표 피크', value: TARGET_PEAK_KW, unit: 'kW' },
       { label: 'SOC', value: round1(socPercent), unit: '%' },
       { label: '최대 출력', value: MAX_DISCHARGE_KW, unit: 'kW' },
+      {
+        label: '배터리실 온도',
+        value: round1(24 + Math.sin(now.getTime() / 1000 / 200)),
+        unit: '℃',
+      },
+      { label: '날씨', value: '맑음', unit: '' },
+      { label: '기온', value: 18, unit: '℃' },
     ],
     status: 'RECOMMENDED',
     appliedBy: null,
@@ -182,6 +233,7 @@ function updateDecision(now, predictedWithoutEss, socPercent, remainingMinutes) 
   // 운영 이력 화면에 보이도록 기록 (대기 추천은 너무 많아져서 뺌)
   if (action !== 'IDLE') {
     sessionDecisions.push(currentDecision)
+    addEvent('CRITICAL', `목표 초과 예상, 방전 ${powerKw} kW 추천`, now)
   }
 }
 
@@ -346,6 +398,7 @@ function buildHistoryOfDay(date, now) {
         { label: '요금 시간대', value: tariffLabelAt(template.time), unit: '' },
         { label: '배터리실 온도', value: round1(22 + random(7) * 9), unit: '℃' },
         { label: '날씨', value: random(8) < 0.6 ? '맑음' : '흐림', unit: '' },
+        { label: '기온', value: Math.round(9 + random(9) * 11), unit: '℃' },
       ],
       status: template.status,
       appliedBy: template.status === 'AUTO' ? '자동 모드' : '운영자',
@@ -379,10 +432,33 @@ export async function fakeGetDecisions(from, to) {
   return list.concat(live).sort((a, b) => (a.decidedAt < b.decidedAt ? 1 : -1))
 }
 
+// 설비별 전력: 평소 전력을 비중대로 나누고, 브레이징로와 사출기에는 변동분을 더함
+// (태양광을 더하는 것은 어느 시간대에 열어도 피크 장면이 나오게 하려는 가짜 데이터용 처리)
+function equipmentsAt(seconds, solarKw) {
+  const baseKw = 1700 + solarKw
+  const motorKw = 2.2 + 0.3 * Math.sin(seconds / 5) // 1번 모터만 실측이라고 가정
+  const extraKw = {
+    'Z2-FURN': furnaceSwingAt(seconds),
+    'Z3-INJ1': injectionSwingAt(seconds) * 0.6,
+    'Z3-INJ2': injectionSwingAt(seconds) * 0.4,
+    'Z4-MOTOR1': motorKw,
+    'U-HVAC': -motorKw,
+  }
+  return EQUIPMENTS.map((item) => ({
+    id: item.id,
+    name: item.name,
+    loadKw: round1(baseKw * item.share + (extraKw[item.id] ?? 0)),
+    origin: item.id === 'Z4-MOTOR1' ? 'MEASURED' : 'SIMULATED',
+    // 설비 상태. 브레이징로는 전력이 크게 오를 때 "승온 중"으로 표시 (필드는 확인 필요)
+    state: item.id === 'Z2-FURN' && furnaceSwingAt(seconds) > 100 ? 'HEATING' : 'RUNNING',
+  }))
+}
+
 // GET /api/battery-statuses/latest 흉내
 export async function fakeGetLatestStatus() {
   failIfOffline()
   const now = new Date()
+  seedEventsOnce(now)
   const seconds = now.getTime() / 1000
   const hour = now.getHours() + now.getMinutes() / 60
 
@@ -412,23 +488,14 @@ export async function fakeGetLatestStatus() {
   if (predictedKw > TARGET_PEAK_KW) peakStatus = 'CRITICAL'
   else if (predictedKw >= WARN_KW) peakStatus = 'WARNING'
 
-  // 설비별 전력: 평소 전력을 비중대로 나누고, 브레이징로와 사출기에는 변동분을 더함
-  // (태양광을 더하는 것은 어느 시간대에 열어도 피크 장면이 나오게 하려는 가짜 데이터용 처리)
-  const baseKw = 1700 + solarKw
-  const motorKw = 2.2 + 0.3 * Math.sin(seconds / 5) // 1번 모터만 실측이라고 가정
-  const extraKw = {
-    'Z2-FURN': furnaceSwingAt(seconds),
-    'Z3-INJ1': injectionSwingAt(seconds) * 0.6,
-    'Z3-INJ2': injectionSwingAt(seconds) * 0.4,
-    'Z4-MOTOR1': motorKw,
-    'U-HVAC': -motorKw,
+  // 단계가 바뀌면 이벤트로 남김 (경고는 추천 이벤트와 겹치므로 주의·정상만)
+  if (lastPeakStatus && lastPeakStatus !== peakStatus) {
+    if (peakStatus === 'WARNING') addEvent('WARNING', '주의 단계 진입', now)
+    if (peakStatus === 'NORMAL') addEvent('NORMAL', '정상 단계로 돌아옴', now)
   }
-  const equipments = EQUIPMENTS.map((item) => ({
-    id: item.id,
-    name: item.name,
-    loadKw: round1(baseKw * item.share + (extraKw[item.id] ?? 0)),
-    origin: item.id === 'Z4-MOTOR1' ? 'MEASURED' : 'SIMULATED',
-  }))
+  lastPeakStatus = peakStatus
+
+  const equipments = equipmentsAt(seconds, solarKw)
 
   return {
     recordedAt: toLocalDateTime(now),
@@ -481,7 +548,8 @@ export async function fakeGetTodayStatuses() {
   const list = []
   for (let i = 0; time <= now; i++) {
     const solarKw = solarAt(time.getHours() + time.getMinutes() / 60)
-    const gridKw = 1650 + 220 * Math.sin(i / 5) + 60 * Math.sin(i / 2)
+    // 지난 구간의 15분 평균. 대부분 목표(1,800kW) 아래이고 가끔 가까이 올라가게 만든 값
+    const gridKw = 1570 + 165 * Math.sin(i / 5) + 45 * Math.sin(i / 2)
     list.push({
       recordedAt: toLocalDateTime(time),
       loadKw: Math.round(gridKw + solarKw),
@@ -510,8 +578,73 @@ export async function fakeUpdateDecision(id, status) {
     currentDecision.appliedBy = '운영자'
     currentDecision.appliedAt = toLocalDateTime(new Date())
     appliedDischargeKw = currentDecision.action === 'DISCHARGE' ? currentDecision.powerKw : 0
+    addEvent('INFO', `방전 ${currentDecision.powerKw} kW 적용 (운영자)`)
+  } else {
+    addEvent('INFO', '방전 추천을 넘김 (운영자)')
   }
   return { ...currentDecision }
+}
+
+// GET /api/battery-statuses?from=&to= 흉내: 최근 1시간, 1분 간격 (모니터링의 전력 추세 그래프용)
+export async function fakeGetRecentStatuses() {
+  failIfOffline()
+  const now = new Date()
+  const list = []
+  for (let minutesAgo = 60; minutesAgo >= 0; minutesAgo--) {
+    const time = new Date(now.getTime() - minutesAgo * 60000)
+    list.push({
+      recordedAt: toLocalDateTime(time),
+      gridKw: Math.round(minuteAverage((at) => gridWithoutEssAt(at.getTime() / 1000), time)),
+    })
+  }
+  return list
+}
+
+// GET /api/events?limit= 흉내: 최근 이벤트 (최신 순). 주소와 필드는 확인 필요
+export async function fakeGetRecentEvents(limit = 6) {
+  failIfOffline()
+  return events.slice(0, limit).map((item) => ({ ...item }))
+}
+
+// 구역 한 곳의 최근 1시간 전력과 오늘 요약 (계통도 화면의 오른쪽 상세용). 주소와 필드는 확인 필요
+export async function fakeGetZoneRecent(zoneId) {
+  failIfOffline()
+  const now = new Date()
+
+  // 어떤 시각에 그 구역이 쓴 전력 (그 구역 설비들의 합)
+  const zoneKwAt = (time) => {
+    const solarKw = solarAt(time.getHours() + time.getMinutes() / 60)
+    return equipmentsAt(time.getTime() / 1000, solarKw)
+      .filter((item) => item.id.startsWith(`${zoneId}-`))
+      .reduce((sum, item) => sum + item.loadKw, 0)
+  }
+
+  const points = []
+  for (let minutesAgo = 60; minutesAgo >= 0; minutesAgo--) {
+    const time = new Date(now.getTime() - minutesAgo * 60000)
+    points.push({
+      recordedAt: toLocalDateTime(time),
+      loadKw: Math.round(minuteAverage(zoneKwAt, time)),
+    })
+  }
+
+  // 오늘 00시부터 지금까지 5분 간격으로 훑어 최대·평균·사용량을 구함
+  const time = new Date(now)
+  time.setHours(0, 0, 0, 0)
+  const values = []
+  while (time <= now) {
+    values.push(zoneKwAt(time))
+    time.setMinutes(time.getMinutes() + 5)
+  }
+  const total = values.reduce((sum, value) => sum + value, 0)
+
+  return {
+    zoneId,
+    points,
+    todayMaxKw: Math.round(Math.max(...values)),
+    todayAvgKw: Math.round(total / values.length),
+    todayKwh: Math.round((total * 5) / 60),
+  }
 }
 
 // ---- 성적표 (GET /api/reports?month= 흉내) ----
@@ -598,7 +731,7 @@ export async function fakeGetReport(month) {
         action: 'DISCHARGE',
         powerKw: [350, 400, 500][Math.floor(random(8) * 3)],
         status: lowBattery ? 'APPLIED' : 'IGNORED',
-        cause: lowBattery ? '잔량 부족으로 방전 중단' : '추천을 무시함',
+        cause: lowBattery ? '잔량 부족으로 방전 중단' : '추천을 넘김',
       })
     }
 
