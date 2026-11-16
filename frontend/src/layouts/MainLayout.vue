@@ -189,6 +189,10 @@ const peakMark = computed(() => {
       <div v-if="!collapsed" class="foot">
         <!-- 시각은 브라우저 시계가 아니라 서버가 보낸 값(recordedAt)을 씀 -->
         <p class="clock num">{{ formatClock(realtimeStore.status?.recordedAt) }}</p>
+        <!-- 시계가 실제보다 빨리 가는 이유를 알려 줌 (시뮬레이션이 배속으로 돌 때만) -->
+        <p v-if="realtimeStore.status?.simulationSpeed > 1" class="speed">
+          시뮬레이션 <span class="num">{{ realtimeStore.status.simulationSpeed }}</span>배속
+        </p>
         <p v-if="realtimeStore.status" class="weather">
           {{ realtimeStore.status.weather.text }}
           <span class="num">{{ realtimeStore.status.weather.tempC }}℃</span>
@@ -363,6 +367,10 @@ const peakMark = computed(() => {
   font-size: 22px;
   font-weight: 700;
   line-height: 1.3;
+}
+.speed {
+  font-size: 12px;
+  color: var(--mute);
 }
 .weather {
   font-size: 13px;

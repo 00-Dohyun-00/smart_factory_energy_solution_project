@@ -3,7 +3,7 @@
 //
 // - 여기 있는 피크 예측·추천 계산은 화면 확인용으로 단순하게 흉내 낸 것입니다. 실제 계산은 백엔드가 합니다.
 // - 이 파일은 batteryStatusApi.js, batteryDecisionApi.js 에서만 불러옵니다. (Store, 화면에서 직접 쓰지 않음)
-// - 이 파일은 서버 역할이라 new Date()로 "서버 시각"을 만듭니다. 화면 코드에서는 new Date()를 쓰지 않습니다.
+// - 이 파일은 서버 역할이라 "서버 시각"을 직접 만듭니다(아래 simNow). 화면 코드에서는 new Date()를 쓰지 않습니다.
 
 const TARGET_PEAK_KW = 1800 // 목표 피크
 const WARN_KW = 1746 // 주의선 (목표의 97%, 기준은 확인 필요)
@@ -41,6 +41,22 @@ function failIfOffline() {
   }
 }
 
+// ---- 시뮬레이션 배속 ----
+// 가짜 서버의 시계를 실제보다 빠르게 돌립니다. 실제 속도로는 15분 구간 하나를 보려면 15분을 기다려야 하기 때문입니다.
+// 기본은 10배속: 15분 구간이 1분 30초 만에 지나가고, 화면이 5초마다 받을 때마다 서버 시각이 50초씩 흐릅니다.
+// 주소 뒤에 ?speed=30 처럼 적으면 배속을 바꿀 수 있습니다. (1 = 실제 속도, 최대 120)
+//   http://localhost:5173/?speed=1   → 실제 속도
+//   http://localhost:5173/?speed=30  → 30배속 (15분 구간이 30초)
+const DEFAULT_SPEED = 10
+const speedInAddress = Number(new URLSearchParams(window.location.search).get('speed'))
+const SIMULATION_SPEED =
+  speedInAddress >= 1 && speedInAddress <= 120 ? speedInAddress : DEFAULT_SPEED
+
+// 지금의 "서버 시각". 화면을 연 순간은 실제 시각과 같고, 그 뒤로는 배속만큼 빠르게 흐릅니다.
+function simNow() {
+  return new Date(openedAt + (Date.now() - openedAt) * SIMULATION_SPEED)
+}
+
 let currentDecision = null // 가장 최근 추천 1건
 let nextDecisionId = 1
 let appliedDischargeKw = 0 // 운영자가 "적용"한 방전 전력
@@ -51,7 +67,7 @@ const events = []
 let nextEventId = 1
 let lastPeakStatus = null // 단계가 바뀌었는지 알기 위해 직전 단계를 기억
 
-function addEvent(level, message, date = new Date()) {
+function addEvent(level, message, date = simNow()) {
   events.unshift({ id: nextEventId++, occurredAt: toLocalDateTime(date), level, message })
   if (events.length > 50) events.pop()
 }
@@ -414,7 +430,7 @@ function buildHistoryOfDay(date, now) {
 // GET /api/battery-decisions?from=&to= 흉내 (from, to 예: '2026-11-14'). 최신 순으로 돌려줌
 export async function fakeGetDecisions(from, to) {
   failIfOffline()
-  const now = new Date()
+  const now = simNow()
   let list = []
 
   const day = new Date(`${from}T00:00:00`)
@@ -454,10 +470,27 @@ function equipmentsAt(seconds, solarKw) {
   }))
 }
 
+// 오늘 0시부터 지금까지 쌓인 양 흉내: 15분마다의 값을 더해 kWh로 바꿈 (15분 = 0.25시간)
+// ESS 충전·방전량은 고정된 예시 값
+function todayEnergyAt(hour) {
+  let gridKwh = 0
+  let solarKwh = 0
+  for (let i = 0; i * 0.25 < hour; i++) {
+    gridKwh += (1570 + 165 * Math.sin(i / 5) + 45 * Math.sin(i / 2)) * 0.25
+    solarKwh += solarAt(i * 0.25) * 0.25
+  }
+  return {
+    gridKwh: Math.round(gridKwh),
+    solarKwh: Math.round(solarKwh),
+    dischargeKwh: 250,
+    chargeKwh: 300,
+  }
+}
+
 // GET /api/battery-statuses/latest 흉내
 export async function fakeGetLatestStatus() {
   failIfOffline()
-  const now = new Date()
+  const now = simNow()
   seedEventsOnce(now)
   const seconds = now.getTime() / 1000
   const hour = now.getHours() + now.getMinutes() / 60
@@ -510,6 +543,8 @@ export async function fakeGetLatestStatus() {
     pcsStatus: dischargeKw > 0 ? 'DISCHARGING' : 'STANDBY',
     sohPercent: 98.2,
     weather: { text: '맑음', tempC: 18 },
+    // 시뮬레이션 배속 (1이면 실제 속도). 화면에 "10배속"처럼 알려 주기 위한 값. 필드는 확인 필요
+    simulationSpeed: SIMULATION_SPEED,
     // 15분 피크
     windowStart: toLocalDateTime(windowStart),
     windowEnd: toLocalDateTime(windowEnd),
@@ -532,6 +567,8 @@ export async function fakeGetLatestStatus() {
       solarPercent: round1((solarKw / loadKw) * 100),
       essPercent: round1((dischargeKw / loadKw) * 100),
     },
+    // 오늘 0시부터 지금까지 쌓인 양 (kWh). 필드는 확인 필요
+    todayEnergy: todayEnergyAt(hour),
     equipments,
   }
 }
@@ -541,7 +578,7 @@ export async function fakeGetTodayStatuses() {
   if (fakeMode === 'chart-error') {
     throw new Error('서버에 연결할 수 없습니다.')
   }
-  const now = new Date()
+  const now = simNow()
   const time = new Date(now)
   time.setHours(0, 0, 0, 0)
 
@@ -576,7 +613,7 @@ export async function fakeUpdateDecision(id, status) {
   currentDecision.status = status
   if (status === 'APPLIED') {
     currentDecision.appliedBy = '운영자'
-    currentDecision.appliedAt = toLocalDateTime(new Date())
+    currentDecision.appliedAt = toLocalDateTime(simNow())
     appliedDischargeKw = currentDecision.action === 'DISCHARGE' ? currentDecision.powerKw : 0
     addEvent('INFO', `방전 ${currentDecision.powerKw} kW 적용 (운영자)`)
   } else {
@@ -588,7 +625,7 @@ export async function fakeUpdateDecision(id, status) {
 // GET /api/battery-statuses?from=&to= 흉내: 최근 1시간, 1분 간격 (모니터링의 전력 추세 그래프용)
 export async function fakeGetRecentStatuses() {
   failIfOffline()
-  const now = new Date()
+  const now = simNow()
   const list = []
   for (let minutesAgo = 60; minutesAgo >= 0; minutesAgo--) {
     const time = new Date(now.getTime() - minutesAgo * 60000)
@@ -606,10 +643,10 @@ export async function fakeGetRecentEvents(limit = 6) {
   return events.slice(0, limit).map((item) => ({ ...item }))
 }
 
-// 구역 한 곳의 최근 1시간 전력과 오늘 요약 (계통도 화면의 오른쪽 상세용). 주소와 필드는 확인 필요
+// 구역 한 곳의 최근 1시간 전력과 오늘 요약 (설비 모니터링 화면의 오른쪽 상세용). 주소와 필드는 확인 필요
 export async function fakeGetZoneRecent(zoneId) {
   failIfOffline()
-  const now = new Date()
+  const now = simNow()
 
   // 어떤 시각에 그 구역이 쓴 전력 (그 구역 설비들의 합)
   const zoneKwAt = (time) => {
@@ -658,7 +695,7 @@ const ESS_CAPACITY_KWH = 1000
 // month 예: '2026-11'. 이번 달이면 오늘까지, 지난 달이면 한 달 전체를 돌려줌
 export async function fakeGetReport(month) {
   failIfOffline()
-  const now = new Date()
+  const now = simNow()
   const thisMonth = toLocalDateTime(now).slice(0, 7)
   const [year, monthNumber] = month.split('-').map(Number)
   const daysInMonth = new Date(year, monthNumber, 0).getDate()
@@ -808,5 +845,224 @@ export async function fakeGetReport(month) {
       emissionFactor: EMISSION_FACTOR,
       carbonTon: round1((selfUseKwh * EMISSION_FACTOR) / 1000),
     },
+  }
+}
+
+// ---- 분석 > 추이 분석 ----
+// 날씨에 따라 태양광이 덜 나오게 하는 비율 (가짜 데이터용)
+const WEATHER_TEXTS = ['맑음', '맑음', '흐림', '맑음', '비', '흐림', '맑음']
+const SOLAR_BY_WEATHER = { 맑음: 1, 흐림: 0.55, 비: 0.2 }
+const SOC_LOW_LIMIT = 20 // 잔량 하한 (%)
+const SOC_HIGH_LIMIT = 90 // 잔량 상한 (%)
+const ROOM_TEMP_LIMIT_C = 35 // 배터리실 온도 제한 (℃)
+const SLOTS_PER_INTERVAL = { QUARTER: 1, HOUR: 4, DAY: 96 } // 15분 칸 몇 개를 하나로 묶는지
+
+// GET /api/analyses/trend?from=&to=&interval= 흉내 (주소와 필드는 확인 필요)
+// from, to 예: '2026-11-10' / interval: 'QUARTER'(15분) | 'HOUR'(1시간) | 'DAY'(1일)
+// 요약·시간대별 평균·처리별 결과는 모두 여기(백엔드 역할)에서 계산해서 줍니다.
+export async function fakeGetTrendAnalysis(from, to, interval) {
+  failIfOffline()
+  const now = simNow()
+  const end = new Date(`${to}T00:00:00`)
+  end.setDate(end.getDate() + 1)
+  const last = end < now ? end : now // 아직 오지 않은 시간은 만들지 않음
+
+  // 1) 15분 간격의 원본 값 만들기
+  const raw = []
+  const weather = []
+  let socPercent = 62
+  const time = new Date(`${from}T00:00:00`)
+  for (let count = 0; time < last && count < 96 * 62; count++) {
+    const date = toLocalDateTime(time).slice(0, 10)
+    const daySeed = Number(date.replaceAll('-', ''))
+    const hour = time.getHours() + time.getMinutes() / 60
+    const slot = time.getHours() * 4 + time.getMinutes() / 15
+    const weatherText = WEATHER_TEXTS[daySeed % 7]
+    if (!weather.length || weather[weather.length - 1].date !== date) {
+      weather.push({ date, text: weatherText })
+    }
+
+    const solarKw = solarAt(hour) * SOLAR_BY_WEATHER[weatherText]
+    // ESS가 없을 때 한전에서 사야 하는 전력: 하루 주기 + 피크가 잘 생기는 시각에 더 올라감
+    const busy = BUSY_HOURS.includes(time.getHours())
+    const gridBase =
+      1500 +
+      190 * Math.sin(((hour - 3) / 24) * 2 * Math.PI) +
+      (busy ? 200 : 0) +
+      (fakeRandom(daySeed * 100 + slot) - 0.5) * 120
+
+    // ESS: 새벽(경부하)에 충전(-), 피크가 잘 생기는 시각에 방전(+). 잔량이 범위를 벗어나면 멈춤
+    let essKw = 0
+    if (hour >= 1 && hour < 4) essKw = -300
+    if (busy && fakeRandom(daySeed * 7 + time.getHours()) > 0.25) essKw = 300
+    // 15분 동안 충전·방전하면 잔량이 얼마나 바뀌는지 보고, 하한·상한을 넘게 되면 하지 않음
+    const socChange = -((essKw * 0.25) / ESS_CAPACITY_KWH) * 100
+    if (socPercent + socChange < SOC_LOW_LIMIT || socPercent + socChange > SOC_HIGH_LIMIT) {
+      essKw = 0
+    } else {
+      socPercent += socChange
+    }
+
+    raw.push({
+      recordedAt: toLocalDateTime(time),
+      hour: time.getHours(),
+      loadKw: gridBase + solarKw,
+      gridKw: gridBase - essKw, // 방전하면 덜 사고, 충전하면 더 삼
+      solarKw,
+      essKw,
+      socPercent,
+      roomTempC:
+        23 +
+        3 * Math.sin(((hour - 10) / 24) * 2 * Math.PI) +
+        (essKw !== 0 ? 2.2 : 0) +
+        fakeRandom(daySeed) * 3,
+      outsideTempC:
+        12 + 6 * Math.sin(((hour - 9) / 24) * 2 * Math.PI) - (weatherText === '비' ? 4 : 0),
+    })
+    time.setMinutes(time.getMinutes() + 15)
+  }
+
+  // 2) 고른 간격으로 묶어 평균 냄 (그래프용)
+  const size = SLOTS_PER_INTERVAL[interval] ?? 4
+  const average = (list, field) => list.reduce((sum, item) => sum + item[field], 0) / list.length
+  const points = []
+  for (let index = 0; index < raw.length; index += size) {
+    const group = raw.slice(index, index + size)
+    points.push({
+      recordedAt: group[0].recordedAt,
+      loadKw: Math.round(average(group, 'loadKw')),
+      gridKw: Math.round(average(group, 'gridKw')),
+      solarKw: Math.round(average(group, 'solarKw')),
+      essKw: Math.round(average(group, 'essKw')),
+      socPercent: round1(average(group, 'socPercent')),
+      roomTempC: round1(average(group, 'roomTempC')),
+      outsideTempC: round1(average(group, 'outsideTempC')),
+    })
+  }
+
+  // 3) 기간 요약과 눈에 띄는 구간
+  // field 값이 가장 큰(또는 작은) 기록 하나를 고름
+  const pick = (list, field, isBetter) =>
+    list.reduce(
+      (best, item) => (best === null || isBetter(item[field], best[field]) ? item : best),
+      null,
+    )
+  const bigger = (a, b) => a > b
+  const smaller = (a, b) => a < b
+  const maxGrid = pick(raw, 'gridKw', bigger)
+  const minGrid = pick(raw, 'gridKw', smaller)
+  const minSoc = pick(raw, 'socPercent', smaller)
+  const maxSoc = pick(raw, 'socPercent', bigger)
+  const maxRoom = pick(raw, 'roomTempC', bigger)
+  // 한낮(12시대)에 태양광이 가장 적게 나온 때
+  const minSolar = pick(
+    raw.filter((item) => item.hour === 12),
+    'solarKw',
+    smaller,
+  )
+  // kW 값을 15분(0.25시간)씩 더해 kWh로 바꿈
+  const sumKwh = (valueOf) => raw.reduce((sum, item) => sum + valueOf(item) * 0.25, 0)
+  const loadKwh = sumKwh((item) => item.loadKw)
+  const solarKwh = sumKwh((item) => item.solarKw)
+
+  let summary = null
+  const highlights = []
+  if (raw.length) {
+    summary = {
+      maxPeakKw: Math.round(maxGrid.gridKw),
+      maxPeakAt: maxGrid.recordedAt,
+      avgGridKw: Math.round(average(raw, 'gridKw')),
+      solarKwh: Math.round(solarKwh),
+      solarPercentOfLoad: round1((solarKwh / loadKwh) * 100),
+      dischargeKwh: Math.round(sumKwh((item) => Math.max(item.essKw, 0))),
+      chargeKwh: Math.round(sumKwh((item) => Math.max(-item.essKw, 0))),
+      efficiencyPercent: 89.5,
+      socMinPercent: round1(minSoc.socPercent),
+      socMinAt: minSoc.recordedAt,
+      socMaxPercent: round1(maxSoc.socPercent),
+      roomTempMaxC: round1(maxRoom.roomTempC),
+      roomTempMaxAt: maxRoom.recordedAt,
+    }
+    highlights.push({
+      at: maxGrid.recordedAt,
+      label: '15분 피크 최대',
+      value: Math.round(maxGrid.gridKw),
+      unit: 'kW',
+      level: maxGrid.gridKw > TARGET_PEAK_KW ? 'CRITICAL' : 'INFO',
+    })
+    highlights.push({
+      at: minSoc.recordedAt,
+      label: '배터리 잔량 최저',
+      value: round1(minSoc.socPercent),
+      unit: '%',
+      level: 'INFO',
+    })
+    highlights.push({
+      at: maxRoom.recordedAt,
+      label: '배터리실 온도 최고',
+      value: round1(maxRoom.roomTempC),
+      unit: '℃',
+      level: 'INFO',
+    })
+    if (minSolar) {
+      highlights.push({
+        at: minSolar.recordedAt,
+        label: '한낮 태양광 발전 최저',
+        value: Math.round(minSolar.solarKw),
+        unit: 'kW',
+        level: 'INFO',
+      })
+    }
+    highlights.push({
+      at: minGrid.recordedAt,
+      label: '한전 구매전력 최저',
+      value: Math.round(minGrid.gridKw),
+      unit: 'kW',
+      level: 'INFO',
+    })
+  }
+
+  // 4) 시각(0~23시)별 평균 한전 구매전력과 그 시각의 요금 시간대
+  const hourly = []
+  for (let hour = 0; hour < 24; hour++) {
+    const list = raw.filter((item) => item.hour === hour)
+    const clock = `${pad(hour)}:00`
+    hourly.push({
+      hour,
+      avgGridKw: list.length ? Math.round(average(list, 'gridKw')) : null,
+      period: TARIFF_PERIODS.find((item) => item.from <= clock && clock < item.to).period,
+    })
+  }
+
+  // 5) 방전 추천을 처리(적용·자동·넘김)별로 묶은 결과. 추천 이력과 같은 데이터에서 셈
+  const decisions = (await fakeGetDecisions(from, to)).filter(
+    (item) => item.action === 'DISCHARGE' && item.resultStatus,
+  )
+  const byStatus = ['APPLIED', 'AUTO', 'IGNORED'].map((status) => {
+    const list = decisions.filter((item) => item.status === status)
+    const defended = list.filter((item) => item.resultStatus === 'DEFENDED').length
+    return {
+      status,
+      count: list.length,
+      defendedCount: defended,
+      defendedPercent: list.length ? round1((defended / list.length) * 100) : null,
+      avgResultPeakKw: list.length ? Math.round(average(list, 'resultPeakKw')) : null,
+    }
+  })
+
+  return {
+    from,
+    to,
+    interval,
+    targetPeakKw: TARGET_PEAK_KW,
+    socLowLimit: SOC_LOW_LIMIT,
+    socHighLimit: SOC_HIGH_LIMIT,
+    roomTempLimitC: ROOM_TEMP_LIMIT_C,
+    summary,
+    points,
+    weather,
+    hourly,
+    byStatus,
+    highlights,
   }
 }
