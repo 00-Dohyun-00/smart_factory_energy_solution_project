@@ -1,8 +1,8 @@
 <!--
   모니터링 > 통합
-  1줄: 실시간 전력 상태 · 최근 1시간 전력 추세
-  2줄: 지금 15분 구간 · 금일 피크 차트 · ESS 추천
-  3줄: 지금 많이 쓰는 설비 · 이번 달 부하 시간대 사용량 · 이번 달 피크 · 최근 이벤트
+  1줄: KPI 4개 (공장 소비전력 · 태양광 발전량 · 배터리 잔량 · 한전 구매전력)
+  2줄: 지금 15분 구간(피크 게이지) · ESS 추천
+  3줄: 오늘 전력 추이 · 공급원 흐름
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
@@ -10,71 +10,27 @@ import Chart from '@/components/Chart.vue'
 import EssAdviceCard from '@/components/EssAdviceCard.vue'
 import PeakWindowCard from '@/components/PeakWindowCard.vue'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
-import { useReportStore } from '@/stores/useReportStore'
-import {
-  formatClock,
-  formatHourMinute,
-  formatInteger,
-  formatKw,
-  formatMonthDayTime,
-  formatOneDecimal,
-} from '@/utils/format'
+import { formatHourMinute, formatInteger, formatKw, formatOneDecimal } from '@/utils/format'
 
 const realtimeStore = useRealtimeStore()
-const reportStore = useReportStore()
+
+const PCS_LABELS = { DISCHARGING: '방전 중', CHARGING: '충전 중', STANDBY: '대기' }
 
 const busy = ref(false) // 적용/넘기기 요청 중
 const actionError = ref('') // 적용/넘기기 실패 메시지
 
 const status = computed(() => realtimeStore.status)
 
-// 최신 상태·추천·이벤트는 공통 틀(MainLayout)이 5초마다 받아 오므로, 여기서는 그래프용 목록만 받음
+// 최신 상태·추천은 공통 틀(MainLayout)이 5초마다 받아 오므로, 여기서는 그래프용 목록만 받음
 onMounted(() => {
   realtimeStore.fetchToday()
-  realtimeStore.fetchRecent()
 })
 
-// 15분 구간이 바뀌면 금일 피크 차트에 막대가 하나 늘어나므로 다시 받음
+// 15분 구간이 바뀌면 오늘 전력 추이에 점이 하나 늘어나므로 다시 받음
 watch(
   () => status.value?.windowStart,
   (now, before) => {
     if (now && before) realtimeStore.fetchToday()
-  },
-)
-
-// 1분이 지나면 전력 추세를 다시 받음 (서버 시각의 "분"이 바뀔 때)
-watch(
-  () => status.value?.recordedAt.slice(0, 16),
-  (now, before) => {
-    if (now && before) realtimeStore.fetchRecent()
-  },
-)
-
-// "이번 달" 카드에 쓸 성적표. 서버 시각으로 이번 달을 알게 되면 한 번 받음
-const serverMonth = computed(() => status.value?.recordedAt.slice(0, 7) ?? '')
-watch(
-  serverMonth,
-  (month) => {
-    if (month) reportStore.fetchReport(month)
-  },
-  { immediate: true },
-)
-const month = computed(() => (reportStore.report?.hasData ? reportStore.report : null))
-
-// "이번 달" 카드에 값이 없을 때 그 이유를 알려 주는 문구
-const monthMessage = computed(() => {
-  if (reportStore.errorMessage) return '이번 달 값을 불러오지 못했습니다.'
-  if (reportStore.report && !reportStore.report.hasData) return '이번 달 기록이 아직 없습니다.'
-  return '이번 달 값을 불러오는 중입니다.'
-})
-
-// 끊겼던 연결이 돌아오면, 받지 못했던 이번 달 값을 다시 받음
-watch(
-  () => realtimeStore.connected,
-  (connected) => {
-    if (connected && !reportStore.report && serverMonth.value) {
-      reportStore.fetchReport(serverMonth.value)
-    }
   },
 )
 
@@ -90,185 +46,204 @@ async function answerDecision(newStatus) {
   }
 }
 
-// ---- 표시용 비율 (백엔드 값 두 개를 나눈 것) ----
-// 한전 구매전력이 목표 피크의 몇 %인지
+// ---- KPI 4개 ----
+// 한전 구매전력이 목표 피크의 몇 %인지 (표시용 비율: 백엔드 값 두 개를 나눈 것)
 const gridPercent = computed(() =>
   status.value ? (status.value.gridKw / status.value.targetPeakKw) * 100 : null,
 )
-// 이번 구간 예상 평균이 목표보다 몇 % 높은지(+) 낮은지(-)
-const overPercent = computed(() => {
-  if (!status.value) return null
-  return ((status.value.predictedKw - status.value.targetPeakKw) / status.value.targetPeakKw) * 100
+
+const kpis = computed(() => {
+  const s = status.value
+  const over = gridPercent.value > 100
+  return [
+    {
+      key: 'load',
+      name: '공장 소비전력',
+      value: formatKw(s?.loadKw),
+      unit: 'kW',
+      sub: s
+        ? `한전 ${formatKw(s.gridKw)} + 태양광 ${formatKw(s.solarKw)} + ESS ${formatKw(s.dischargeKw)}`
+        : '',
+      // 막대: 공급원 비율 (백엔드가 준 값)
+      bars: s
+        ? [
+            { source: 'grid', width: s.sourceRatio.gridPercent },
+            { source: 'solar', width: s.sourceRatio.solarPercent },
+            { source: 'ess', width: s.sourceRatio.essPercent },
+          ]
+        : [],
+    },
+    {
+      key: 'solar',
+      name: '태양광 발전량',
+      value: formatKw(s?.solarKw),
+      unit: 'kW',
+      sub: s ? `공장 소비의 ${formatOneDecimal(s.sourceRatio.solarPercent)}%` : '',
+      bars: s ? [{ source: 'solar', width: s.sourceRatio.solarPercent }] : [],
+    },
+    {
+      key: 'ess',
+      name: '배터리 잔량 (SOC)',
+      value: formatOneDecimal(s?.socPercent),
+      unit: '%',
+      sub: s
+        ? `PCS ${PCS_LABELS[s.pcsStatus] ?? '—'}, 배터리실 ${formatOneDecimal(s.batteryTempC)}℃`
+        : '',
+      bars: s ? [{ source: 'ess', width: s.socPercent }] : [],
+    },
+    {
+      key: 'grid',
+      name: '한전 구매전력',
+      value: formatKw(s?.gridKw),
+      unit: 'kW',
+      sub: s
+        ? `목표 피크 ${formatKw(s.targetPeakKw)} kW의 ${formatOneDecimal(gridPercent.value)}%`
+        : '',
+      over, // 목표 피크를 넘으면 경고색
+      bars: s ? [{ source: over ? 'over' : 'grid', width: Math.min(100, gridPercent.value) }] : [],
+    },
+  ]
 })
 
-const PEAK_INFO = {
-  NORMAL: { shape: '●', label: '정상', className: 'ok' },
-  WARNING: { shape: '▲', label: '주의', className: 'warn' },
-  CRITICAL: { shape: '■', label: '경고', className: 'crit' },
-}
-const peakInfo = computed(() => {
-  if (!realtimeStore.connected || !status.value) {
-    return { shape: '◆', label: '통신 단절', className: 'lost' }
-  }
-  return PEAK_INFO[status.value.peakStatus]
+// ---- 공급원 흐름 ----
+const sources = computed(() => {
+  const s = status.value
+  return [
+    { key: 'grid', name: '한전', kw: s?.gridKw, percent: s?.sourceRatio.gridPercent, note: '구매' },
+    {
+      key: 'solar',
+      name: '태양광',
+      kw: s?.solarKw,
+      percent: s?.sourceRatio.solarPercent,
+      note: '발전',
+    },
+    {
+      key: 'ess',
+      name: 'ESS',
+      kw: s?.dischargeKw,
+      percent: s?.sourceRatio.essPercent,
+      note: PCS_LABELS[s?.pcsStatus] ?? '—',
+    },
+  ]
 })
 
-const sources = computed(() => [
-  { key: 'grid', name: '한전', kw: status.value?.gridKw },
-  { key: 'solar', name: '태양광', kw: status.value?.solarKw },
-  { key: 'ess', name: 'ESS', kw: status.value?.dischargeKw },
-])
+const totals = computed(() => {
+  const energy = status.value?.todayEnergy
+  return [
+    { label: '한전 구매', kwh: energy?.gridKwh },
+    { label: '태양광 발전', kwh: energy?.solarKwh },
+    { label: 'ESS 방전', kwh: energy?.dischargeKwh },
+    { label: 'ESS 충전', kwh: energy?.chargeKwh },
+  ]
+})
 
-// ---- 그래프 공통 ----
+// ---- 오늘 전력 추이 ----
 // ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
 const COLOR = {
   ink: '#14181c', // --ink
+  ink2: '#3c444c', // --ink-2
   mute: '#646e77', // --mute
   line: '#dde1e5', // --line
-  ok: '#2f7d4f', // --ok
-  warn: '#9c5f08', // --warn
   crit: '#c8372d', // --crit
-  lost: '#8a9299', // --lost
   grid: '#5b6472', // --src-grid
-}
-const stateColor = computed(() => COLOR[peakInfo.value.className])
-
-function targetLine(targetKw) {
-  return {
-    silent: true,
-    symbol: 'none',
-    lineStyle: { color: COLOR.ink, width: 2, type: 'solid' },
-    label: {
-      formatter: `목표 ${formatKw(targetKw)}`,
-      position: 'insideStartTop',
-      color: COLOR.ink,
-      fontWeight: 'bold',
-    },
-    data: [{ yAxis: targetKw }],
-  }
+  solar: '#d19a00', // --src-solar
 }
 
-const valueAxis = {
-  type: 'value',
-  axisLabel: { color: COLOR.mute },
-  splitLine: { lineStyle: { color: COLOR.line } },
-}
+// 가로축: 하루를 15분으로 나눈 96칸 ('00:00', '00:15', … '23:45')
+// 아직 오지 않은 시간은 값 없이 비워 두어, 하루 중 지금이 어디쯤인지 보이게 함
+const SLOTS = Array.from({ length: 96 }, (_, index) => {
+  const hour = String(Math.floor(index / 4)).padStart(2, '0')
+  const minute = String((index % 4) * 15).padStart(2, '0')
+  return `${hour}:${minute}`
+})
 
-// ---- 실시간 전력 추세 (최근 1시간) ----
 const trendOption = computed(() => {
-  const list = realtimeStore.recentStatuses
-  const values = list.map((item) => item.gridKw)
-  // 세로축을 값이 있는 범위 근처로 잡아 변화가 잘 보이게 함 (표시용 계산)
-  const lowest = Math.min(...values, status.value?.targetPeakKw ?? Infinity)
+  const list = realtimeStore.todayStatuses
+  const target = status.value?.targetPeakKw
+  const lastTime = list.length ? formatHourMinute(list[list.length - 1].recordedAt) : null
+
+  // 시각별 값을 96칸에 맞춰 넣음 (없는 칸은 null → 선을 그리지 않음)
+  const byTime = {}
+  for (const item of list) byTime[formatHourMinute(item.recordedAt)] = item
+  const values = (field) => SLOTS.map((time) => (byTime[time] ? byTime[time][field] : null))
+
+  // 요금이 비싼 시간대(최대부하)를 회색 띠로 표시. 시간대 구분은 백엔드가 준 값
+  const tariffAreas = (status.value?.tariff.periods ?? [])
+    .filter((item) => item.period === 'PEAK')
+    .map((item) => [
+      { xAxis: item.from, itemStyle: { color: 'rgba(20, 24, 28, 0.07)' } },
+      { xAxis: item.to === '24:00' ? '23:45' : item.to },
+    ])
+
+  const lineSeries = (name, field, color) => ({
+    name,
+    type: 'line',
+    showSymbol: false,
+    connectNulls: false,
+    data: values(field),
+    lineStyle: { color, width: 2.5 },
+    itemStyle: { color },
+  })
+
+  const load = lineSeries('공장 소비', 'loadKw', COLOR.ink)
+  const grid = lineSeries('한전 구매', 'gridKw', COLOR.grid)
+  const solar = lineSeries('태양광', 'solarKw', COLOR.solar)
+
+  // 목표 피크선과 요금 띠는 한전 구매 선에, "지금" 세로선은 공장 소비 선에 붙임
+  grid.markArea = { silent: true, data: tariffAreas }
+  if (target) {
+    grid.markLine = {
+      silent: true,
+      symbol: 'none',
+      lineStyle: { color: COLOR.crit, width: 2, type: 'solid' },
+      label: {
+        formatter: `목표 피크 ${formatKw(target)}`,
+        position: 'insideStartTop',
+        color: COLOR.crit,
+        fontWeight: 'bold',
+      },
+      data: [{ yAxis: target }],
+    }
+  }
+  if (lastTime) {
+    load.markLine = {
+      silent: true,
+      symbol: 'none',
+      lineStyle: { color: COLOR.ink2, width: 1, type: 'solid' },
+      label: { formatter: `지금 ${lastTime}`, position: 'end', color: COLOR.ink },
+      data: [{ xAxis: lastTime }],
+    }
+  }
+
   return {
     animation: false,
-    grid: { left: 52, right: 16, top: 14, bottom: 24 },
+    grid: { left: 52, right: 20, top: 40, bottom: 24 },
+    legend: {
+      right: 0,
+      top: 0,
+      icon: 'rect',
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: COLOR.ink2 },
+    },
     tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatKw(value)} kW` },
     xAxis: {
       type: 'category',
-      data: list.map((item) => formatHourMinute(item.recordedAt)),
+      data: SLOTS,
       boundaryGap: false,
       axisLine: { lineStyle: { color: COLOR.line } },
       axisTick: { show: false },
-      axisLabel: { color: COLOR.mute, interval: 14 },
-    },
-    yAxis: { ...valueAxis, min: Math.floor((lowest * 0.9) / 100) * 100 },
-    series: [
-      {
-        name: '한전 구매전력',
-        type: 'line',
-        showSymbol: false,
-        data: values,
-        lineStyle: { color: COLOR.grid, width: 2.5 },
-        itemStyle: { color: COLOR.grid },
-        markLine: status.value ? targetLine(status.value.targetPeakKw) : undefined,
-      },
-    ],
-  }
-})
-
-// ---- 금일 피크 차트 ----
-const times = computed(() =>
-  realtimeStore.todayStatuses.map((item) => formatHourMinute(item.recordedAt)),
-)
-
-// 요금이 비싼 시간대(최대부하)를 회색 띠로 표시. 시간대 구분은 백엔드가 준 값
-const tariffAreas = computed(() => {
-  const periods = status.value?.tariff.periods ?? []
-  const lastTime = times.value[times.value.length - 1]
-  return periods
-    .filter((item) => item.period === 'PEAK' && item.from <= lastTime)
-    .map((item) => [
-      { xAxis: item.from, itemStyle: { color: 'rgba(20, 24, 28, 0.07)' } },
-      // 아직 지나지 않은 시간은 그래프에 없으므로 마지막 시각까지만 칠함
-      { xAxis: item.to <= lastTime ? item.to : lastTime },
-    ])
-})
-
-const dayOption = computed(() => {
-  const list = realtimeStore.todayStatuses
-  const target = status.value?.targetPeakKw
-
-  // 마지막 막대는 아직 끝나지 않은 지금 구간이므로 예상 평균으로 그림
-  const bars = list.map((item, index) => {
-    const isNow = index === list.length - 1 && status.value
-    const value = isNow ? status.value.predictedKw : item.gridKw
-    let color = COLOR.grid
-    if (target && value > target) color = COLOR.crit
-    if (isNow) color = stateColor.value
-    return {
-      value,
-      itemStyle: { color },
-      label: { show: Boolean(isNow), position: 'top', formatter: '지금', color: COLOR.ink },
-    }
-  })
-
-  return {
-    animation: false,
-    grid: { left: 52, right: 16, top: 22, bottom: 24 },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'shadow' },
-      valueFormatter: (value) => `${formatKw(value)} kW`,
-    },
-    xAxis: {
-      type: 'category',
-      data: times.value,
-      axisLine: { lineStyle: { color: COLOR.line } },
-      axisTick: { show: false },
-      // 3시간마다 눈금 글자 (15분 막대 12개 = 3시간)
+      // 3시간마다 눈금 글자 (15분 칸 12개 = 3시간)
       axisLabel: { color: COLOR.mute, interval: (index) => index % 12 === 0 },
     },
-    yAxis: valueAxis,
-    series: [
-      {
-        name: '15분 평균',
-        type: 'bar',
-        barCategoryGap: '18%',
-        data: bars,
-        markArea: { silent: true, data: tariffAreas.value },
-        markLine: target ? targetLine(target) : undefined,
-      },
-    ],
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: COLOR.mute },
+      splitLine: { lineStyle: { color: COLOR.line } },
+    },
+    series: [load, grid, solar],
   }
 })
-
-// ---- 지금 많이 쓰는 설비: 많이 쓰는 순서로 5개 (표시용 정렬) ----
-const topEquipments = computed(() => {
-  const sorted = [...(status.value?.equipments ?? [])]
-    .sort((a, b) => b.loadKw - a.loadKw)
-    .slice(0, 5)
-  const highest = sorted.length ? sorted[0].loadKw : 1
-  return sorted.map((item) => ({ ...item, percent: (item.loadKw / highest) * 100 }))
-})
-
-// ---- 최근 이벤트 ----
-const EVENT_INFO = {
-  CRITICAL: { shape: '■', className: 'crit' },
-  WARNING: { shape: '▲', className: 'warn' },
-  NORMAL: { shape: '●', className: 'ok' },
-  INFO: { shape: '○', className: 'info' },
-}
 </script>
 
 <template>
@@ -285,106 +260,38 @@ const EVENT_INFO = {
 
     <!-- 서버 연결이 끊겼다는 알림은 공통 틀(MainLayout)이 모든 화면에 띄움 -->
 
-    <!-- 1줄 -->
-    <div class="row row-1">
-      <section class="card state">
-        <div class="card-head">
-          <h2 class="card-title">실시간 전력 상태</h2>
-          <span class="note">5초마다 갱신</span>
+    <!-- 1줄: KPI 4개 -->
+    <div class="row kpis">
+      <section v-for="kpi in kpis" :key="kpi.key" class="card kpi" :class="kpi.key">
+        <div class="kpi-top">
+          <span class="dot" aria-hidden="true"></span>
+          <h2 class="kpi-name">{{ kpi.name }}</h2>
         </div>
-        <p class="load">
-          <span class="load-value num">{{ formatKw(status?.loadKw) }}</span>
-          <span class="load-unit">kW</span>
-          <span class="load-label">공장 소비전력</span>
+        <p class="kpi-value" :class="{ over: kpi.over }">
+          <span class="num">{{ kpi.value }}</span>
+          <span class="kpi-unit">{{ kpi.unit }}</span>
         </p>
-        <div class="usage">
-          <span>
-            한전 구매 <span class="num">{{ formatKw(status?.gridKw) }}</span> kW, 목표 피크 대비
-          </span>
-          <strong class="num" :class="{ over: gridPercent > 100 }">
-            {{ formatOneDecimal(gridPercent) }} %
-          </strong>
-        </div>
+        <p class="kpi-sub num" :class="{ over: kpi.over }">{{ kpi.sub }}</p>
         <div class="track" aria-hidden="true">
           <span
+            v-for="bar in kpi.bars"
+            :key="bar.source"
             class="bar"
-            :class="{ over: gridPercent > 100 }"
-            :style="{ width: `${Math.min(100, gridPercent ?? 0)}%` }"
+            :class="bar.source"
+            :style="{ width: `${bar.width}%` }"
           ></span>
         </div>
-        <dl class="sources">
-          <div v-for="source in sources" :key="source.key" :class="source.key">
-            <dt><span class="dot" aria-hidden="true"></span>{{ source.name }}</dt>
-            <dd>
-              <span class="num">{{ formatKw(source.kw) }}</span> kW
-            </dd>
-          </div>
-        </dl>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <h2 class="card-title">실시간 전력 추세</h2>
-          <span class="note">최근 1시간, 한전 구매전력 (kW)</span>
-        </div>
-        <Chart v-if="realtimeStore.recentStatuses.length" :option="trendOption" :height="176" />
-        <p v-else class="empty tall">불러오는 중입니다.</p>
       </section>
     </div>
 
-    <!-- 2줄 -->
-    <div class="row row-2">
-      <PeakWindowCard :status="status" :stale="!realtimeStore.connected" />
-
-      <section class="card">
-        <div class="card-head">
-          <h2 class="card-title">금일 피크 차트</h2>
-          <span class="note">막대 하나가 15분 평균 (kW), 회색 띠는 요금 비싼 시간</span>
-        </div>
-        <dl class="stats">
-          <div>
-            <dt>최근 갱신</dt>
-            <dd class="num">{{ formatClock(status?.recordedAt) }}</dd>
-          </div>
-          <div>
-            <dt>현재 단계</dt>
-            <dd :class="peakInfo.className">
-              <span aria-hidden="true">{{ peakInfo.shape }}</span> {{ peakInfo.label }}
-            </dd>
-          </div>
-          <div>
-            <dt>목표 대비</dt>
-            <dd class="num" :class="{ crit: overPercent > 0 }">
-              {{ overPercent > 0 ? '+' : '' }}{{ formatOneDecimal(overPercent) }} %
-            </dd>
-          </div>
-          <div>
-            <dt>오늘 최대</dt>
-            <dd>
-              <span class="num">{{ formatKw(status?.todayPeakKw) }}</span> kW
-            </dd>
-          </div>
-          <div>
-            <dt>이번 달 최대</dt>
-            <dd>
-              <span class="num">{{ formatKw(month?.summary.monthPeakKw) }}</span> kW
-            </dd>
-          </div>
-        </dl>
-        <Chart v-if="realtimeStore.todayStatuses.length" :option="dayOption" :height="244" />
-        <p v-else-if="realtimeStore.todayLoading" class="empty taller">불러오는 중입니다.</p>
-        <p v-else-if="realtimeStore.todayError" class="empty taller" role="alert">
-          그래프를 불러오지 못했습니다. ({{ realtimeStore.todayError }})
-          <button class="text-button" @click="realtimeStore.fetchToday()">다시 시도</button>
-        </p>
-        <p v-else class="empty taller">오늘 기록이 아직 없습니다.</p>
-      </section>
+    <!-- 2줄: 15분 피크 + ESS 추천 -->
+    <div class="row middle">
+      <PeakWindowCard class="peak" :status="status" :stale="!realtimeStore.connected" />
 
       <div class="advice-wrap">
         <EssAdviceCard
           class="advice"
           :decision="realtimeStore.decision"
-          :status="status"
           :busy="busy"
           :offline="!realtimeStore.connected"
           @apply="answerDecision('APPLIED')"
@@ -394,126 +301,62 @@ const EVENT_INFO = {
       </div>
     </div>
 
-    <!-- 3줄 -->
-    <div class="row row-3">
-      <section class="card">
+    <!-- 3줄: 오늘 전력 추이 + 공급원 흐름 -->
+    <div class="row bottom">
+      <section class="card trend">
         <div class="card-head">
-          <h2 class="card-title">지금 많이 쓰는 설비</h2>
-          <span class="note">kW</span>
+          <h2 class="card-title">오늘 전력 추이</h2>
+          <span class="note">15분 평균 (kW), 회색 띠는 요금 비싼 시간</span>
         </div>
-        <ol v-if="topEquipments.length" class="rank">
-          <li v-for="(item, index) in topEquipments" :key="item.id">
-            <!-- 설비를 누르면 계통도에서 그 설비가 있는 구역이 펼쳐진 채로 열림 -->
-            <RouterLink
-              class="rank-link"
-              :to="{ path: '/monitoring/diagram', query: { zone: item.id.split('-')[0] } }"
-              :title="`${item.name}: 계통도에서 보기`"
-            >
-              <span class="rank-no num">{{ index + 1 }}</span>
-              <span class="rank-name">{{ item.name }}</span>
-              <span class="track thin" aria-hidden="true">
-                <span class="bar dark" :style="{ width: `${item.percent}%` }"></span>
-              </span>
-              <strong class="num">{{ formatKw(item.loadKw) }}</strong>
-              <!-- 누르면 다른 화면으로 간다는 표시 -->
-              <span class="rank-go" aria-hidden="true">›</span>
-            </RouterLink>
-          </li>
-        </ol>
-        <p v-else class="empty">설비 값을 아직 받지 못했습니다.</p>
+        <Chart v-if="realtimeStore.todayStatuses.length" :option="trendOption" :height="330" />
+        <p v-else-if="realtimeStore.todayLoading" class="empty">불러오는 중입니다.</p>
+        <p v-else-if="realtimeStore.todayError" class="empty" role="alert">
+          그래프를 불러오지 못했습니다. ({{ realtimeStore.todayError }})
+          <button class="text-button" @click="realtimeStore.fetchToday()">다시 시도</button>
+        </p>
+        <p v-else class="empty">오늘 기록이 아직 없습니다.</p>
       </section>
 
-      <section class="card">
+      <section class="card flow">
         <div class="card-head">
-          <h2 class="card-title">이번 달 부하 시간대 사용량</h2>
+          <h2 class="card-title">공급원 흐름</h2>
+          <span class="note">지금 공장으로 들어오는 전기</span>
         </div>
-        <ul v-if="month" class="tariffs">
-          <li v-for="item in month.bill.byTariff" :key="item.period">
-            <div class="tariff-text">
-              <strong>{{ item.label }}</strong>
-              <span class="num">
-                {{ formatInteger(item.kwh) }} kWh, {{ formatOneDecimal(item.percent) }}%
+
+        <ul class="sources">
+          <li v-for="source in sources" :key="source.key" :class="source.key">
+            <span class="dot" aria-hidden="true"></span>
+            <strong class="source-name">{{ source.name }}</strong>
+            <span class="source-kw"
+              ><span class="num">{{ formatKw(source.kw) }}</span> kW</span
+            >
+            <span class="track thick" aria-hidden="true">
+              <span class="bar" :class="source.key" :style="{ width: `${source.percent ?? 0}%` }">
               </span>
-            </div>
-            <div class="track thin" aria-hidden="true">
-              <span class="bar dark" :style="{ width: `${item.percent}%` }"></span>
-            </div>
+            </span>
+            <span class="source-percent num">{{ formatOneDecimal(source.percent) }}%</span>
+            <span class="source-note">{{ source.note }}</span>
           </li>
         </ul>
-        <p v-else class="empty">
-          {{ monthMessage }}
-          <button
-            v-if="reportStore.errorMessage"
-            class="text-button"
-            @click="reportStore.fetchReport(serverMonth)"
-          >
-            다시 시도
-          </button>
-        </p>
-      </section>
 
-      <section class="card month">
-        <div class="card-head">
-          <h2 class="card-title">이번 달 피크</h2>
-          <RouterLink to="/report" class="text-button">월간 성적표 보기</RouterLink>
-        </div>
-        <template v-if="month">
-          <p class="month-peak" :class="{ over: month.summary.monthPeakKw > month.targetPeakKw }">
-            <span class="num">{{ formatKw(month.summary.monthPeakKw) }}</span>
-            <span class="load-unit">kW</span>
-          </p>
-          <p class="month-note">
-            가장 높았던 피크
-            <span class="num"
-              >({{ formatMonthDayTime(month.summary.monthPeakAt).slice(0, 11) }})</span
-            >, 목표 <span class="num">{{ formatKw(month.targetPeakKw) }}</span> kW
-          </p>
-          <dl class="stats bottom">
-            <div>
-              <dt>피크 방어</dt>
-              <dd class="num">
-                {{ month.summary.defenseSuccess }} / {{ month.summary.defenseTotal }}회
-              </dd>
-            </div>
-            <div>
-              <dt>성공률</dt>
-              <dd class="num">{{ formatOneDecimal(month.summary.defenseSuccessPercent) }} %</dd>
-            </div>
-            <div>
-              <dt>평균 저감</dt>
+        <p class="join" aria-hidden="true">▼ 합쳐서</p>
+        <p class="factory">
+          <strong>공장 소비전력</strong>
+          <span class="factory-value num">{{ formatKw(status?.loadKw) }}</span>
+          <span>kW</span>
+        </p>
+
+        <div class="totals-wrap">
+          <h3 class="totals-title">오늘 누적 (00:00부터)</h3>
+          <dl class="totals">
+            <div v-for="item in totals" :key="item.label">
+              <dt>{{ item.label }}</dt>
               <dd>
-                <span class="num">{{ formatKw(month.summary.avgReductionKw) }}</span> kW
+                <span class="num">{{ formatInteger(item.kwh) }}</span> kWh
               </dd>
             </div>
           </dl>
-        </template>
-        <p v-else class="empty">
-          {{ monthMessage }}
-          <button
-            v-if="reportStore.errorMessage"
-            class="text-button"
-            @click="reportStore.fetchReport(serverMonth)"
-          >
-            다시 시도
-          </button>
-        </p>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <h2 class="card-title">최근 이벤트</h2>
-          <RouterLink to="/logs" class="text-button">추천 이력 보기</RouterLink>
         </div>
-        <ul v-if="realtimeStore.events.length" class="events">
-          <li v-for="event in realtimeStore.events" :key="event.id">
-            <span class="event-time num">{{ formatHourMinute(event.occurredAt) }}</span>
-            <span class="event-text" :class="EVENT_INFO[event.level].className">
-              <span aria-hidden="true">{{ EVENT_INFO[event.level].shape }}</span>
-              {{ event.message }}
-            </span>
-          </li>
-        </ul>
-        <p v-else class="empty">아직 기록된 이벤트가 없습니다.</p>
       </section>
     </div>
   </div>
@@ -538,22 +381,10 @@ const EVENT_INFO = {
   color: var(--ink);
 }
 
-/* 줄 배치 */
 .row {
-  display: grid;
+  display: flex;
   gap: 16px;
 }
-.row-1 {
-  grid-template-columns: 480px minmax(0, 1fr);
-}
-.row-2 {
-  grid-template-columns: 320px minmax(0, 1fr) 380px;
-}
-.row-3 {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  flex: 1;
-}
-
 .card-head {
   display: flex;
   align-items: baseline;
@@ -566,7 +397,6 @@ const EVENT_INFO = {
   color: var(--mute);
 }
 .text-button {
-  margin-left: auto;
   padding: 0;
   background: none;
   border: 0;
@@ -579,99 +409,16 @@ const EVENT_INFO = {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  height: 120px;
+  height: 330px;
   color: var(--mute);
-}
-.empty.tall {
-  height: 176px;
-}
-.empty.taller {
-  height: 244px;
-}
-.empty .text-button {
-  margin-left: 0;
 }
 
-/* 공통 막대 */
-.track {
-  height: 12px;
-  background: var(--line);
-}
-.track.thin {
-  height: 10px;
-}
-.bar {
-  display: block;
-  height: 100%;
-  background: var(--ok);
-  transition: width 0.4s ease;
-}
-.bar.over {
-  background: var(--crit);
-}
-.bar.dark {
-  background: var(--ink-2);
-}
-
-/* 실시간 전력 상태 */
-.state {
-  display: flex;
-  flex-direction: column;
-}
-.load {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.load-value {
-  font-size: 48px;
-  font-weight: 700;
-  line-height: 1.1;
-}
-.load-unit {
-  font-size: 18px;
-  color: var(--ink-2);
-}
-.load-label {
-  color: var(--mute);
-}
-.usage {
-  display: flex;
-  align-items: baseline;
-  margin: 6px 0 4px;
-  font-size: 13px;
-  color: var(--ink-2);
-}
-.usage strong {
-  margin-left: auto;
-  font-size: 16px;
-  color: var(--ink);
-}
-.usage strong.over {
-  color: var(--crit);
-}
-.sources {
-  display: flex;
-  gap: 32px;
-  margin-top: auto;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-.sources dt {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--mute);
-}
-.sources dd {
-  font-size: 18px;
-  font-weight: 700;
-}
+/* 공급원 색 */
 .dot {
+  flex: none;
   width: 10px;
   height: 10px;
-  background: var(--source);
+  background: var(--source, var(--ink));
 }
 .grid {
   --source: var(--src-grid);
@@ -683,48 +430,89 @@ const EVENT_INFO = {
   --source: var(--src-ess);
 }
 
-/* 금일 피크 차트 위의 요약 숫자 */
-.stats {
+/* 공통 막대 */
+.track {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 28px;
-  margin-bottom: 4px;
+  height: 8px;
+  background: var(--line);
 }
-.stats dt {
-  font-size: 12px;
-  color: var(--mute);
+.track.thick {
+  height: 12px;
 }
-.stats dd {
-  font-size: 17px;
-  font-weight: 700;
-  /* 숫자와 단위가 두 줄로 갈라지지 않게 */
-  white-space: nowrap;
+.bar {
+  display: block;
+  height: 100%;
+  background: var(--source);
+  transition: width 0.4s ease;
 }
-.stats dd.ok {
-  color: var(--ok);
-}
-.stats dd.warn {
-  color: var(--warn);
-}
-.stats dd.crit {
-  color: var(--crit);
-}
-/* 통신 단절: 연한 회색(--lost)은 흰 배경에서 글자로 읽기 어려워 진한 회색을 씀 */
-.stats dd.lost {
-  color: var(--ink-2);
-}
-.stats.bottom {
-  gap: 28px;
-  margin-top: auto;
-  margin-bottom: 0;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
+.bar.over {
+  background: var(--crit);
 }
 
+/* 1줄: KPI 4개. 낮게 잡아 아래 줄이 첫 화면에 들어오게 함 */
+.kpi {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 16px;
+}
+/* 공장 소비전력은 특정 공급원이 아니므로 점을 먹색으로 */
+.kpi.load {
+  --source: var(--ink);
+}
+.kpi-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.kpi-name {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.kpi-sub {
+  margin-bottom: 6px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kpi-sub.over {
+  font-weight: 700;
+  color: var(--crit);
+}
+.kpi-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.kpi-value.over {
+  color: var(--crit);
+}
+.kpi-unit {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+/* 2줄 */
+.peak {
+  flex: 1;
+  min-width: 0;
+}
 .advice-wrap {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 8px;
+  width: 600px;
 }
 .advice {
   flex: 1;
@@ -733,105 +521,110 @@ const EVENT_INFO = {
   color: var(--crit);
 }
 
-/* 지금 많이 쓰는 설비 */
-.rank {
+/* 3줄 */
+.bottom {
+  flex: 1;
+}
+.trend {
+  flex: 1;
+  min-width: 0;
+}
+.flow {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 12px;
+  width: 600px;
+}
+.flow .card-head {
+  margin-bottom: 0;
+}
+.sources {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 12px;
 }
-.rank-link {
+.sources li {
   display: grid;
-  grid-template-columns: 16px 88px minmax(0, 1fr) 48px 8px;
+  grid-template-columns: 10px 52px 104px minmax(0, 1fr) 52px 52px;
   align-items: center;
-  gap: 10px;
-  /* 누를 수 있는 줄이라 위아래로 여유를 주고, 카드 안쪽 여백만큼 좌우로 넓힘 */
-  margin: 0 -8px;
-  padding: 4px 8px;
+  gap: 12px;
 }
-.rank-link:hover {
-  background: var(--bg);
+.source-name {
+  font-size: 15px;
 }
-.rank-go {
-  color: var(--mute);
-}
-.rank-link:hover .rank-go {
-  color: var(--ink);
-}
-.rank-no {
-  color: var(--mute);
-}
-.rank-name {
+.source-kw {
+  font-size: 18px;
+  font-weight: 700;
   white-space: nowrap;
 }
-.rank strong {
-  font-size: 15px;
+.source-percent {
   text-align: right;
 }
-
-/* 부하 시간대 */
-.tariffs {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.source-note {
+  font-size: 12px;
+  color: var(--mute);
+  text-align: right;
+  white-space: nowrap;
 }
-.tariff-text {
+.join {
+  font-size: 12px;
+  color: var(--mute);
+}
+.factory {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--bg);
+  border: 2px solid var(--ink);
+}
+.factory strong {
+  font-size: 15px;
+}
+.factory-value {
+  margin-left: auto;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.totals-wrap {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.totals-title {
   margin-bottom: 4px;
-}
-.tariff-text span {
   font-size: 13px;
-  color: var(--ink-2);
-}
-
-/* 이번 달 피크 */
-.month {
-  display: flex;
-  flex-direction: column;
-}
-.month-peak {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 36px;
   font-weight: 700;
-  line-height: 1.15;
 }
-.month-peak.over {
-  color: var(--crit);
-}
-.month-note {
-  font-size: 13px;
-  color: var(--ink-2);
-}
-
-/* 최근 이벤트 */
-.events {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.events li {
+.totals {
   display: flex;
   gap: 12px;
-  font-size: 13px;
 }
-.event-time {
-  flex: none;
+.totals div {
+  flex: 1;
+}
+.totals dt {
+  font-size: 12px;
+  color: var(--mute);
+}
+.totals dd {
+  font-size: 15px;
   font-weight: 700;
+  white-space: nowrap;
 }
-.event-text.crit {
-  color: var(--crit);
-}
-.event-text.warn {
-  color: var(--warn);
-}
-.event-text.ok {
-  color: var(--ok);
-}
-.event-text.info {
-  color: var(--ink-2);
+
+/* 화면이 좁으면 오른쪽 카드 폭을 줄여 왼쪽 그래프와 게이지 자리를 남김 */
+@media (max-width: 1600px) {
+  .advice-wrap,
+  .flow {
+    width: 480px;
+  }
+  .sources li {
+    grid-template-columns: 10px 48px 92px minmax(0, 1fr) 48px 44px;
+    gap: 8px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
