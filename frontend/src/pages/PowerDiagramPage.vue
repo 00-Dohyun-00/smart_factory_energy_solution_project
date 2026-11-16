@@ -1,20 +1,15 @@
 <!--
   모니터링 > 설비 모니터링
-  요약 줄 → 가운데 전력 계통도 + 오른쪽에 고른 구역의 상세
+  KPI 5개 → 가운데 전력 계통도 + 오른쪽에 고른 구역의 상세
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Chart from '@/components/Chart.vue'
+import KpiCards from '@/components/KpiCards.vue'
 import PowerTree from '@/components/PowerTree.vue'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
-import {
-  formatClock,
-  formatHourMinute,
-  formatInteger,
-  formatKw,
-  formatOneDecimal,
-} from '@/utils/format'
+import { formatHourMinute, formatInteger, formatKw, formatOneDecimal } from '@/utils/format'
 
 const realtimeStore = useRealtimeStore()
 const route = useRoute()
@@ -28,7 +23,6 @@ const ZONE_LABELS = {
   Z5: '검사',
   U: '유틸리티',
 }
-const PCS_LABELS = { DISCHARGING: '방전 중', CHARGING: '충전 중', STANDBY: '대기' }
 const STATE_LABELS = { RUNNING: '운전', HEATING: '승온 중', STOPPED: '정지' }
 
 // 고른 구역은 주소에 적어 둠 (예: /monitoring/diagram?zone=Z3)
@@ -37,12 +31,6 @@ const STATE_LABELS = { RUNNING: '운전', HEATING: '승온 중', STOPPED: '정�
 const zoneInAddress = route.query.zone
 const selectedZone = ref(ZONE_LABELS[zoneInAddress] ? zoneInAddress : 'Z2')
 const status = computed(() => realtimeStore.status)
-
-// ESS는 충전 중이면 충전 전력을, 그 밖에는 방전 전력을 보여 줌
-const essKw = computed(() => {
-  if (!status.value) return null
-  return status.value.pcsStatus === 'CHARGING' ? status.value.chargeKw : status.value.dischargeKw
-})
 
 // 구역을 고르면 그 구역의 상세(최근 1시간, 오늘 요약)를 받고 주소도 바꿈
 onMounted(() => {
@@ -136,42 +124,8 @@ const trendOption = computed(() => ({
 
     <!-- 서버 연결이 끊겼다는 알림은 공통 틀(MainLayout)이 모든 화면에 띄움 -->
 
-    <!-- 요약 줄 -->
-    <dl class="card summary">
-      <div class="main">
-        <dt>공장 소비</dt>
-        <dd>
-          <span class="num">{{ formatKw(status?.loadKw) }}</span> kW
-        </dd>
-      </div>
-      <div>
-        <dt><span class="dot grid" aria-hidden="true"></span>한전</dt>
-        <dd>
-          <span class="num">{{ formatKw(status?.gridKw) }}</span> kW
-        </dd>
-      </div>
-      <div>
-        <dt><span class="dot solar" aria-hidden="true"></span>태양광</dt>
-        <dd>
-          <span class="num">{{ formatKw(status?.solarKw) }}</span> kW
-        </dd>
-      </div>
-      <div>
-        <dt><span class="dot ess" aria-hidden="true"></span>ESS</dt>
-        <dd>
-          <span class="num">{{ formatKw(essKw) }}</span> kW,
-          {{ PCS_LABELS[status?.pcsStatus] ?? '—' }}
-        </dd>
-      </div>
-      <div class="right">
-        <dt>설비</dt>
-        <dd class="num">{{ status ? `${status.equipments.length}대` : '—' }}</dd>
-      </div>
-      <div>
-        <dt>최근 수신</dt>
-        <dd class="num">{{ formatClock(status?.recordedAt) }}</dd>
-      </div>
-    </dl>
+    <!-- KPI 5개 (통합 화면과 같은 카드) -->
+    <KpiCards :status="status" />
 
     <div class="row">
       <!-- 계통도 -->
@@ -273,44 +227,6 @@ const trendOption = computed(() => ({
   height: 12px;
   background: var(--card);
   border: 2px solid var(--ink);
-}
-
-/* 요약 줄 */
-.summary {
-  display: flex;
-  align-items: center;
-  gap: 48px;
-  padding: 12px 20px;
-}
-.summary dt {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--mute);
-}
-.summary dd {
-  font-size: 20px;
-  font-weight: 700;
-}
-.summary .main dd {
-  font-size: 24px;
-}
-.summary .right {
-  margin-left: auto;
-}
-.dot {
-  width: 10px;
-  height: 10px;
-}
-.dot.grid {
-  background: var(--src-grid);
-}
-.dot.solar {
-  background: var(--src-solar);
-}
-.dot.ess {
-  background: var(--src-ess);
 }
 
 .row {
