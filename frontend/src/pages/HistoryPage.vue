@@ -15,7 +15,7 @@ const ACTION_LABELS = { CHARGE: '충전', DISCHARGE: '방전', IDLE: '대기' }
 const STATUS_INFO = {
   RECOMMENDED: { shape: '○', label: '추천 중' },
   APPLIED: { shape: '●', label: '적용' },
-  IGNORED: { shape: '✕', label: '무시' },
+  IGNORED: { shape: '✕', label: '넘김' },
   AUTO: { shape: '◇', label: '자동' },
 }
 const RESULT_INFO = {
@@ -29,6 +29,7 @@ const fromDate = ref('') // 예: '2026-11-14'
 const toDate = ref('')
 const actionFilter = ref('ALL')
 const statusFilter = ref('ALL')
+const ruleFilter = ref('ALL') // 근거(규칙) 이름. 예: '피크 방어'
 const keyword = ref('')
 
 const openedId = ref(null) // 자세한 내용을 펼친 행의 id
@@ -66,13 +67,20 @@ function load(showLoading = true) {
 function resetFilters() {
   actionFilter.value = 'ALL'
   statusFilter.value = 'ALL'
+  ruleFilter.value = 'ALL'
   keyword.value = ''
   applyPreset('today')
 }
 
+// 근거 선택 상자에 넣을 목록: 받아 온 이력에 실제로 나온 근거만 모음 (중복 제거)
+const ruleOptions = computed(() => [
+  ...new Set(historyStore.decisions.map((item) => item.ruleLabel)),
+])
+
 // 기간이 바뀌면 다시 조회
 watch([fromDate, toDate], () => {
   openedId.value = null
+  ruleFilter.value = 'ALL' // 새 기간에는 고른 근거가 없을 수 있으므로 처음으로 돌림
   load()
 })
 
@@ -102,6 +110,7 @@ const filtered = computed(() => {
   return historyStore.decisions.filter((item) => {
     if (actionFilter.value !== 'ALL' && item.action !== actionFilter.value) return false
     if (statusFilter.value !== 'ALL' && item.status !== statusFilter.value) return false
+    if (ruleFilter.value !== 'ALL' && item.ruleLabel !== ruleFilter.value) return false
     if (word) {
       const text = `${item.reason} ${item.ruleLabel} ${item.appliedBy ?? ''}`
       if (!text.includes(word)) return false
@@ -117,7 +126,7 @@ const counts = computed(() => {
     { label: '전체', value: filtered.value.length },
     { label: '적용', value: count('APPLIED') },
     { label: '자동', value: count('AUTO') },
-    { label: '무시', value: count('IGNORED') },
+    { label: '넘김', value: count('IGNORED') },
     { label: '추천 중', value: count('RECOMMENDED') },
   ]
 })
@@ -130,7 +139,11 @@ function toggle(id) {
 <template>
   <div class="page">
     <div class="head">
-      <h1 class="title">운영 이력</h1>
+      <div class="crumb">
+        <span class="crumb-parent">로그</span>
+        <span class="crumb-parent" aria-hidden="true">›</span>
+        <h1 class="crumb-title">추천 이력</h1>
+      </div>
       <ul class="counts">
         <li v-for="item in counts" :key="item.label">
           {{ item.label }} <strong class="num">{{ item.value }}</strong>
@@ -184,7 +197,15 @@ function toggle(id) {
           <option value="RECOMMENDED">추천 중</option>
           <option value="APPLIED">적용</option>
           <option value="AUTO">자동</option>
-          <option value="IGNORED">무시</option>
+          <option value="IGNORED">넘김</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="field-label">근거</span>
+        <select v-model="ruleFilter" class="input">
+          <option value="ALL">전체</option>
+          <option v-for="rule in ruleOptions" :key="rule" :value="rule">{{ rule }}</option>
         </select>
       </label>
 
