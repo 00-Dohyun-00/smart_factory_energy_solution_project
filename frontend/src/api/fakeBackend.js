@@ -104,15 +104,15 @@ function toLocalDateTime(date) {
   return `${day}T${time}`
 }
 
-// 낮에만 발전하는 태양광 (06시~18시, 한낮에 최대 600kW)
+// 낮에만 발전하는 태양광 (06시~18시, 맑은 날 한낮에 최대 600kW)
 function solarAt(hour) {
   return Math.max(0, Math.sin(((hour - 6) / 12) * Math.PI)) * 600
 }
 
 // 브레이징로가 승온할 때 늘어나는 전력 (약 4분 주기로 반복되게 만든 값)
-// 뒤쪽 항은 15분 구간마다 평균이 조금씩 달라지게 하는 느린 변화
+// 15분 평균을 내면 거의 0이 되어, 순간값만 출렁이고 구간 평균은 크게 바꾸지 않음
 function furnaceSwingAt(seconds) {
-  return 330 * Math.sin(seconds / 40) + 110 * Math.sin(seconds / 700)
+  return 330 * Math.sin(seconds / 40)
 }
 
 // 사출기가 한 사이클 돌 때마다 출렁이는 전력
@@ -120,10 +120,84 @@ function injectionSwingAt(seconds) {
   return 40 * Math.sin(seconds / 7)
 }
 
-// ESS가 없을 때 한전에서 사야 하는 전력.
-// 브레이징로 승온과 사출기 가동이 겹치면 목표 피크(1,800kW)를 넘도록 만든 값
-function gridWithoutEssAt(seconds) {
-  return 1700 + furnaceSwingAt(seconds) + injectionSwingAt(seconds)
+// ---- 하루 전력 모양 ----
+// 공장 소비전력의 시각별 기준값 (평일, kW). 0시부터 23시까지이고, 시각 사이는 앞뒤 값을 이어서 씀.
+// 밤에도 브레이징로·칠러가 돌아 1,300kW 안팎을 쓰고, 오전·오후 생산 시간에 2,000kW 넘게 올라가는 모양.
+// 한낮에는 태양광이 이만큼을 덜어 주므로, 해가 진 뒤인 17~18시나 흐리거나 비 오는 날에 피크 위험이 커짐
+const LOAD_BY_HOUR = [
+  1300, 1280, 1270, 1270, 1280, 1300, 1350, 1500, 1800, 1960, 2010, 2030, 1760, 1920, 1980, 1990,
+  1960, 1880, 1820, 1700, 1600, 1520, 1440, 1360,
+]
+
+// 날짜마다 정해 둔 가짜 날씨. 흐리거나 비가 오면 태양광이 그 비율만큼만 나옴
+const WEATHER_TEXTS = ['맑음', '맑음', '흐림', '맑음', '비', '흐림', '맑음']
+const SOLAR_BY_WEATHER = { 맑음: 1, 흐림: 0.55, 비: 0.2 }
+
+// 주소 뒤에 ?scenario=peak 를 붙이면 오늘을 "피크 위험일"(비 + 바쁜 날)로 만듦.
+// 평범한 날에는 피크 장면이 드물어서, 시연에서 피크 방어를 보여 줄 때 씀
+//   http://localhost:5173/?scenario=peak
+const scenario = new URLSearchParams(window.location.search).get('scenario')
+
+// '2026-11-16' 모양의 날짜 글자
+function dateKeyOf(date) {
+  return toLocalDateTime(date).slice(0, 10)
+}
+
+// 날짜로 정하는 가짜 난수의 씨앗 (예: 20261116)
+function daySeedOf(date) {
+  return Number(dateKeyOf(date).replaceAll('-', ''))
+}
+
+function isPeakScenarioDay(date) {
+  return scenario === 'peak' && dateKeyOf(date) === dateKeyOf(simNow())
+}
+
+function weatherOf(date) {
+  if (isPeakScenarioDay(date)) return '비'
+  return WEATHER_TEXTS[daySeedOf(date) % 7]
+}
+
+// 그날 공장이 얼마나 바쁜지 (평일은 0.95~1.05배, 주말은 0.72배)
+function dayFactorOf(date) {
+  if (isPeakScenarioDay(date)) return 1.05
+  const weekDay = date.getDay()
+  if (weekDay === 0 || weekDay === 6) return 0.72
+  return 0.95 + fakeRandom(daySeedOf(date) * 3) * 0.1
+}
+
+// 그 시각 공장의 기준 전력 (설비가 몇 분 단위로 출렁이는 부분은 뺀 값)
+function baseLoadAt(time) {
+  const hour = time.getHours() + time.getMinutes() / 60 + time.getSeconds() / 3600
+  const index = Math.floor(hour)
+  const now = LOAD_BY_HOUR[index]
+  const next = LOAD_BY_HOUR[(index + 1) % 24]
+  const seconds = time.getTime() / 1000
+  // 15분 구간마다 평균이 조금씩 달라지게 하는 느린 변화
+  const drift = 50 * Math.sin(seconds / 530) + 30 * Math.sin(seconds / 1700)
+  return (now + (next - now) * (hour - index)) * dayFactorOf(time) + drift
+}
+
+// 그 시각 공장 전체가 쓰는 전력 (기준 전력 + 브레이징로·사출기의 출렁임)
+function factoryLoadAt(time) {
+  const seconds = time.getTime() / 1000
+  return baseLoadAt(time) + furnaceSwingAt(seconds) + injectionSwingAt(seconds)
+}
+
+// 그 시각의 태양광 발전량 (날씨 반영)
+function solarKwAt(time) {
+  const hour = time.getHours() + time.getMinutes() / 60
+  return solarAt(hour) * SOLAR_BY_WEATHER[weatherOf(time)]
+}
+
+// ESS가 없을 때 한전에서 사야 하는 전력 = 공장 소비 − 태양광
+function gridWithoutEssAt(time) {
+  return factoryLoadAt(time) - solarKwAt(time)
+}
+
+// 바깥 기온 (오후 3시 무렵 가장 높고, 비 오는 날은 4℃ 낮음)
+function outsideTempAt(time) {
+  const hour = time.getHours() + time.getMinutes() / 60
+  return 12 + 6 * Math.sin(((hour - 9) / 24) * 2 * Math.PI) - (weatherOf(time) === '비' ? 4 : 0)
 }
 
 function round1(value) {
@@ -159,7 +233,7 @@ function updateWindow(nowMs, gridKw) {
     // 새 구간 시작. 화면을 구간 중간에 열었다면 그 전까지는 15초 간격으로 계산해 채움
     windowState = { startMs, lastMs: startMs, demandKw: 0, points: [{ minute: 0, demandKw: 0 }] }
     for (let ms = startMs + 15000; ms < nowMs; ms += 15000) {
-      addWindowPoint(ms, gridWithoutEssAt(ms / 1000))
+      addWindowPoint(ms, gridWithoutEssAt(new Date(ms)))
     }
   }
   addWindowPoint(nowMs, gridKw)
@@ -174,30 +248,80 @@ function addWindowPoint(ms, gridKw) {
   })
 }
 
-// ---- 요금 시간대 ----
-// 산업용 계절별·시간대별 요금제의 겨울철 시간대를 흉내 낸 임시 값입니다. (실제 구분과 단가는 확인 필요)
+// ---- 요금 시간대 (계절별) ----
+// 시간대 구분: 한전 계절별·시간대별 요금제의 구분 (Jang 외, Sustainability 2022, 표 5)
+// 단가: 같은 논문 표 2의 고압A 선택II 값을 반올림한 임시 값. 2021년 일반용 기준이라 현재 산업용 단가는 확인 필요
+// 환경 설정 화면의 단가 3칸은 "지금 계절"의 단가입니다. (applySettings 참고)
 const TARIFF_LABELS = { LIGHT: '경부하', MID: '중간부하', PEAK: '최대부하' }
-const TARIFF_PERIODS = [
-  { from: '00:00', to: '08:00', period: 'LIGHT' },
-  { from: '08:00', to: '09:00', period: 'MID' },
-  { from: '09:00', to: '12:00', period: 'PEAK' },
-  { from: '12:00', to: '16:00', period: 'MID' },
-  { from: '16:00', to: '19:00', period: 'PEAK' },
-  { from: '19:00', to: '22:00', period: 'MID' },
-  { from: '22:00', to: '24:00', period: 'LIGHT' },
+const SEASON_LABELS = { SUMMER: '여름', SPRING_FALL: '봄·가을', WINTER: '겨울' }
+const SUMMER_PERIODS = [
+  { from: '00:00', to: '09:00', period: 'LIGHT' },
+  { from: '09:00', to: '10:00', period: 'MID' },
+  { from: '10:00', to: '12:00', period: 'PEAK' },
+  { from: '12:00', to: '13:00', period: 'MID' },
+  { from: '13:00', to: '17:00', period: 'PEAK' },
+  { from: '17:00', to: '23:00', period: 'MID' },
+  { from: '23:00', to: '24:00', period: 'LIGHT' },
 ]
+const PERIODS_BY_SEASON = {
+  SUMMER: SUMMER_PERIODS,
+  SPRING_FALL: SUMMER_PERIODS, // 봄·가을은 여름과 시간대 구분이 같고 단가만 다름
+  WINTER: [
+    { from: '00:00', to: '09:00', period: 'LIGHT' },
+    { from: '09:00', to: '10:00', period: 'MID' },
+    { from: '10:00', to: '12:00', period: 'PEAK' },
+    { from: '12:00', to: '17:00', period: 'MID' },
+    { from: '17:00', to: '20:00', period: 'PEAK' },
+    { from: '20:00', to: '22:00', period: 'MID' },
+    { from: '22:00', to: '23:00', period: 'PEAK' },
+    { from: '23:00', to: '24:00', period: 'LIGHT' },
+  ],
+}
+// 전력량요금 단가 (원/kWh)
+const PRICES_BY_SEASON = {
+  SUMMER: { LIGHT: 52, MID: 104, PEAK: 126 },
+  SPRING_FALL: { LIGHT: 52, MID: 60, PEAK: 71 },
+  WINTER: { LIGHT: 61, MID: 92, PEAK: 106 },
+}
+
+// 여름 6~8월, 봄·가을 3~5월과 9~10월, 겨울 11~2월
+function seasonOf(date) {
+  const month = date.getMonth() + 1
+  if (month >= 6 && month <= 8) return 'SUMMER'
+  if (month >= 3 && month <= 10) return 'SPRING_FALL'
+  return 'WINTER'
+}
+
+function periodsOf(date) {
+  return PERIODS_BY_SEASON[seasonOf(date)]
+}
+
+// 그 시각의 요금 시간대 ('LIGHT' | 'MID' | 'PEAK')
+function periodAt(date) {
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return periodsOf(date).find((item) => item.from <= time && time < item.to).period
+}
 
 function tariffAt(now) {
+  const periods = periodsOf(now)
   const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`
-  const index = TARIFF_PERIODS.findIndex((item) => item.from <= time && time < item.to)
-  const current = TARIFF_PERIODS[index]
-  const next = TARIFF_PERIODS[(index + 1) % TARIFF_PERIODS.length]
+  const index = periods.findIndex((item) => item.from <= time && time < item.to)
+  const current = periods[index]
+  // 다음에 시간대 이름이 바뀌는 칸을 찾음 (23~24시 경부하 다음의 0시 경부하는 이어진 같은 시간대)
+  let nextIndex = (index + 1) % periods.length
+  while (periods[nextIndex].period === current.period && nextIndex !== index) {
+    nextIndex = (nextIndex + 1) % periods.length
+  }
+  const next = periods[nextIndex]
+  const season = seasonOf(now)
   return {
+    season,
+    seasonLabel: SEASON_LABELS[season],
     period: current.period,
     label: TARIFF_LABELS[current.period],
-    until: current.to === '24:00' ? '00:00' : current.to, // 이 시간대가 끝나는 시각
+    until: next.from, // 이 시간대가 끝나는 시각
     nextLabel: TARIFF_LABELS[next.period],
-    periods: TARIFF_PERIODS.map((item) => ({ ...item, label: TARIFF_LABELS[item.period] })),
+    periods: periods.map((item) => ({ ...item, label: TARIFF_LABELS[item.period] })),
   }
 }
 
@@ -240,8 +364,8 @@ function updateDecision(now, predictedWithoutEss, socPercent, remainingMinutes) 
         value: round1(24 + Math.sin(now.getTime() / 1000 / 200)),
         unit: '℃',
       },
-      { label: '날씨', value: '맑음', unit: '' },
-      { label: '기온', value: 18, unit: '℃' },
+      { label: '날씨', value: weatherOf(now), unit: '' },
+      { label: '기온', value: Math.round(outsideTempAt(now)), unit: '℃' },
     ],
     status: 'RECOMMENDED',
     appliedBy: null,
@@ -360,11 +484,6 @@ function fakeRandom(seed) {
   return x - Math.floor(x)
 }
 
-function tariffLabelAt(time) {
-  const found = TARIFF_PERIODS.find((item) => item.from <= time && time < item.to)
-  return TARIFF_LABELS[found.period]
-}
-
 // 하루치 이력 만들기 (date 예: '2026-11-14')
 function buildHistoryOfDay(date, now) {
   const daySeed = Number(date.replaceAll('-', ''))
@@ -420,7 +539,7 @@ function buildHistoryOfDay(date, now) {
         { label: '태양광 발전', value: Math.round(solarAt(decided.getHours())), unit: 'kW' },
         { label: 'SOC', value: soc, unit: '%' },
         { label: '최대 출력', value: MAX_DISCHARGE_KW, unit: 'kW' },
-        { label: '요금 시간대', value: tariffLabelAt(template.time), unit: '' },
+        { label: '요금 시간대', value: TARIFF_LABELS[periodAt(decided)], unit: '' },
         { label: '배터리실 온도', value: round1(22 + random(7) * 9), unit: '℃' },
         { label: '날씨', value: random(8) < 0.6 ? '맑음' : '흐림', unit: '' },
         { label: '기온', value: Math.round(9 + random(9) * 11), unit: '℃' },
@@ -457,10 +576,11 @@ export async function fakeGetDecisions(from, to) {
   return list.concat(live).sort((a, b) => (a.decidedAt < b.decidedAt ? 1 : -1))
 }
 
-// 설비별 전력: 평소 전력을 비중대로 나누고, 브레이징로와 사출기에는 변동분을 더함
-// (태양광을 더하는 것은 어느 시간대에 열어도 피크 장면이 나오게 하려는 가짜 데이터용 처리)
-function equipmentsAt(seconds, solarKw) {
-  const baseKw = 1700 + solarKw
+// 설비별 전력: 기준 전력을 비중대로 나누고, 브레이징로와 사출기에는 변동분을 더함
+// (설비 전력을 모두 더하면 그 시각 공장 소비전력과 같음)
+function equipmentsAt(time) {
+  const seconds = time.getTime() / 1000
+  const baseKw = baseLoadAt(time)
   const motorKw = 2.2 + 0.3 * Math.sin(seconds / 5) // 1번 모터만 실측이라고 가정
   const extraKw = {
     'Z2-FURN': furnaceSwingAt(seconds),
@@ -479,17 +599,148 @@ function equipmentsAt(seconds, solarKw) {
   }))
 }
 
+// ---- 하루 시뮬레이션 (15분 칸 96개) ----
+// 오늘 전력 추이와 추이 분석이 같은 하루를 보도록, 하루치를 한 번 계산해 두고 같이 씁니다.
+// ESS는 "지금 추천 방식"을 흉내 냄: 15분 평균이 목표 피크를 넘으면 최대 출력으로 방전, 경부하에는 충전.
+// (다음 단계에서 이 부분을 새 추천 방식으로 바꿔 두 방식을 비교합니다)
+const START_SOC_PERCENT = 50 // 하루 시작(0시) 잔량
+const NIGHT_CHARGE_KW = 250 // 경부하 시간대 충전 전력
+const dayCache = new Map() // 같은 날·같은 설정이면 다시 계산하지 않음
+
+// dateKey 예: '2026-11-16'
+function simulateDay(dateKey) {
+  const efficiency = settings.efficiencyPercent / 100
+  const cacheKey = [
+    dateKey,
+    TARGET_PEAK_KW,
+    MAX_DISCHARGE_KW,
+    ESS_CAPACITY_KWH,
+    SOC_LOW_LIMIT,
+    SOC_HIGH_LIMIT,
+    efficiency,
+    scenario,
+  ].join('|')
+  if (dayCache.has(cacheKey)) return dayCache.get(cacheKey)
+
+  const slots = []
+  let socPercent = START_SOC_PERCENT
+  for (let slot = 0; slot < 96; slot++) {
+    const start = new Date(`${dateKey}T00:00:00`)
+    start.setMinutes(slot * 15)
+    const middle = new Date(start.getTime() + 7.5 * 60000)
+    // 설비의 빠른 출렁임은 15분 평균에서 거의 0이 되므로 기준 전력만 씀
+    const loadKw = baseLoadAt(middle)
+    const solarKw = solarKwAt(middle)
+    const netKw = loadKw - solarKw // ESS가 없을 때의 한전 구매전력
+
+    // ESS 전력: +는 방전, −는 충전. 잔량이 하한·상한을 넘지 않는 만큼만
+    let essKw = 0
+    if (netKw > TARGET_PEAK_KW) {
+      const usableKwh = ((socPercent - SOC_LOW_LIMIT) / 100) * ESS_CAPACITY_KWH
+      essKw = Math.max(0, Math.min(MAX_DISCHARGE_KW, usableKwh / 0.25))
+    } else if (periodAt(middle) === 'LIGHT') {
+      const emptyKwh = ((SOC_HIGH_LIMIT - socPercent) / 100) * ESS_CAPACITY_KWH
+      // 충전하면 한전에서 더 사므로, 충전 때문에 목표 피크를 넘지 않게 함
+      const headroomKw = TARGET_PEAK_KW - netKw
+      const chargeKw = Math.min(NIGHT_CHARGE_KW, headroomKw, emptyKwh / 0.25 / efficiency)
+      essKw = -Math.max(0, chargeKw)
+    }
+    // 15분(0.25시간) 동안 바뀐 잔량. 충전할 때 손실(효율)을 반영
+    if (essKw > 0) socPercent -= ((essKw * 0.25) / ESS_CAPACITY_KWH) * 100
+    if (essKw < 0) socPercent += ((-essKw * 0.25 * efficiency) / ESS_CAPACITY_KWH) * 100
+
+    slots.push({
+      recordedAt: toLocalDateTime(start),
+      hour: start.getHours(),
+      loadKw,
+      solarKw,
+      netKw,
+      essKw,
+      gridKw: netKw - essKw, // 방전하면 덜 사고, 충전하면 더 삼
+      socPercent,
+      roomTempC:
+        23 +
+        3 * Math.sin(((slot / 4 - 10) / 24) * 2 * Math.PI) +
+        (essKw !== 0 ? 2.2 : 0) +
+        fakeRandom(daySeedOf(middle)) * 3,
+      outsideTempC: outsideTempAt(middle),
+    })
+  }
+  dayCache.set(cacheKey, slots)
+  return slots
+}
+
+// 오늘 이미 끝난 15분 구간 중 가장 높았던 한전 구매전력 (0시 첫 구간 중이면 null)
+function todayPeakOf(now) {
+  const slot = now.getHours() * 4 + Math.floor(now.getMinutes() / 15)
+  const ended = simulateDay(dateKeyOf(now)).slice(0, slot)
+  return ended.length ? Math.round(Math.max(...ended.map((item) => item.gridKw))) : null
+}
+
+// ---- 실시간 잔량 ----
+// 화면을 연 시각의 잔량은 하루 시뮬레이션에서 가져오고, 그 뒤로는 방전한 만큼 줄어듦
+let liveSocPercent = null
+let liveSocAtMs = 0
+
+function updateLiveSoc(now) {
+  if (liveSocPercent === null) {
+    const slots = simulateDay(dateKeyOf(now))
+    const slot = now.getHours() * 4 + Math.floor(now.getMinutes() / 15)
+    liveSocPercent = slot > 0 ? slots[slot - 1].socPercent : START_SOC_PERCENT
+    liveSocAtMs = now.getTime()
+    return
+  }
+  // 지난번 조회부터 지금까지 적용 중이던 방전 전력으로 줄어든 양
+  const hours = (now.getTime() - liveSocAtMs) / 3600000
+  liveSocAtMs = now.getTime()
+  liveSocPercent -= ((appliedDischargeKw * hours) / ESS_CAPACITY_KWH) * 100
+  if (liveSocPercent <= SOC_LOW_LIMIT) {
+    liveSocPercent = SOC_LOW_LIMIT
+    if (appliedDischargeKw > 0) {
+      // 하한에 닿으면 배터리를 보호하려고 방전을 멈춤
+      appliedDischargeKw = 0
+      addEvent('WARNING', `잔량 하한 ${SOC_LOW_LIMIT}% 도달, 방전 멈춤`, now)
+    }
+  }
+}
+
+// ---- 12개월 최고 피크 ----
+// 기본요금은 지난 1년 중 가장 높았던 15분 피크로 정해짐 (Jang 외, 2022). 실제 산정 기준 달은 확인 필요.
+// 성적표와 같은 숫자가 나오도록 지난 11개월과 이번 달의 성적표에서 가장 높은 달을 고름
+let peakRecordCache = { key: '', value: null }
+
+async function peakRecordOf(now) {
+  const key = `${dateKeyOf(now)}|${TARGET_PEAK_KW}`
+  if (peakRecordCache.key === key) return peakRecordCache.value
+
+  let year = null
+  let month = null
+  const cursor = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+  for (let count = 0; count < 12; count++) {
+    const report = await fakeGetReport(toLocalDateTime(cursor).slice(0, 7))
+    if (report.hasData) {
+      const record = { peakKw: report.summary.monthPeakKw, at: report.summary.monthPeakAt }
+      if (!year || record.peakKw > year.peakKw) year = record
+      month = record // 마지막으로 남는 것이 이번 달
+    }
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+  peakRecordCache = { key, value: { year, month } }
+  return peakRecordCache.value
+}
+
 // GET /api/battery-statuses/latest 흉내
 export async function fakeGetLatestStatus() {
   failIfOffline()
   const now = simNow()
   seedEventsOnce(now)
   const seconds = now.getTime() / 1000
-  const hour = now.getHours() + now.getMinutes() / 60
 
-  const solarKw = solarAt(hour)
-  const gridWithoutEss = gridWithoutEssAt(seconds)
-  const socPercent = 60 + 15 * Math.sin(seconds / 300)
+  const solarKw = solarKwAt(now)
+  const gridWithoutEss = gridWithoutEssAt(now)
+  updateLiveSoc(now)
+  const socPercent = liveSocPercent
+  const peakRecord = await peakRecordOf(now)
 
   // 현재 15분 구간 (예: 14:00~14:15)
   const windowStart = new Date(windowStartOf(now.getTime()))
@@ -520,7 +771,7 @@ export async function fakeGetLatestStatus() {
   }
   lastPeakStatus = peakStatus
 
-  const equipments = equipmentsAt(seconds, solarKw)
+  const equipments = equipmentsAt(now)
 
   return {
     recordedAt: toLocalDateTime(now),
@@ -534,7 +785,7 @@ export async function fakeGetLatestStatus() {
     // ESS 전력변환장치(PCS) 상태와 배터리 건강 상태(SOH). 필드는 확인 필요
     pcsStatus: dischargeKw > 0 ? 'DISCHARGING' : 'STANDBY',
     sohPercent: 98.2,
-    weather: { text: '맑음', tempC: 18 },
+    weather: { text: weatherOf(now), tempC: Math.round(outsideTempAt(now)) },
     // 시뮬레이션 배속 (1이면 실제 속도). 화면에 "10배속"처럼 알려 주기 위한 값. 필드는 확인 필요
     simulationSpeed: SIMULATION_SPEED,
     // 15분 피크
@@ -548,9 +799,12 @@ export async function fakeGetLatestStatus() {
     defenseKw: Math.max(0, Math.ceil(predictedKw - TARGET_PEAK_KW)),
     // 구간 시작부터 지금까지 쌓인 값 (그래프용). 필드는 확인 필요
     windowPoints: windowState.points.slice(),
-    // 지금까지의 최대 피크 (고정된 예시 값). 필드는 확인 필요
-    todayPeakKw: 1768,
-    monthPeakKw: 1792,
+    // 지금까지의 최대 피크. 필드는 확인 필요
+    todayPeakKw: todayPeakOf(now),
+    monthPeakKw: peakRecord.month.peakKw,
+    // 12개월 최고 피크: 기본요금을 정하는 값. 이보다 낮은 피크는 막아도 기본요금이 줄지 않음
+    yearPeakKw: peakRecord.year.peakKw,
+    yearPeakAt: peakRecord.year.at,
     // 요금 시간대
     tariff: tariffAt(now),
     // 공급원 비율 (공장 전체 기준, 계산 방식은 확인 필요)
@@ -569,24 +823,16 @@ export async function fakeGetTodayStatuses() {
     throw new Error('서버에 연결할 수 없습니다.')
   }
   const now = simNow()
-  const time = new Date(now)
-  time.setHours(0, 0, 0, 0)
-
-  const list = []
-  for (let i = 0; time <= now; i++) {
-    const solarKw = solarAt(time.getHours() + time.getMinutes() / 60)
-    // 지난 구간의 15분 평균. 대부분 목표(1,800kW) 아래이고 가끔 가까이 올라가게 만든 값
-    const gridKw = 1570 + 165 * Math.sin(i / 5) + 45 * Math.sin(i / 2)
-    list.push({
-      recordedAt: toLocalDateTime(time),
-      loadKw: Math.round(gridKw + solarKw),
-      solarKw: Math.round(solarKw),
-      gridKw: Math.round(gridKw),
-      socPercent: round1(60 + 18 * Math.sin(i / 9)),
-    })
-    time.setMinutes(time.getMinutes() + 15)
-  }
-  return list
+  // 하루 시뮬레이션에서 지금까지의 칸만 보냄 (추이 분석과 같은 값)
+  return simulateDay(dateKeyOf(now))
+    .filter((item) => new Date(item.recordedAt) <= now)
+    .map((item) => ({
+      recordedAt: item.recordedAt,
+      loadKw: Math.round(item.loadKw),
+      solarKw: Math.round(item.solarKw),
+      gridKw: Math.round(item.gridKw),
+      socPercent: round1(item.socPercent),
+    }))
 }
 
 // GET /api/battery-decisions 의 최신 1건 흉내
@@ -621,7 +867,7 @@ export async function fakeGetRecentStatuses() {
     const time = new Date(now.getTime() - minutesAgo * 60000)
     list.push({
       recordedAt: toLocalDateTime(time),
-      gridKw: Math.round(minuteAverage((at) => gridWithoutEssAt(at.getTime() / 1000), time)),
+      gridKw: Math.round(minuteAverage(gridWithoutEssAt, time)),
     })
   }
   return list
@@ -639,12 +885,10 @@ export async function fakeGetZoneRecent(zoneId) {
   const now = simNow()
 
   // 어떤 시각에 그 구역이 쓴 전력 (그 구역 설비들의 합)
-  const zoneKwAt = (time) => {
-    const solarKw = solarAt(time.getHours() + time.getMinutes() / 60)
-    return equipmentsAt(time.getTime() / 1000, solarKw)
+  const zoneKwAt = (time) =>
+    equipmentsAt(time)
       .filter((item) => item.id.startsWith(`${zoneId}-`))
       .reduce((sum, item) => sum + item.loadKw, 0)
-  }
 
   const points = []
   for (let minutesAgo = 60; minutesAgo >= 0; minutesAgo--) {
@@ -676,10 +920,10 @@ export async function fakeGetZoneRecent(zoneId) {
 
 // ---- 성적표 (GET /api/reports?month= 흉내) ----
 // 단가와 배출계수는 화면 확인용으로 넣은 임시 값입니다. 실제 계산은 백엔드가 합니다.
+// 전력량요금 단가는 위의 PRICES_BY_SEASON(계절별)을 씁니다.
 let BASE_PRICE_PER_KW = 8320 // 기본요금 단가 (원/kW)
-const ENERGY_PRICES = { LIGHT: 87, MID: 110, PEAK: 172 } // 전력량요금 단가 (원/kWh)
 const EMISSION_FACTOR = 0.4594 // 탄소 배출계수 (kgCO2/kWh, 확인 필요)
-const BUSY_HOURS = [9, 10, 11, 16, 17, 18] // 피크가 잘 생기는 시각
+const BUSY_HOURS = [10, 11, 14, 15, 17, 18] // 피크가 잘 생기는 시각 (하루 전력 모양에서 태양광을 뺀 값이 높은 때)
 let ESS_CAPACITY_KWH = 1000
 
 // month 예: '2026-11'. 이번 달이면 오늘까지, 지난 달이면 한 달 전체를 돌려줌
@@ -704,6 +948,7 @@ export async function fakeGetReport(month) {
   const exceeded = []
   const dailyDischarge = []
   const tariffKwh = { LIGHT: 0, MID: 0, PEAK: 0 }
+  const prices = PRICES_BY_SEASON[seasonOf(new Date(year, monthNumber - 1, 1))] // 그 달 계절의 단가
   let defenseTotal = 0
   let solarKwh = 0
 
@@ -740,8 +985,7 @@ export async function fakeGetReport(month) {
       const hourPeakKw = Math.round(peakKw * ratio)
       heatmap.push({ date, hour, peakKw: hourPeakKw })
 
-      const time = `${pad(hour)}:00`
-      const period = TARIFF_PERIODS.find((item) => item.from <= time && time < item.to).period
+      const period = periodAt(new Date(year, monthNumber - 1, day, hour))
       tariffKwh[period] += hourPeakKw * 0.93 // 1시간 평균은 최대값보다 조금 낮다고 가정
     }
 
@@ -776,7 +1020,7 @@ export async function fakeGetReport(month) {
 
   // 전기요금 (원)
   const energyCharge = Math.round(
-    sum(Object.keys(tariffKwh).map((key) => tariffKwh[key] * ENERGY_PRICES[key])),
+    sum(Object.keys(tariffKwh).map((key) => tariffKwh[key] * prices[key])),
   )
   const baseCharge = topDay.peakKw * BASE_PRICE_PER_KW
   const totalKwh = sum(Object.values(tariffKwh))
@@ -810,13 +1054,17 @@ export async function fakeGetReport(month) {
       // 목표 피크를 넘어서 더 내게 된 기본요금 (넘지 않았으면 0)
       baseChargeOverTarget: Math.max(0, topDay.peakKw - TARGET_PEAK_KW) * BASE_PRICE_PER_KW,
       monthEndEstimate: Math.round((energyCharge / lastDay) * daysInMonth) + baseCharge,
-      lastMonthTotal: Math.round(150000000 + fakeRandom(year * 100 + monthNumber) * 12000000),
+      // 지난달 요금: 이번 달 예상의 94~106% 사이 (단가가 바뀌어도 비교가 터무니없어지지 않게)
+      lastMonthTotal: Math.round(
+        (Math.round((energyCharge / lastDay) * daysInMonth) + baseCharge) *
+          (0.94 + fakeRandom(year * 100 + monthNumber) * 0.12),
+      ),
       byTariff: Object.keys(tariffKwh).map((key) => ({
         period: key,
         label: TARIFF_LABELS[key],
         kwh: Math.round(tariffKwh[key]),
         percent: round1((tariffKwh[key] / totalKwh) * 100),
-        charge: Math.round(tariffKwh[key] * ENERGY_PRICES[key]),
+        charge: Math.round(tariffKwh[key] * prices[key]),
       })),
     },
     exceeded: exceeded.reverse(), // 최신 순
@@ -842,9 +1090,6 @@ export async function fakeGetReport(month) {
 }
 
 // ---- 분석 > 추이 분석 ----
-// 날씨에 따라 태양광이 덜 나오게 하는 비율 (가짜 데이터용)
-const WEATHER_TEXTS = ['맑음', '맑음', '흐림', '맑음', '비', '흐림', '맑음']
-const SOLAR_BY_WEATHER = { 맑음: 1, 흐림: 0.55, 비: 0.2 }
 let SOC_LOW_LIMIT = 20 // 잔량 하한 (%)
 let SOC_HIGH_LIMIT = 90 // 잔량 상한 (%)
 let ROOM_TEMP_LIMIT_C = 35 // 배터리실 온도 제한 (℃)
@@ -860,59 +1105,17 @@ export async function fakeGetTrendAnalysis(from, to, interval) {
   end.setDate(end.getDate() + 1)
   const last = end < now ? end : now // 아직 오지 않은 시간은 만들지 않음
 
-  // 1) 15분 간격의 원본 값 만들기
+  // 1) 15분 간격의 원본 값: 날마다 하루 시뮬레이션을 가져와 아직 오지 않은 칸은 뺌
   const raw = []
   const weather = []
-  let socPercent = 62
-  const time = new Date(`${from}T00:00:00`)
-  for (let count = 0; time < last && count < 96 * 62; count++) {
-    const date = toLocalDateTime(time).slice(0, 10)
-    const daySeed = Number(date.replaceAll('-', ''))
-    const hour = time.getHours() + time.getMinutes() / 60
-    const slot = time.getHours() * 4 + time.getMinutes() / 15
-    const weatherText = WEATHER_TEXTS[daySeed % 7]
-    if (!weather.length || weather[weather.length - 1].date !== date) {
-      weather.push({ date, text: weatherText })
+  const day = new Date(`${from}T00:00:00`)
+  for (let count = 0; day < last && count < 62; count++) {
+    weather.push({ date: dateKeyOf(day), text: weatherOf(day) })
+    for (const item of simulateDay(dateKeyOf(day))) {
+      if (new Date(item.recordedAt) >= last) break
+      raw.push(item)
     }
-
-    const solarKw = solarAt(hour) * SOLAR_BY_WEATHER[weatherText]
-    // ESS가 없을 때 한전에서 사야 하는 전력: 하루 주기 + 피크가 잘 생기는 시각에 더 올라감
-    const busy = BUSY_HOURS.includes(time.getHours())
-    const gridBase =
-      1500 +
-      190 * Math.sin(((hour - 3) / 24) * 2 * Math.PI) +
-      (busy ? 200 : 0) +
-      (fakeRandom(daySeed * 100 + slot) - 0.5) * 120
-
-    // ESS: 새벽(경부하)에 충전(-), 피크가 잘 생기는 시각에 방전(+). 잔량이 범위를 벗어나면 멈춤
-    let essKw = 0
-    if (hour >= 1 && hour < 4) essKw = -300
-    if (busy && fakeRandom(daySeed * 7 + time.getHours()) > 0.25) essKw = 300
-    // 15분 동안 충전·방전하면 잔량이 얼마나 바뀌는지 보고, 하한·상한을 넘게 되면 하지 않음
-    const socChange = -((essKw * 0.25) / ESS_CAPACITY_KWH) * 100
-    if (socPercent + socChange < SOC_LOW_LIMIT || socPercent + socChange > SOC_HIGH_LIMIT) {
-      essKw = 0
-    } else {
-      socPercent += socChange
-    }
-
-    raw.push({
-      recordedAt: toLocalDateTime(time),
-      hour: time.getHours(),
-      loadKw: gridBase + solarKw,
-      gridKw: gridBase - essKw, // 방전하면 덜 사고, 충전하면 더 삼
-      solarKw,
-      essKw,
-      socPercent,
-      roomTempC:
-        23 +
-        3 * Math.sin(((hour - 10) / 24) * 2 * Math.PI) +
-        (essKw !== 0 ? 2.2 : 0) +
-        fakeRandom(daySeed) * 3,
-      outsideTempC:
-        12 + 6 * Math.sin(((hour - 9) / 24) * 2 * Math.PI) - (weatherText === '비' ? 4 : 0),
-    })
-    time.setMinutes(time.getMinutes() + 15)
+    day.setDate(day.getDate() + 1)
   }
 
   // 2) 고른 간격으로 묶어 평균 냄 (그래프용)
@@ -1023,7 +1226,7 @@ export async function fakeGetTrendAnalysis(from, to, interval) {
     hourly.push({
       hour,
       avgGridKw: list.length ? Math.round(average(list, 'gridKw')) : null,
-      period: TARIFF_PERIODS.find((item) => item.from <= clock && clock < item.to).period,
+      period: periodAt(new Date(`${to}T${clock}:00`)), // 기간 마지막 날 계절의 시간대
     })
   }
 
@@ -1066,9 +1269,10 @@ const settings = {
   // 피크 · 요금
   targetPeakKw: 1800,
   warnPercent: 97,
-  priceLightWon: 87,
-  priceMidWon: 110,
-  pricePeakWon: 172,
+  // 전력량요금 단가 3칸은 지금 계절의 단가 (PRICES_BY_SEASON에서 가져옴)
+  priceLightWon: PRICES_BY_SEASON[seasonOf(simNow())].LIGHT,
+  priceMidWon: PRICES_BY_SEASON[seasonOf(simNow())].MID,
+  pricePeakWon: PRICES_BY_SEASON[seasonOf(simNow())].PEAK,
   basePriceWon: 8320,
   // ESS
   capacityKwh: 1000,
@@ -1155,9 +1359,11 @@ function applySettings() {
   TARGET_PEAK_KW = settings.targetPeakKw
   WARN_KW = Math.round((settings.targetPeakKw * settings.warnPercent) / 100)
   MAX_DISCHARGE_KW = settings.maxPowerKw
-  ENERGY_PRICES.LIGHT = settings.priceLightWon
-  ENERGY_PRICES.MID = settings.priceMidWon
-  ENERGY_PRICES.PEAK = settings.pricePeakWon
+  // 단가 3칸은 지금 계절의 단가만 바꿈
+  const prices = PRICES_BY_SEASON[seasonOf(simNow())]
+  prices.LIGHT = settings.priceLightWon
+  prices.MID = settings.priceMidWon
+  prices.PEAK = settings.pricePeakWon
   BASE_PRICE_PER_KW = settings.basePriceWon
   ESS_CAPACITY_KWH = settings.capacityKwh
   SOC_LOW_LIMIT = settings.socLowPercent
@@ -1294,7 +1500,7 @@ export async function fakeGetPeakAnalysis(from, to) {
 
   // 3) 피크가 잦은 시간대: 요금 시간대 묶음마다 평균을 내어 가장 높은 묶음을 고름
   let busiest = null
-  for (const block of TARIFF_PERIODS) {
+  for (const block of periodsOf(new Date(`${to}T00:00:00`))) {
     const list = heatmap.filter((item) => {
       const clock = `${pad(item.hour)}:00`
       return block.from <= clock && clock < block.to
