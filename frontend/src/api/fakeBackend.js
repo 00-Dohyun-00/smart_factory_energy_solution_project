@@ -4,6 +4,9 @@
 // - 여기 있는 피크 예측·추천 계산은 화면 확인용으로 단순하게 흉내 낸 것입니다. 실제 계산은 백엔드가 합니다.
 // - 이 파일은 batteryStatusApi.js, batteryDecisionApi.js 에서만 불러옵니다. (Store, 화면에서 직접 쓰지 않음)
 // - 이 파일은 서버 역할이라 "서버 시각"을 직접 만듭니다(아래 simNow). 화면 코드에서는 new Date()를 쓰지 않습니다.
+// - 공장 전력과 태양광은 실제 데이터(fakeEnergyData.json)에서 가져옵니다. (아래 "실제 데이터로 만드는 전력" 참고)
+
+import energyData from '@/api/fakeEnergyData.json'
 
 // 아래 기준값들은 환경 설정 화면에서 바꾸면 applySettings()가 고쳐 씁니다. 그래서 const가 아니라 let입니다.
 let TARGET_PEAK_KW = 1800 // 목표 피크
@@ -104,11 +107,6 @@ function toLocalDateTime(date) {
   return `${day}T${time}`
 }
 
-// 낮에만 발전하는 태양광 (06시~18시, 맑은 날 한낮에 최대 600kW)
-function solarAt(hour) {
-  return Math.max(0, Math.sin(((hour - 6) / 12) * Math.PI)) * 600
-}
-
 // 브레이징로가 승온할 때 늘어나는 전력 (약 4분 주기로 반복되게 만든 값)
 // 15분 평균을 내면 거의 0이 되어, 순간값만 출렁이고 구간 평균은 크게 바꾸지 않음
 function furnaceSwingAt(seconds) {
@@ -120,23 +118,102 @@ function injectionSwingAt(seconds) {
   return 40 * Math.sin(seconds / 7)
 }
 
-// ---- 하루 전력 모양 ----
-// 공장 소비전력의 시각별 기준값 (평일, kW). 0시부터 23시까지이고, 시각 사이는 앞뒤 값을 이어서 씀.
-// 밤에도 브레이징로·칠러가 돌아 1,300kW 안팎을 쓰고, 오전·오후 생산 시간에 2,000kW 넘게 올라가는 모양.
-// 한낮에는 태양광이 이만큼을 덜어 주므로, 해가 진 뒤인 17~18시나 흐리거나 비 오는 날에 피크 위험이 커짐
-const LOAD_BY_HOUR = [
-  1300, 1280, 1270, 1270, 1280, 1300, 1350, 1500, 1800, 1960, 2010, 2030, 1760, 1920, 1980, 1990,
-  1960, 1880, 1820, 1700, 1600, 1520, 1440, 1360,
-]
+// ---- 실제 데이터로 만드는 전력 ----
+// fakeEnergyData.json = 원본 CSV(frontend/data)에서 필요한 숫자만 뽑은 파일
+//   loadKwh : 제철소 실측 15분 전력량 (2018년 1년, 35,040칸)
+//             출처: UCI Machine Learning Repository, Steel Industry Energy Consumption (CC BY 4.0)
+//   solarMwh: 경상남도 태양광 시간별 발전량 (2025년 1년, 8,760칸)
+//             출처: 공공데이터포털, 한국전력거래소_지역별 시간별 태양광 및 풍력 발전량 (공공누리)
+// 우리 공장 크기로 바꾸는 식은 데이터 README의 초안을 따름 (백엔드 시뮬레이터와 같은 식)
+const LOAD_YEAR = 2018
+const SOLAR_YEAR = 2025
+const BASE_LOAD_KW = 1300 // 공장 kW = 1,300 + 1.35 × (usage_kwh × 4)
+const LOAD_SCALE = 1.35
+const SOLAR_SCALE = 1.536 // 태양광 kW = generation_mwh × 1.536 (1,000 kW 지붕 태양광으로 환산)
 
-// 날짜마다 정해 둔 가짜 날씨. 흐리거나 비가 오면 태양광이 그 비율만큼만 나옴
-const WEATHER_TEXTS = ['맑음', '맑음', '흐림', '맑음', '비', '흐림', '맑음']
-const SOLAR_BY_WEATHER = { 맑음: 1, 흐림: 0.55, 비: 0.2 }
-
-// 주소 뒤에 ?scenario=peak 를 붙이면 오늘을 "피크 위험일"(비 + 바쁜 날)로 만듦.
+// 주소 뒤에 ?scenario=peak 를 붙이면 오늘을 "1년 중 피크가 가장 높았던 날"로 바꿈.
 // 평범한 날에는 피크 장면이 드물어서, 시연에서 피크 방어를 보여 줄 때 씀
 //   http://localhost:5173/?scenario=peak
 const scenario = new URLSearchParams(window.location.search).get('scenario')
+
+// 그해 1월 1일부터 며칠째인지 (0부터). month는 0(1월)~11(12월)
+function dayOfYear(year, month, day) {
+  return Math.round((Date.UTC(year, month, day) - Date.UTC(year, 0, 1)) / 86400000)
+}
+
+// 데이터 두 해(2018, 2025)는 2월 29일이 없어서 28일로 씀
+function dayOfMonthIn(date) {
+  return date.getMonth() === 1 ? Math.min(date.getDate(), 28) : date.getDate()
+}
+
+// 공장 전력은 같은 달·같은 요일인 2018년 날을 씀 (요일마다 평일·주말 모양이 달라서)
+// 예: 2026-11-17(화) → 2018-11-20(화)
+function loadDayIndexOf(date) {
+  const day = dayOfMonthIn(date)
+  let shift = date.getDay() - new Date(LOAD_YEAR, date.getMonth(), day).getDay()
+  if (shift > 3) shift -= 7
+  if (shift < -3) shift += 7
+  const index = dayOfYear(LOAD_YEAR, date.getMonth(), day) + shift
+  if (index < 0) return index + 7
+  if (index > 364) return index - 7
+  return index
+}
+
+// 태양광은 같은 월·일인 2025년 날을 씀 (날씨는 요일과 상관없음)
+function solarDayIndexOf(date) {
+  return dayOfYear(SOLAR_YEAR, date.getMonth(), dayOfMonthIn(date))
+}
+
+// 데이터 한 칸의 값을 우리 공장 크기로 바꾼 값 (kW)
+function loadKwOfSlot(index) {
+  return BASE_LOAD_KW + LOAD_SCALE * energyData.loadKwh[index] * 4
+}
+
+function solarKwOfHour(index) {
+  const hour = index % 24
+  // 밤(21시~05시)의 작은 값은 태양광 연계 ESS가 내보낸 양으로 보여 0으로 처리 (데이터 README)
+  if (hour >= 21 || hour < 5) return 0
+  return energyData.solarMwh[index] * SOLAR_SCALE
+}
+
+// 1년 중 (공장 − 태양광)이 가장 높았던 날. ?scenario=peak 에서 씀 (처음 한 번만 계산)
+let peakDayIndex = null
+function peakDayIndexOf() {
+  if (peakDayIndex !== null) return peakDayIndex
+  let best = -Infinity
+  for (let day = 0; day < 365; day++) {
+    for (let slot = 0; slot < 96; slot++) {
+      const netKw = loadKwOfSlot(day * 96 + slot) - solarKwOfHour(day * 24 + Math.floor(slot / 4))
+      if (netKw > best) {
+        best = netKw
+        peakDayIndex = day
+      }
+    }
+  }
+  return peakDayIndex
+}
+
+// 그 시각이 들어 있는 15분 칸의 공장 전력 (kW)
+function loadKwOfTime(time) {
+  const day = isPeakScenarioDay(time) ? peakDayIndexOf() : loadDayIndexOf(time)
+  return loadKwOfSlot(day * 96 + time.getHours() * 4 + Math.floor(time.getMinutes() / 15))
+}
+
+// 그 시각이 들어 있는 1시간 칸의 태양광 (kW)
+function solarKwOfTime(time) {
+  const day = isPeakScenarioDay(time) ? peakDayIndexOf() : solarDayIndexOf(time)
+  return solarKwOfHour(day * 24 + time.getHours())
+}
+
+// 데이터는 칸마다 평균 하나뿐이라, 칸 가운데에 그 값을 두고 사이는 앞뒤 칸을 직선으로 이음
+// (칸 경계에서 계단처럼 뛰지 않게 하려는 것. 칸 가운데 시각에서는 데이터 값 그대로)
+function smoothValueAt(time, valueOfTime, stepMs) {
+  const shifted = time.getTime() - stepMs / 2
+  const start = Math.floor(shifted / stepMs) * stepMs
+  const before = valueOfTime(new Date(start))
+  const after = valueOfTime(new Date(start + stepMs))
+  return before + ((after - before) * (shifted - start)) / stepMs
+}
 
 // '2026-11-16' 모양의 날짜 글자
 function dateKeyOf(date) {
@@ -152,29 +229,35 @@ function isPeakScenarioDay(date) {
   return scenario === 'peak' && dateKeyOf(date) === dateKeyOf(simNow())
 }
 
+// 날씨: 그날 태양광 발전량으로 추정. 그 달에 가장 많이 발전한 날과 비교해
+// 75% 이상이면 맑음, 40% 이상이면 흐림, 그 아래는 비 (1년 중 맑음 212일 · 흐림 95일 · 비 58일)
+let bestSolarByMonth = null // 달마다 가장 많이 발전한 날의 발전량 (처음 한 번만 계산)
+
+function daySolarKwh(dayIndex) {
+  let total = 0
+  for (let hour = 0; hour < 24; hour++) total += solarKwOfHour(dayIndex * 24 + hour)
+  return total
+}
+
 function weatherOf(date) {
-  if (isPeakScenarioDay(date)) return '비'
-  return WEATHER_TEXTS[daySeedOf(date) % 7]
+  const day = isPeakScenarioDay(date) ? peakDayIndexOf() : solarDayIndexOf(date)
+  const monthOf = (index) => new Date(SOLAR_YEAR, 0, 1 + index).getMonth()
+  if (!bestSolarByMonth) {
+    bestSolarByMonth = new Array(12).fill(0)
+    for (let index = 0; index < 365; index++) {
+      const month = monthOf(index)
+      bestSolarByMonth[month] = Math.max(bestSolarByMonth[month], daySolarKwh(index))
+    }
+  }
+  const ratio = daySolarKwh(day) / bestSolarByMonth[monthOf(day)]
+  if (ratio >= 0.75) return '맑음'
+  if (ratio >= 0.4) return '흐림'
+  return '비'
 }
 
-// 그날 공장이 얼마나 바쁜지 (평일은 0.95~1.05배, 주말은 0.72배)
-function dayFactorOf(date) {
-  if (isPeakScenarioDay(date)) return 1.05
-  const weekDay = date.getDay()
-  if (weekDay === 0 || weekDay === 6) return 0.72
-  return 0.95 + fakeRandom(daySeedOf(date) * 3) * 0.1
-}
-
-// 그 시각 공장의 기준 전력 (설비가 몇 분 단위로 출렁이는 부분은 뺀 값)
+// 그 시각 공장의 기준 전력 (데이터 값. 설비가 몇 분 단위로 출렁이는 부분은 뺀 값)
 function baseLoadAt(time) {
-  const hour = time.getHours() + time.getMinutes() / 60 + time.getSeconds() / 3600
-  const index = Math.floor(hour)
-  const now = LOAD_BY_HOUR[index]
-  const next = LOAD_BY_HOUR[(index + 1) % 24]
-  const seconds = time.getTime() / 1000
-  // 15분 구간마다 평균이 조금씩 달라지게 하는 느린 변화
-  const drift = 50 * Math.sin(seconds / 530) + 30 * Math.sin(seconds / 1700)
-  return (now + (next - now) * (hour - index)) * dayFactorOf(time) + drift
+  return smoothValueAt(time, loadKwOfTime, 15 * 60000)
 }
 
 // 그 시각 공장 전체가 쓰는 전력 (기준 전력 + 브레이징로·사출기의 출렁임)
@@ -183,10 +266,9 @@ function factoryLoadAt(time) {
   return baseLoadAt(time) + furnaceSwingAt(seconds) + injectionSwingAt(seconds)
 }
 
-// 그 시각의 태양광 발전량 (날씨 반영)
+// 그 시각의 태양광 발전량 (데이터 값)
 function solarKwAt(time) {
-  const hour = time.getHours() + time.getMinutes() / 60
-  return solarAt(hour) * SOLAR_BY_WEATHER[weatherOf(time)]
+  return smoothValueAt(time, solarKwOfTime, 60 * 60000)
 }
 
 // ESS가 없을 때 한전에서 사야 하는 전력 = 공장 소비 − 태양광
@@ -592,7 +674,7 @@ function buildHistoryOfDay(date, now) {
     }
 
     const soc = round1(35 + random(4) * 50)
-    const loadKw = Math.round(predictedKw + solarAt(decided.getHours()) + random(5) * 60)
+    const loadKw = Math.round(predictedKw + solarKwAt(decided) + random(5) * 60)
     const answeredAt = new Date(decided.getTime() + (20 + Math.floor(random(6) * 70)) * 1000)
 
     list.push({
@@ -611,7 +693,7 @@ function buildHistoryOfDay(date, now) {
         { label: '예상 평균', value: predictedKw, unit: 'kW' },
         { label: '목표 피크', value: TARGET_PEAK_KW, unit: 'kW' },
         { label: '공장 소비', value: loadKw, unit: 'kW' },
-        { label: '태양광 발전', value: Math.round(solarAt(decided.getHours())), unit: 'kW' },
+        { label: '태양광 발전', value: Math.round(solarKwAt(decided)), unit: 'kW' },
         { label: 'SOC', value: soc, unit: '%' },
         { label: '최대 출력', value: MAX_DISCHARGE_KW, unit: 'kW' },
         { label: '요금 시간대', value: TARIFF_LABELS[periodAt(decided)], unit: '' },
@@ -1003,7 +1085,8 @@ export async function fakeGetZoneRecent(zoneId) {
 // 전력량요금 단가는 위의 PRICES_BY_SEASON(계절별)을 씁니다.
 let BASE_PRICE_PER_KW = 8320 // 기본요금 단가 (원/kW)
 const EMISSION_FACTOR = 0.4594 // 탄소 배출계수 (kgCO2/kWh, 확인 필요)
-const BUSY_HOURS = [10, 11, 14, 15, 17, 18] // 피크가 잘 생기는 시각 (하루 전력 모양에서 태양광을 뺀 값이 높은 때)
+// 피크가 잘 생기는 시각 (실제 데이터에서 공장 − 태양광이 1,800을 넘은 칸이 많은 시각: 아침 8시, 해 진 뒤 16~20시)
+const BUSY_HOURS = [8, 16, 17, 18, 19, 20]
 let ESS_CAPACITY_KWH = 1000
 
 // month 예: '2026-11'. 이번 달이면 오늘까지, 지난 달이면 한 달 전체를 돌려줌
