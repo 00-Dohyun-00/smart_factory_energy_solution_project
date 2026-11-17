@@ -1,5 +1,28 @@
 /* 프로젝트 전체에 적용되는 기본 스타일 (reset.css 다음에 적용) */
 
+/* 색 변수. 화면에서는 색을 직접 쓰지 않고 var(--이름)으로 씁니다. */
+:root {
+  --bg: #eef0f2;
+  --card: #fff;
+  --line: #dde1e5;
+  --line-strong: #b9c0c7;
+  --ink: #14181c;
+  --ink-2: #3c444c;
+  --mute: #646e77;
+  --faint: #98a1a9;
+  /* 상태색: 정상 / 주의 / 경고 / 통신 단절 */
+  --ok: #2f7d4f;
+  --warn: #9c5f08; /* 흰 배경에서 글자 대비 4.5:1 이상이 되도록 어둡게 잡은 값 */
+  --crit: #c8372d;
+  --lost: #8a9299;
+  /* 강조색을 따로 두지 않고 먹색을 씀. 색은 상태와 공급원에만 쓰기 위해서 */
+  --accent: #14181c;
+  /* 공급원 색: 임시값, 팀 확정 필요 */
+  --src-grid: #5b6472;
+  --src-solar: #d19a00;
+  --src-ess: #0f8f8a;
+}
+
 *,
 *::before,
 *::after {
@@ -8,7 +31,7 @@
 
 html,
 body,
-#root {
+#app {
   height: 100%;
 }
 
@@ -21,8 +44,8 @@ body {
     sans-serif;
   font-size: 14px;
   line-height: 1.5;
-  color: #222;
-  background: #fff;
+  color: var(--ink);
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -45,4 +68,76 @@ textarea {
 img {
   max-width: 100%;
   display: block;
+}
+
+/* 키보드로 이동할 때 현재 위치가 보이도록 */
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* 공통 카드: 흰 배경 + 얇은 테두리 (그림자 없음) */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 14px 16px;
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* 화면 맨 위 제목 줄: "모니터링 › 통합" */
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.crumb-parent {
+  color: var(--mute);
+}
+.crumb-title {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/* 숫자는 자릿수가 바뀌어도 흔들리지 않게 같은 너비로 */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 값의 출처 표시 (지금은 화면에서 쓰지 않음) */
+.tag {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--mute);
+  white-space: nowrap;
+}
+
+/* 인쇄 (보고서의 "인쇄 · PDF 저장") */
+@page {
+  size: A4 landscape; /* 화면이 가로로 넓어서 종이도 가로로 */
+  margin: 10mm;
+}
+@media print {
+  html,
+  body,
+  #app {
+    height: auto;
+  }
+  body {
+    background: var(--card);
+    /* 넓은 화면 배치를 종이 폭에 맞게 줄임 (종이 폭 약 1,050px ÷ 0.62 = 화면 폭 약 1,700px) */
+    zoom: 0.62;
+  }
+  /* 카드가 두 쪽에 걸쳐 잘리지 않게 함 */
+  .card {
+    break-inside: avoid;
+  }
 }

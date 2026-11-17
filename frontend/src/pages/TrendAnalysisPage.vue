@@ -1,0 +1,958 @@
+<!--
+  분석 > 추이 분석
+  조회 조건 → 기간 요약 → 왼쪽에 같은 시간 축을 쓰는 그래프 세 개(전력 · 배터리 잔량 · 온도와 날씨)
+  → 오른쪽에 시간대별 사용 패턴 · 추천 처리별 결과 · 눈에 띄는 구간
+
+  요약 숫자, 시간대별 평균, 처리별 결과는 백엔드가 계산해 준 값을 그대로 보여 줍니다.
+-->
+<script setup>
+import { computed, ref, watch } from 'vue'
+import Chart from '@/components/Chart.vue'
+import { useAnalysisStore } from '@/stores/useAnalysisStore'
+import { useRealtimeStore } from '@/stores/useRealtimeStore'
+import { formatInteger, formatKw, formatMonthDayTime, formatOneDecimal } from '@/utils/format'
+
+const analysisStore = useAnalysisStore()
+const realtimeStore = useRealtimeStore()
+
+const INTERVALS = [
+  { value: 'QUARTER', label: '15분' },
+  { value: 'HOUR', label: '1시간' },
+  { value: 'DAY', label: '1일' },
+]
+// "보기"에서 켜고 끌 수 있는 항목
+const ITEMS = [
+  { key: 'load', label: '공장 소비' },
+  { key: 'grid', label: '한전 구매' },
+  { key: 'solar', label: '태양광' },
+  { key: 'ess', label: 'ESS 충·방전' },
+  { key: 'soc', label: '배터리 잔량' },
+  { key: 'temp', label: '온도·날씨' },
+]
+// 처리 상태는 색만으로 구분하지 않도록 도형 + 글자로 표시 (운영 로그 화면과 같은 표시)
+const STATUS_INFO = {
+  APPLIED: { shape: '●', label: '적용' },
+  AUTO: { shape: '◇', label: '자동' },
+  IGNORED: { shape: '✕', label: '넘김' },
+}
+
+// ---- 조회 조건 ----
+const preset = ref('week') // today(오늘) | week(최근 7일) | month(이번 달) | custom(직접 입력)
+const fromDate = ref('') // 예: '2026-11-10'
+const toDate = ref('')
+const interval = ref('HOUR')
+const shown = ref(ITEMS.map((item) => item.key)) // 켜져 있는 항목들
+const focusAt = ref('') // "눈에 띄는 구간"에서 고른 시각 (그래프에 세로선으로 표시)
+
+// "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
+const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) ?? '')
+
+const dateError = computed(() =>
+  fromDate.value && toDate.value && fromDate.value > toDate.value
+    ? '시작일이 종료일보다 늦습니다.'
+    : '',
+)
+
+// '2026-11-14'에서 며칠 전 날짜 구하기
+function daysBefore(date, days) {
+  const [year, month, day] = date.split('-').map(Number)
+  const result = new Date(year, month - 1, day - days)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${result.getFullYear()}-${pad(result.getMonth() + 1)}-${pad(result.getDate())}`
+}
+
+function applyPreset(name) {
+  preset.value = name
+  if (!serverDate.value) return
+  toDate.value = serverDate.value
+  if (name === 'today') fromDate.value = serverDate.value
+  if (name === 'week') fromDate.value = daysBefore(serverDate.value, 6)
+  if (name === 'month') fromDate.value = `${serverDate.value.slice(0, 8)}01` // 이번 달 1일
+}
+
+function load(showLoading = true) {
+  if (!fromDate.value || !toDate.value || dateError.value) return
+  analysisStore.fetchTrend(fromDate.value, toDate.value, interval.value, showLoading)
+}
+
+// 기간이나 간격이 바뀌면 다시 조회
+watch([fromDate, toDate, interval], () => {
+  focusAt.value = ''
+  load()
+})
+
+// 서버 날짜를 처음 알게 되면 "최근 7일"로 조회 시작
+watch(
+  serverDate,
+  (date) => {
+    if (date && !fromDate.value) applyPreset('week')
+  },
+  { immediate: true },
+)
+
+// 조회 기간에 오늘이 들어 있으면, 15분 구간이 바뀔 때마다 조용히 다시 받음
+watch(
+  () => realtimeStore.status?.windowStart,
+  (now, before) => {
+    if (now && before && toDate.value >= serverDate.value) load(false)
+  },
+)
+
+// ---- 받은 결과 ----
+const trend = computed(() => analysisStore.trend)
+const points = computed(() => trend.value?.points ?? [])
+const summary = computed(() => trend.value?.summary ?? null)
+
+// 한전 평균 구매전력이 목표 피크의 몇 %인지 (표시용 비율)
+const avgGridPercent = computed(() =>
+  summary.value ? (summary.value.avgGridKw / trend.value.targetPeakKw) * 100 : null,
+)
+
+// '2026-11-11T09:30:00' → '11-11 09:30'
+const shortTime = (dateTime) => formatMonthDayTime(dateTime).slice(0, 11)
+
+// 눈에 띄는 구간의 값: 단위에 맞는 자릿수로
+const highlightValue = (item) =>
+  item.unit === 'kW' ? formatKw(item.value) : formatOneDecimal(item.value)
+
+function toggleFocus(at) {
+  focusAt.value = focusAt.value === at ? '' : at
+}
+
+// ---- 그래프 공통 ----
+// ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
+const COLOR = {
+  ink: '#14181c', // --ink
+  ink2: '#3c444c', // --ink-2
+  mute: '#646e77', // --mute
+  faint: '#98a1a9', // --faint
+  line: '#dde1e5', // --line
+  crit: '#c8372d', // --crit
+  grid: '#5b6472', // --src-grid
+  solar: '#d19a00', // --src-solar
+  ess: '#0f8f8a', // --src-ess
+}
+
+const isDaily = computed(() => trend.value?.interval === 'DAY') // 하루에 점 하나
+const isSingleDay = computed(() => trend.value?.from === trend.value?.to) // 하루만 조회
+
+// 가로축 글자: 1일 간격이면 '11-10', 그 밖에는 '11-10 09:00'
+const labels = computed(() =>
+  points.value.map((item) =>
+    isDaily.value ? item.recordedAt.slice(5, 10) : shortTime(item.recordedAt),
+  ),
+)
+
+// 날짜('11-10') → 날씨, 날짜 → 몇 번째 날인지
+const weatherByDate = computed(() => {
+  const result = {}
+  for (const item of trend.value?.weather ?? []) result[item.date.slice(5)] = item.text
+  return result
+})
+const dayNumbers = computed(() => {
+  const result = {}
+  ;(trend.value?.weather ?? []).forEach((item, index) => {
+    result[item.date.slice(5)] = index
+  })
+  return result
+})
+
+// 날짜가 많으면 가로축 글자가 겹치므로 며칠에 하나씩만 적음
+const dayStep = computed(() => Math.ceil((trend.value?.weather.length ?? 1) / 10))
+
+// 세 그래프가 같이 쓰는 가로축. withWeather = true면 날짜 아래에 날씨도 적음
+function timeAxis(withWeather) {
+  return {
+    type: 'category',
+    data: labels.value,
+    axisLine: { lineStyle: { color: COLOR.line } },
+    axisTick: { show: false },
+    axisLabel: {
+      color: COLOR.mute,
+      // 어느 칸에 글자를 적을지
+      interval: (index, value) => {
+        const date = value.slice(0, 5)
+        if (isSingleDay.value && !isDaily.value) {
+          return value.endsWith(':00') && Number(value.slice(6, 8)) % 3 === 0 // 3시간마다
+        }
+        const startOfDay = isDaily.value || value.endsWith(' 00:00')
+        return startOfDay && dayNumbers.value[date] % dayStep.value === 0
+      },
+      formatter: (value) => {
+        if (isSingleDay.value && !isDaily.value) return value.slice(6) // 하루만 보면 시각
+        const date = value.slice(0, 5)
+        const weather = weatherByDate.value[date]
+        return withWeather && weather ? `${date}\n${weather}` : date
+      },
+    },
+    // 날짜가 바뀌는 곳에 세로선
+    splitLine: {
+      show: !isDaily.value && !isSingleDay.value,
+      interval: (index, value) => value.endsWith(' 00:00'),
+      lineStyle: { color: COLOR.line },
+    },
+  }
+}
+
+const valueAxis = {
+  type: 'value',
+  axisLabel: { color: COLOR.mute },
+  splitLine: { lineStyle: { color: COLOR.line } },
+}
+
+const legend = {
+  right: 0,
+  top: 0,
+  icon: 'rect',
+  itemWidth: 10,
+  itemHeight: 10,
+  textStyle: { color: COLOR.ink2 },
+}
+
+// "눈에 띄는 구간"에서 고른 시각이 그래프의 어느 칸인지 (그 시각이 들어 있는 칸)
+const focusLabel = computed(() => {
+  if (!focusAt.value) return null
+  let found = null
+  points.value.forEach((item, index) => {
+    if (item.recordedAt <= focusAt.value) found = labels.value[index]
+  })
+  return found
+})
+
+// 기준선(가로)과 고른 시각(세로)을 그리는 설정
+// lines 예: [{ value: 1800, text: '목표 피크 1,800', color: COLOR.crit, dashed: false }]
+function markLines(lines) {
+  const data = lines.map((item) => ({
+    yAxis: item.value,
+    lineStyle: {
+      color: item.color,
+      width: item.dashed ? 1.5 : 2,
+      type: item.dashed ? 'dashed' : 'solid',
+    },
+    label: {
+      formatter: item.text,
+      position: 'insideEndTop',
+      color: item.color,
+      fontWeight: 'bold',
+    },
+  }))
+  if (focusLabel.value) {
+    data.push({
+      xAxis: focusLabel.value,
+      lineStyle: { color: COLOR.ink, width: 2, type: 'solid' },
+      label: { formatter: '선택', position: 'end', color: COLOR.ink, fontWeight: 'bold' },
+    })
+  }
+  return { silent: true, symbol: 'none', data }
+}
+
+function lineSeries(name, field, color, width = 2) {
+  return {
+    name,
+    type: 'line',
+    showSymbol: false,
+    data: points.value.map((item) => item[field]),
+    lineStyle: { color, width },
+    itemStyle: { color },
+  }
+}
+
+// ---- 전력 (kW) ----
+const powerItems = computed(() => shown.value.filter((key) => key !== 'soc' && key !== 'temp'))
+
+const powerOption = computed(() => {
+  const series = []
+  if (shown.value.includes('ess')) {
+    series.push({
+      name: 'ESS 방전(+) · 충전(−)',
+      type: 'bar',
+      barMaxWidth: 14,
+      data: points.value.map((item) => item.essKw),
+      itemStyle: { color: COLOR.ess },
+    })
+  }
+  if (shown.value.includes('solar')) series.push(lineSeries('태양광', 'solarKw', COLOR.solar))
+  if (shown.value.includes('grid')) series.push(lineSeries('한전 구매', 'gridKw', COLOR.grid))
+  if (shown.value.includes('load')) series.push(lineSeries('공장 소비', 'loadKw', COLOR.ink))
+
+  // 목표 피크선은 한전 구매전력과 비교하는 선이라, 한전 구매를 켰을 때만 그림
+  const target = trend.value.targetPeakKw
+  const lines = shown.value.includes('grid')
+    ? [{ value: target, text: `목표 피크 ${formatKw(target)}`, color: COLOR.crit }]
+    : []
+  if (series.length) series[0].markLine = markLines(lines)
+
+  return {
+    animation: false,
+    grid: { left: 52, right: 20, top: 34, bottom: 24 },
+    legend,
+    tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatKw(value)} kW` },
+    xAxis: timeAxis(false),
+    yAxis: valueAxis,
+    series,
+  }
+})
+
+// ---- 배터리 잔량 (%) ----
+const socOption = computed(() => {
+  const series = lineSeries('배터리 잔량', 'socPercent', COLOR.ess, 2.5)
+  series.markLine = markLines([
+    {
+      value: trend.value.socLowLimit,
+      text: `하한 ${trend.value.socLowLimit}%`,
+      color: COLOR.mute,
+      dashed: true,
+    },
+    {
+      value: trend.value.socHighLimit,
+      text: `상한 ${trend.value.socHighLimit}%`,
+      color: COLOR.mute,
+      dashed: true,
+    },
+  ])
+  return {
+    animation: false,
+    grid: { left: 52, right: 20, top: 16, bottom: 24 },
+    tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} %` },
+    xAxis: timeAxis(false),
+    yAxis: { ...valueAxis, min: 0, max: 100, interval: 50 },
+    series: [series],
+  }
+})
+
+// ---- 온도 (℃) · 날씨 ----
+const tempOption = computed(() => {
+  const room = lineSeries('배터리실 온도', 'roomTempC', COLOR.ink, 2.5)
+  const outside = lineSeries('바깥 기온', 'outsideTempC', COLOR.faint)
+  const limit = trend.value.roomTempLimitC
+  room.markLine = markLines([{ value: limit, text: `온도 제한 ${limit}℃`, color: COLOR.crit }])
+  return {
+    animation: false,
+    // 가로축에 날짜와 날씨를 두 줄로 적으므로 아래 여백을 넉넉히 둠
+    grid: { left: 52, right: 20, top: 34, bottom: 40 },
+    legend,
+    tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} ℃` },
+    xAxis: timeAxis(true),
+    yAxis: { ...valueAxis, min: 0, max: 40, interval: 10 },
+    series: [outside, room],
+  }
+})
+
+// ---- 시간대별 사용 패턴 ----
+const hourlyOption = computed(() => {
+  const hourly = trend.value.hourly
+  const names = hourly.map((item) => `${item.hour}시`)
+
+  // 최대부하 시간대(이어진 시각들)를 회색 띠로 표시. 시간대 구분은 백엔드가 준 값
+  const areas = []
+  let start = null
+  hourly.forEach((item, index) => {
+    const isPeak = item.period === 'PEAK'
+    if (isPeak && start === null) start = index
+    const isLast = index === hourly.length - 1
+    if (start !== null && (!isPeak || isLast)) {
+      const end = isPeak ? index : index - 1
+      areas.push([
+        { xAxis: names[start], itemStyle: { color: 'rgba(20, 24, 28, 0.07)' } },
+        { xAxis: names[end] },
+      ])
+      start = null
+    }
+  })
+
+  const target = trend.value.targetPeakKw
+  return {
+    animation: false,
+    grid: { left: 48, right: 12, top: 22, bottom: 24 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      valueFormatter: (value) => `${formatKw(value)} kW`,
+    },
+    xAxis: {
+      type: 'category',
+      data: names,
+      axisLine: { lineStyle: { color: COLOR.line } },
+      axisTick: { show: false },
+      axisLabel: { color: COLOR.mute, interval: (index) => index % 6 === 0 },
+    },
+    yAxis: valueAxis,
+    series: [
+      {
+        name: '평균 한전 구매',
+        type: 'bar',
+        barCategoryGap: '25%',
+        data: hourly.map((item) => item.avgGridKw),
+        itemStyle: { color: COLOR.grid },
+        markArea: { silent: true, data: areas },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          lineStyle: { color: COLOR.crit, width: 2, type: 'solid' },
+          label: {
+            formatter: `목표 ${formatKw(target)}`,
+            position: 'insideEndTop',
+            color: COLOR.crit,
+            fontWeight: 'bold',
+          },
+          data: [{ yAxis: target }],
+        },
+      },
+    ],
+  }
+})
+</script>
+
+<template>
+  <div class="page">
+    <div class="crumb">
+      <span class="crumb-parent">분석</span>
+      <span class="crumb-parent" aria-hidden="true">›</span>
+      <h1 class="crumb-title">추이 분석</h1>
+      <p class="crumb-note">전력, 배터리, 온도·날씨를 같은 시간 축에 놓고 봅니다</p>
+    </div>
+
+    <!-- 조회 조건 -->
+    <section class="card filters" aria-label="조회 조건">
+      <div class="field">
+        <span class="field-label">기간</span>
+        <div class="presets" role="group" aria-label="기간 빠른 선택">
+          <button :class="{ active: preset === 'today' }" @click="applyPreset('today')">
+            오늘
+          </button>
+          <button :class="{ active: preset === 'week' }" @click="applyPreset('week')">
+            최근 7일
+          </button>
+          <button :class="{ active: preset === 'month' }" @click="applyPreset('month')">
+            이번 달
+          </button>
+        </div>
+        <input
+          v-model="fromDate"
+          type="date"
+          class="input num"
+          aria-label="시작일"
+          @change="preset = 'custom'"
+        />
+        <span aria-hidden="true">~</span>
+        <input
+          v-model="toDate"
+          type="date"
+          class="input num"
+          aria-label="종료일"
+          @change="preset = 'custom'"
+        />
+      </div>
+
+      <div class="field">
+        <span class="field-label">간격</span>
+        <div class="presets" role="group" aria-label="간격">
+          <button
+            v-for="item in INTERVALS"
+            :key="item.value"
+            :class="{ active: interval === item.value }"
+            @click="interval = item.value"
+          >
+            {{ item.label }}
+          </button>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="field-label">보기</span>
+        <label v-for="item in ITEMS" :key="item.key" class="check">
+          <input v-model="shown" type="checkbox" :value="item.key" />
+          {{ item.label }}
+        </label>
+      </div>
+
+      <p v-if="analysisStore.loading" class="loading-note">불러오는 중입니다.</p>
+      <p v-if="dateError" class="date-error" role="alert">{{ dateError }}</p>
+    </section>
+
+    <p v-if="analysisStore.errorMessage" class="state error" role="alert">
+      분석 결과를 불러오지 못했습니다. ({{ analysisStore.errorMessage }})
+      <button class="retry" @click="load()">다시 시도</button>
+    </p>
+    <p v-else-if="!trend" class="state">불러오는 중입니다.</p>
+    <p v-else-if="!points.length" class="state">이 기간에는 기록이 없습니다. 기간을 바꿔 보세요.</p>
+
+    <template v-else>
+      <!-- 기간 요약 -->
+      <dl class="card summary">
+        <div>
+          <dt>기간 중 최대 피크</dt>
+          <dd :class="{ over: summary.maxPeakKw > trend.targetPeakKw }">
+            <span class="num">{{ formatKw(summary.maxPeakKw) }}</span> <small>kW</small>
+          </dd>
+          <p class="num">
+            {{ shortTime(summary.maxPeakAt) }},
+            {{ summary.maxPeakKw > trend.targetPeakKw ? '목표 초과' : '목표 이내' }}
+          </p>
+        </div>
+        <div>
+          <dt>평균 한전 구매전력</dt>
+          <dd>
+            <span class="num">{{ formatKw(summary.avgGridKw) }}</span> <small>kW</small>
+          </dd>
+          <p class="num">목표 피크의 {{ formatOneDecimal(avgGridPercent) }}%</p>
+        </div>
+        <div>
+          <dt>태양광 발전</dt>
+          <dd>
+            <span class="num">{{ formatInteger(summary.solarKwh) }}</span> <small>kWh</small>
+          </dd>
+          <p class="num">공장 소비의 {{ formatOneDecimal(summary.solarPercentOfLoad) }}%</p>
+        </div>
+        <div>
+          <dt>ESS 방전 / 충전</dt>
+          <dd>
+            <span class="num">
+              {{ formatInteger(summary.dischargeKwh) }} / {{ formatInteger(summary.chargeKwh) }}
+            </span>
+            <small>kWh</small>
+          </dd>
+          <p class="num">충·방전 효율 {{ formatOneDecimal(summary.efficiencyPercent) }}%</p>
+        </div>
+        <div>
+          <dt>배터리 잔량 범위</dt>
+          <dd>
+            <span class="num">
+              {{ formatOneDecimal(summary.socMinPercent) }} ~
+              {{ formatOneDecimal(summary.socMaxPercent) }}
+            </span>
+            <small>%</small>
+          </dd>
+          <p class="num">최저 {{ shortTime(summary.socMinAt) }}</p>
+        </div>
+        <div>
+          <dt>배터리실 최고 온도</dt>
+          <dd>
+            <span class="num">{{ formatOneDecimal(summary.roomTempMaxC) }}</span> <small>℃</small>
+          </dd>
+          <p class="num">
+            {{ shortTime(summary.roomTempMaxAt) }}, 제한 {{ trend.roomTempLimitC }}℃
+          </p>
+        </div>
+      </dl>
+
+      <div class="main">
+        <!-- 왼쪽: 같은 시간 축을 쓰는 그래프 세 개 -->
+        <section class="card charts">
+          <template v-if="powerItems.length">
+            <h2 class="chart-title">전력 <small>kW</small></h2>
+            <!--
+              key: 켜 둔 항목이 바뀌면 그래프를 새로 만듦.
+              Chart.vue는 이전 설정에 새 설정을 덮어쓰는 방식이라, 선의 개수가 줄면 꺼 둔 선이 남기 때문
+            -->
+            <Chart :key="powerItems.join()" :option="powerOption" :height="270" />
+          </template>
+
+          <template v-if="shown.includes('soc')">
+            <h2 class="chart-title">
+              배터리 잔량 <small>%</small>
+              <span class="chart-note">점선은 잔량 하한과 상한</span>
+            </h2>
+            <Chart :option="socOption" :height="130" />
+          </template>
+
+          <template v-if="shown.includes('temp')">
+            <h2 class="chart-title">
+              온도 <small>℃</small> · 날씨
+              <span class="chart-note">날짜 아래에 그날 날씨</span>
+            </h2>
+            <Chart :option="tempOption" :height="170" />
+          </template>
+
+          <p v-if="!shown.length" class="state">"보기"에서 볼 항목을 하나 이상 골라 주세요.</p>
+        </section>
+
+        <!-- 오른쪽 -->
+        <div class="right">
+          <section class="card">
+            <div class="card-head">
+              <h2 class="card-title">시간대별 사용 패턴</h2>
+              <span class="note">시각별 평균 한전 구매 (kW)</span>
+            </div>
+            <Chart :option="hourlyOption" :height="190" />
+            <p class="foot-note">회색 띠는 요금이 비싼 최대부하 시간대입니다.</p>
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <h2 class="card-title">추천 처리별 결과</h2>
+              <span class="note">결과가 나온 방전 추천</span>
+            </div>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>처리</th>
+                  <th class="right-text">건수</th>
+                  <th>목표 이내</th>
+                  <th class="right-text">평균 결과 피크</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in trend.byStatus" :key="item.status">
+                  <td>
+                    <strong>
+                      <span aria-hidden="true">{{ STATUS_INFO[item.status].shape }}</span>
+                      {{ STATUS_INFO[item.status].label }}
+                    </strong>
+                  </td>
+                  <td class="right-text num">{{ item.count }}</td>
+                  <td class="num">
+                    <template v-if="item.count">
+                      <span class="track" aria-hidden="true">
+                        <span class="bar" :style="{ width: `${item.defendedPercent}%` }"></span>
+                      </span>
+                      {{ item.defendedCount }}건 ({{ formatOneDecimal(item.defendedPercent) }}%)
+                    </template>
+                    <template v-else>—</template>
+                  </td>
+                  <td class="right-text num">
+                    <strong :class="{ over: item.avgResultPeakKw > trend.targetPeakKw }">
+                      {{ formatKw(item.avgResultPeakKw) }}
+                      <template v-if="item.count">kW</template>
+                    </strong>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="card highlights-card">
+            <div class="card-head">
+              <h2 class="card-title">눈에 띄는 구간</h2>
+              <span class="note">누르면 그래프에 그 시각을 표시</span>
+            </div>
+            <ul class="highlights">
+              <li v-for="item in trend.highlights" :key="item.label">
+                <button
+                  class="highlight"
+                  :class="{ active: focusAt === item.at }"
+                  :aria-pressed="focusAt === item.at"
+                  @click="toggleFocus(item.at)"
+                >
+                  <span class="highlight-time num">{{ shortTime(item.at) }}</span>
+                  <span class="highlight-label">
+                    <span v-if="item.level === 'CRITICAL'" class="over" aria-hidden="true">■</span>
+                    {{ item.label }}
+                  </span>
+                  <strong class="num" :class="{ over: item.level === 'CRITICAL' }">
+                    {{ highlightValue(item) }} {{ item.unit }}
+                  </strong>
+                </button>
+              </li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100%;
+  padding: 20px;
+}
+.crumb-note {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--mute);
+}
+
+/* 조회 조건 */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+}
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.field-label {
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.input {
+  height: 34px;
+  padding: 0 10px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--ink);
+}
+.presets {
+  display: flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.presets button {
+  height: 32px;
+  padding: 0 12px;
+  background: var(--card);
+  border: 0;
+  color: var(--ink-2);
+}
+.presets button + button {
+  border-left: 1px solid var(--line-strong);
+}
+.presets button:hover {
+  background: var(--bg);
+}
+.presets button.active {
+  background: var(--ink);
+  font-weight: 700;
+  color: var(--card);
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--ink);
+}
+.loading-note {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--mute);
+}
+.date-error {
+  width: 100%;
+  color: var(--crit);
+}
+
+.state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex: 1;
+  min-height: 200px;
+  color: var(--mute);
+}
+.state.error {
+  color: var(--crit);
+}
+.retry {
+  height: 34px;
+  padding: 0 14px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--ink-2);
+}
+.over {
+  color: var(--crit);
+}
+
+/* 기간 요약 */
+.summary {
+  display: flex;
+  padding: 12px 16px;
+}
+.summary > div {
+  flex: 1;
+  min-width: 0;
+  margin-right: 16px;
+  padding-right: 16px;
+  border-right: 1px solid var(--line);
+}
+.summary > div:last-child {
+  margin-right: 0;
+  padding-right: 0;
+  border-right: 0;
+}
+.summary dt {
+  font-size: 12px;
+  color: var(--mute);
+}
+.summary dd {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.summary small {
+  margin-left: 4px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+.summary p {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 그래프와 오른쪽 열 */
+.main {
+  display: flex;
+  flex: 1;
+  gap: 16px;
+}
+.charts {
+  flex: 1;
+  min-width: 0;
+}
+.chart-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 15px;
+  font-weight: 700;
+}
+.chart-title:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.chart-title small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--mute);
+}
+.chart-note {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--mute);
+}
+
+.right {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 16px;
+  width: 480px;
+}
+.card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.note {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--mute);
+}
+.foot-note {
+  font-size: 12px;
+  color: var(--mute);
+}
+
+/* 추천 처리별 결과 표 */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.table th {
+  padding: 6px 12px 6px 0;
+  border-bottom: 1px solid var(--ink);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--mute);
+  text-align: left;
+  white-space: nowrap;
+}
+.table td {
+  padding: 9px 12px 9px 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.table tr:last-child td {
+  border-bottom: 0;
+}
+.table th:last-child,
+.table td:last-child {
+  padding-right: 0;
+}
+.table .right-text {
+  text-align: right;
+}
+.track {
+  display: inline-block;
+  width: 80px;
+  height: 8px;
+  margin-right: 8px;
+  background: var(--line);
+  vertical-align: middle;
+}
+.bar {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+}
+
+/* 눈에 띄는 구간 */
+.highlights-card {
+  flex: 1;
+}
+.highlight {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 8px 8px 4px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-left: 4px solid transparent;
+  color: var(--ink);
+  text-align: left;
+}
+.highlights li:last-child .highlight {
+  border-bottom: 0;
+}
+.highlight:hover {
+  background: var(--bg);
+}
+/* 그래프에 표시 중인 구간 */
+.highlight.active {
+  background: var(--bg);
+  border-left-color: var(--ink);
+}
+.highlight-time {
+  flex: none;
+  width: 92px;
+  font-weight: 700;
+}
+.highlight-label {
+  color: var(--ink-2);
+}
+.highlight strong {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* 화면이 좁으면 오른쪽 열을 줄여 그래프 자리를 남김 */
+@media (max-width: 1600px) {
+  .right {
+    width: 400px;
+  }
+  .track {
+    width: 48px;
+  }
+}
+</style>
