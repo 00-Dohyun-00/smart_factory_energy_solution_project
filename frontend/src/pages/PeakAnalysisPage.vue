@@ -10,7 +10,13 @@ import { computed, ref, watch } from 'vue'
 import Chart from '@/components/Chart.vue'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
-import { formatHourMinute, formatInteger, formatKw, formatMonthDayTime } from '@/utils/format'
+import {
+  formatHourMinute,
+  formatInteger,
+  formatKw,
+  formatMonthDayTime,
+  formatOneDecimal,
+} from '@/utils/format'
 
 const analysisStore = useAnalysisStore()
 const realtimeStore = useRealtimeStore()
@@ -61,8 +67,18 @@ function load(showLoading = true) {
   analysisStore.fetchPeak(fromDate.value, toDate.value, showLoading)
 }
 
-// 기간이 바뀌면 다시 조회
-watch([fromDate, toDate], () => load())
+// "피크가 높았던 구간" 표에서 누른 구간의 시작 시각 (히트맵에 그 칸을 표시)
+const selectedStart = ref('')
+
+function toggleWindow(windowStart) {
+  selectedStart.value = selectedStart.value === windowStart ? '' : windowStart
+}
+
+// 기간이 바뀌면 고른 구간을 지우고 다시 조회
+watch([fromDate, toDate], () => {
+  selectedStart.value = ''
+  load()
+})
 
 // 서버 날짜를 처음 알게 되면 "이번 달"로 조회 시작
 watch(
@@ -89,6 +105,13 @@ const summary = computed(() => peak.value?.summary ?? null)
 const shortTime = (dateTime) => formatMonthDayTime(dateTime).slice(0, 11)
 // '2026-11-02' → '11-02'
 const dayLabel = (date) => date.slice(5)
+
+// 목표를 넘은 구간이 전체 15분 구간의 몇 %인지 (표시용 비율: 백엔드 값 두 개를 나눈 것)
+const exceededPercent = computed(() =>
+  summary.value?.windowCount
+    ? (summary.value.exceededCount / summary.value.windowCount) * 100
+    : null,
+)
 
 // ---- 그래프 공통 ----
 // ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
@@ -180,6 +203,67 @@ const heatOption = computed(() => {
   const dates = peak.value.dailyPeaks.map((item) => item.date)
   const dayLabels = dates.map(dayLabel)
 
+  // 히트맵 위에 테두리로 덧그리는 칸 묶음. x는 시각(0~23), y는 날짜 순번
+  // 예: { x0: 8, x1: 8, y0: 1, y1: 1, lineWidth: 3, text: '11-02 08:30 · 1,841 kW', textAtTop: true }
+  const outlines = []
+
+  // 표에서 누른 구간 한 칸 (그 날 그 시각)
+  if (selectedStart.value) {
+    const hour = Number(selectedStart.value.slice(11, 13))
+    const row = dates.indexOf(selectedStart.value.slice(0, 10))
+    const picked = peak.value.topWindows.find((item) => item.windowStart === selectedStart.value)
+    if (row >= 0 && picked) {
+      outlines.push({
+        x0: hour,
+        x1: hour,
+        y0: row,
+        y1: row,
+        lineWidth: 3,
+        text: `${shortTime(picked.windowStart)} · ${formatKw(picked.peakKw)} kW`,
+        textAtTop: true,
+      })
+    }
+  }
+
+  // 테두리 그리기: 칸의 가운데 좌표(api.coord)와 칸 한 개 크기(api.size)를 받아 칸 전체를 감싸는 사각형을 그림
+  // (markArea는 칸 가운데에 맞춰져 반 칸씩 밀리므로 직접 그림)
+  function renderOutline(params, api) {
+    const item = outlines[params.dataIndex]
+    const start = api.coord([item.x0, item.y0])
+    const end = api.coord([item.x1, item.y1])
+    const [cellWidth, cellHeight] = api.size([1, 1])
+    const x = Math.min(start[0], end[0]) - cellWidth / 2
+    const y = Math.min(start[1], end[1]) - cellHeight / 2
+    const width = Math.abs(end[0] - start[0]) + cellWidth
+    const height = Math.abs(end[1] - start[1]) + cellHeight
+    return {
+      type: 'group',
+      children: [
+        {
+          type: 'rect',
+          shape: { x, y, width, height },
+          style: { fill: 'none', stroke: COLOR.ink, lineWidth: item.lineWidth },
+        },
+        {
+          type: 'text',
+          style: {
+            text: item.text,
+            x: x + width / 2,
+            y: item.textAtTop ? y - 4 : y + height - 4,
+            align: 'center',
+            verticalAlign: 'bottom',
+            fill: COLOR.ink,
+            font: 'bold 12px sans-serif',
+            backgroundColor: '#fff', // --card
+            borderColor: item.textAtTop ? COLOR.ink : 'transparent',
+            borderWidth: 1,
+            padding: [2, 5],
+          },
+        },
+      ],
+    }
+  }
+
   return {
     animation: false,
     grid: { left: 52, right: 12, top: 30, bottom: 22 },
@@ -197,6 +281,7 @@ const heatOption = computed(() => {
     // 색 단계는 목표 피크 대비 비율로 나눔 (표시용). 목표를 넘은 칸은 빨강
     visualMap: {
       type: 'piecewise',
+      seriesIndex: 0, // 히트맵 칸에만 색을 입힘 (테두리 그리기에는 쓰지 않음)
       dimension: 2,
       orient: 'horizontal',
       top: 0,
@@ -220,6 +305,16 @@ const heatOption = computed(() => {
         data: peak.value.heatmap.map((item) => [item.hour, dates.indexOf(item.date), item.peakKw]),
         itemStyle: { borderColor: '#fff', borderWidth: 1 },
         emphasis: { itemStyle: { borderColor: COLOR.ink, borderWidth: 1 } },
+      },
+      {
+        // 칸 위에 덧그리는 테두리 (표에서 누른 구간). 마우스에는 반응하지 않음
+        type: 'custom',
+        silent: true,
+        clip: false,
+        z: 10,
+        tooltip: { show: false },
+        renderItem: renderOutline,
+        data: outlines.map((_, index) => [index]),
       },
     ],
   }
@@ -295,6 +390,10 @@ const heatOption = computed(() => {
           <dt>목표를 넘은 구간</dt>
           <dd>
             <span class="num">{{ formatInteger(summary.exceededCount) }}</span> <small>회</small>
+            <!-- 전체 15분 구간 중 몇 %였는지 -->
+            <span v-if="exceededPercent !== null" class="pct num">
+              ({{ formatOneDecimal(exceededPercent) }}%)
+            </span>
           </dd>
           <p class="num">15분 구간 {{ formatInteger(summary.windowCount) }}개 중</p>
         </div>
@@ -331,7 +430,7 @@ const heatOption = computed(() => {
         <section class="card heat">
           <div class="card-head">
             <h2 class="card-title">피크가 몰리는 시간대</h2>
-            <span class="note">칸 하나 = 그 날 그 시각의 최대 15분 피크 · 진할수록 높음</span>
+            <span class="note"> 진할수록 높음 · 굵은 테두리 = 표에서 누른 구간 </span>
           </div>
           <!-- key: 날짜 수가 바뀌면 그래프 높이도 바뀌므로 새로 만듦 -->
           <Chart :key="heatHeight" :option="heatOption" :height="heatHeight" />
@@ -341,7 +440,7 @@ const heatOption = computed(() => {
         <section class="card top">
           <div class="card-head">
             <h2 class="card-title">피크가 높았던 구간</h2>
-            <span class="note">위에서 {{ peak.topWindows.length }}개</span>
+            <span class="note">누르면 히트맵에 표시</span>
           </div>
           <table class="table">
             <thead>
@@ -353,10 +452,23 @@ const heatOption = computed(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(item, index) in peak.topWindows" :key="item.windowStart">
+              <tr
+                v-for="(item, index) in peak.topWindows"
+                :key="item.windowStart"
+                class="window-row"
+                :class="{ active: selectedStart === item.windowStart }"
+                @click="toggleWindow(item.windowStart)"
+              >
                 <td class="rank-col num">{{ index + 1 }}</td>
                 <td class="num">
-                  {{ shortTime(item.windowStart) }}~{{ formatHourMinute(item.windowEnd) }}
+                  <!-- 키보드로도 고를 수 있게 버튼으로 둠 (줄 어디를 눌러도 같은 동작) -->
+                  <button
+                    class="window-button"
+                    :aria-pressed="selectedStart === item.windowStart"
+                    @click.stop="toggleWindow(item.windowStart)"
+                  >
+                    {{ shortTime(item.windowStart) }}~{{ formatHourMinute(item.windowEnd) }}
+                  </button>
                 </td>
                 <td class="right-text num">
                   <strong :class="{ over: item.peakKw > peak.targetPeakKw }">
@@ -497,6 +609,12 @@ const heatOption = computed(() => {
   font-weight: 400;
   color: var(--ink-2);
 }
+.summary .pct {
+  margin-left: 6px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
 .summary p {
   font-size: 12px;
   color: var(--mute);
@@ -554,6 +672,35 @@ const heatOption = computed(() => {
 }
 .table .right-text {
   text-align: right;
+}
+/* 누르면 히트맵에 표시되는 줄 */
+.window-row {
+  cursor: pointer;
+}
+.window-row:hover {
+  background: var(--bg);
+}
+.window-row.active {
+  background: var(--bg);
+  font-weight: 700;
+}
+/* 고른 줄은 왼쪽에 굵은 줄 (안 고른 줄도 같은 폭을 투명하게 두어 글자가 밀리지 않게 함) */
+.window-row td:first-child {
+  border-left: 4px solid transparent;
+  padding-left: 6px;
+}
+.window-row.active td:first-child {
+  border-left-color: var(--ink);
+}
+.window-button {
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
 }
 .rank-col {
   width: 36px;
