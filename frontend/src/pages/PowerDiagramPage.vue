@@ -250,8 +250,15 @@ const trendOption = computed(() => ({
   flex-direction: column;
 }
 .tree-body {
+  position: relative;
   flex: 1;
   min-height: 420px;
+}
+/* 계통도 그림은 칸 안에 비율을 지키며 들어가게 겹쳐 놓음
+   (그림이 폭에 따라 커지면서 칸 높이를 밀어내 화면이 넘치지 않게) */
+.tree-body > :deep(.tree) {
+  position: absolute;
+  inset: 0;
 }
 
 /* 오른쪽 상세 */
