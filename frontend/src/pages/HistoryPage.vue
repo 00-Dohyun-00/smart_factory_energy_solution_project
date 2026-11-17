@@ -18,9 +18,10 @@ const STATUS_INFO = {
   IGNORED: { shape: '✕', label: '넘김' },
   AUTO: { shape: '◇', label: '자동' },
 }
+// "목표 달성" 칸에 보이는 말 (UI 피드백: 더 짧고 바로 읽히는 말로)
 const RESULT_INFO = {
-  DEFENDED: { shape: '●', label: '목표 이내', className: 'ok' },
-  EXCEEDED: { shape: '■', label: '목표 초과', className: 'crit' },
+  DEFENDED: { shape: '●', label: '달성', className: 'ok' },
+  EXCEEDED: { shape: '■', label: '초과', className: 'crit' },
 }
 
 // ---- 조회 조건 ----
@@ -203,7 +204,7 @@ function toggle(id) {
       </label>
 
       <label class="field">
-        <span class="field-label">근거</span>
+        <span class="field-label">이유</span>
         <select v-model="ruleFilter" class="input">
           <option value="ALL">전체</option>
           <option v-for="rule in ruleOptions" :key="rule" :value="rule">{{ rule }}</option>
@@ -212,7 +213,7 @@ function toggle(id) {
 
       <label class="field search">
         <span class="field-label">검색</span>
-        <input v-model="keyword" type="search" class="input" placeholder="이유, 근거, 처리자" />
+        <input v-model="keyword" type="search" class="input" placeholder="이유, 처리자" />
       </label>
 
       <p v-if="dateError" class="date-error" role="alert">{{ dateError }}</p>
@@ -236,15 +237,21 @@ function toggle(id) {
           <thead>
             <tr>
               <th class="col-toggle"><span class="sr-only">자세히 보기</span></th>
+              <!--
+                칼럼 이름은 UI 피드백(2026-11-17)으로 더 바로 읽히는 말로 바꿈.
+                예전 이름: 15분 구간 → 대상 시간, 근거 → 이유, 예상 평균 → 예상 피크,
+                처리자 · 시각 → 처리자 / 처리 시각(두 칸), 결과 피크 → 실제 피크, 결과 → 목표 달성
+              -->
               <th>추천 시각</th>
-              <th>15분 구간</th>
+              <th>대상 시간</th>
               <th>추천</th>
-              <th>근거</th>
-              <th class="right">예상 평균</th>
+              <th>이유</th>
+              <th class="right">예상 피크</th>
               <th>처리</th>
-              <th>처리자 · 시각</th>
-              <th class="right">결과 피크</th>
-              <th>결과</th>
+              <th>처리자</th>
+              <th>처리 시각</th>
+              <th class="right">실제 피크</th>
+              <th>목표 달성</th>
             </tr>
           </thead>
           <tbody>
@@ -276,12 +283,9 @@ function toggle(id) {
                   <span aria-hidden="true">{{ STATUS_INFO[item.status].shape }}</span>
                   {{ STATUS_INFO[item.status].label }}
                 </td>
-                <td>
-                  <template v-if="item.appliedBy">
-                    {{ item.appliedBy }}
-                    <span class="sub num">{{ formatHourMinute(item.appliedAt) }}</span>
-                  </template>
-                  <template v-else>—</template>
+                <td>{{ item.appliedBy ?? '—' }}</td>
+                <td class="num">
+                  {{ item.appliedAt ? formatHourMinute(item.appliedAt) : '—' }}
                 </td>
                 <td class="right num">
                   <template v-if="item.resultPeakKw !== null">
@@ -305,7 +309,7 @@ function toggle(id) {
               <!-- 펼친 행: 추천 이유와 판단에 쓴 값 -->
               <tr v-if="openedId === item.id" class="detail-row">
                 <td></td>
-                <td colspan="9">
+                <td colspan="10">
                   <p class="reason">{{ item.reason }}</p>
                   <dl class="used">
                     <div v-for="used in item.usedValues" :key="used.label" class="used-item">
