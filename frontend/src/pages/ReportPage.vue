@@ -45,6 +45,11 @@ const monthLabel = computed(() => {
   return `${year}년 ${monthNumber}월`
 })
 
+// 전기요금 비교에 쓰는 작년 같은 달 이름 (예: '작년 11월')
+const lastYearLabel = computed(() =>
+  month.value ? `작년 ${Number(month.value.slice(5, 7))}월` : '작년 같은 달',
+)
+
 // 이전 달(-1) / 다음 달(+1)로 이동
 function moveMonth(step) {
   const [year, monthNumber] = month.value.split('-').map(Number)
@@ -269,6 +274,9 @@ const peakOption = computed(() => {
 })
 
 // ---- 피크가 몰리는 시간대 (날짜 × 시각 히트맵) ----
+// 세로로 긴 배치라 날짜 수에 맞춰 칸이 납작해지지 않게 높이를 잡음
+const heatHeight = computed(() => Math.max(240, report.value.dailyPeaks.length * 14 + 60))
+
 const heatOption = computed(() => {
   const target = report.value.targetPeakKw
   const dates = report.value.dailyPeaks.map((item) => item.date)
@@ -403,70 +411,72 @@ const essOption = computed(() => ({
         </div>
       </div>
 
-      <div class="middle">
-        <div class="column">
-          <section class="card">
-            <div class="card-head">
-              <h2 class="card-title">일별 최대 피크와 저감량</h2>
-              <span class="note">
-                단위 kW · 빨강은 목표 초과 · 세로축은 {{ formatKw(peakAxisMin) }}부터
-              </span>
-            </div>
-            <Chart :option="peakOption" :height="190" />
-          </section>
+      <!-- 위에서 아래로 한 줄씩: 전기요금 → 일별 피크 → 시간대 히트맵 → 목표를 넘은 구간 → ESS → 태양광 -->
+      <BillCard
+        :bill="report.bill"
+        :peak-kw="report.summary.monthPeakKw"
+        :in-progress="isLatestMonth"
+        :last-year-total="reportStore.lastYearTotal"
+        :last-year-label="lastYearLabel"
+      />
 
-          <section class="card">
-            <div class="card-head">
-              <h2 class="card-title">피크가 몰리는 시간대</h2>
-              <span class="note">칸 하나 = 그 날 그 시각의 최대 15분 피크</span>
-            </div>
-            <Chart :option="heatOption" :height="224" />
-          </section>
+      <section class="card">
+        <div class="card-head">
+          <h2 class="card-title">일별 최대 피크와 저감량</h2>
+          <span class="note">
+            단위 kW · 빨강은 목표 초과 · 세로축은 {{ formatKw(peakAxisMin) }}부터
+          </span>
         </div>
+        <Chart :option="peakOption" :height="230" />
+      </section>
 
-        <div class="column">
-          <BillCard :bill="report.bill" />
-
-          <!-- 목표를 넘은 구간 -->
-          <section class="card exceeded">
-            <div class="card-head">
-              <h2 class="card-title">목표를 넘은 구간 {{ report.exceeded.length }}건</h2>
-              <RouterLink to="/logs" class="link">추천 이력에서 보기</RouterLink>
-            </div>
-            <p v-if="!report.exceeded.length" class="empty">목표를 넘은 구간이 없습니다.</p>
-            <div v-else class="table-wrap">
-              <table class="table">
-                <thead>
-                  <tr>
-                    <th>15분 구간</th>
-                    <th class="right">결과 피크</th>
-                    <th class="right">초과</th>
-                    <th>추천</th>
-                    <th>처리</th>
-                    <th>원인</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in report.exceeded" :key="item.windowStart">
-                    <td class="num">
-                      {{ formatMonthDayTime(item.windowStart).slice(0, 11) }}~{{
-                        formatHourMinute(item.windowEnd)
-                      }}
-                    </td>
-                    <td class="right num">
-                      <strong>{{ formatKw(item.resultPeakKw) }} kW</strong>
-                    </td>
-                    <td class="right num over">+{{ formatKw(item.overKw) }}</td>
-                    <td class="num">방전 {{ formatKw(item.powerKw) }} kW</td>
-                    <td>{{ STATUS_LABELS[item.status] }}</td>
-                    <td class="cause">{{ item.cause }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
+      <section class="card">
+        <div class="card-head">
+          <h2 class="card-title">피크가 몰리는 시간대</h2>
+          <span class="note">칸 하나 = 그 날 그 시각의 최대 15분 피크</span>
         </div>
-      </div>
+        <!-- key: 날짜 수가 바뀌면 그래프 높이도 바뀌므로 새로 만듦 -->
+        <Chart :key="heatHeight" :option="heatOption" :height="heatHeight" />
+      </section>
+
+      <!-- 목표를 넘은 구간 -->
+      <section class="card exceeded">
+        <div class="card-head">
+          <h2 class="card-title">목표를 넘은 구간 {{ report.exceeded.length }}건</h2>
+          <RouterLink to="/logs" class="link">추천 이력에서 보기</RouterLink>
+        </div>
+        <p v-if="!report.exceeded.length" class="empty">목표를 넘은 구간이 없습니다.</p>
+        <div v-else class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>15분 구간</th>
+                <th class="right">결과 피크</th>
+                <th class="right">초과</th>
+                <th>추천</th>
+                <th>처리</th>
+                <th>원인</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in report.exceeded" :key="item.windowStart">
+                <td class="num">
+                  {{ formatMonthDayTime(item.windowStart).slice(0, 11) }}~{{
+                    formatHourMinute(item.windowEnd)
+                  }}
+                </td>
+                <td class="right num">
+                  <strong>{{ formatKw(item.resultPeakKw) }} kW</strong>
+                </td>
+                <td class="right num over">+{{ formatKw(item.overKw) }}</td>
+                <td class="num">방전 {{ formatKw(item.powerKw) }} kW</td>
+                <td>{{ STATUS_LABELS[item.status] }}</td>
+                <td class="cause">{{ item.cause }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div class="bottom">
         <!-- ESS 운용 -->
@@ -554,11 +564,14 @@ const essOption = computed(() => ({
 </template>
 
 <style scoped>
+/* 보고서는 위에서 아래로 읽는 세로 배치. 글줄이 너무 길어지지 않게 폭을 제한하고 가운데에 둠 */
 .page {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  max-width: 1200px;
   min-height: 100%;
+  margin: 0 auto;
   padding: 20px;
 }
 
@@ -680,18 +693,6 @@ const essOption = computed(() => ({
   color: var(--mute);
 }
 
-/* 가운데: 왼쪽 그래프 2개 + 오른쪽 요금·초과 구간 */
-.middle {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(520px, 37vw, 700px);
-  gap: 16px;
-}
-.column {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
 .card-head {
   display: flex;
   align-items: center;
@@ -716,8 +717,6 @@ const essOption = computed(() => ({
 .exceeded {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
 }
 .empty {
   display: flex;
@@ -756,10 +755,10 @@ const essOption = computed(() => ({
   color: var(--ink-2);
 }
 
-/* 아래: ESS + 태양광·탄소 */
+/* 아래: ESS → 태양광·탄소 (세로로 이어서) */
 .bottom {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(400px, 28vw, 520px);
+  display: flex;
+  flex-direction: column;
   gap: 16px;
 }
 .ess-body {
