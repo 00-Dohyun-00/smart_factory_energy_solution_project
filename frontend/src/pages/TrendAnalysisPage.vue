@@ -9,10 +9,18 @@
 import { computed, ref, watch } from 'vue'
 import Chart from '@/components/Chart.vue'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
+import { useHistoryStore } from '@/stores/useHistoryStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
-import { formatInteger, formatKw, formatMonthDayTime, formatOneDecimal } from '@/utils/format'
+import {
+  formatHourMinute,
+  formatInteger,
+  formatKw,
+  formatMonthDayTime,
+  formatOneDecimal,
+} from '@/utils/format'
 
 const analysisStore = useAnalysisStore()
+const historyStore = useHistoryStore() // 그래프 위 추천 핀용. 추천 이력 화면과 같은 API를 씀
 const realtimeStore = useRealtimeStore()
 
 const INTERVALS = [
@@ -35,6 +43,11 @@ const STATUS_INFO = {
   AUTO: { shape: '◇', label: '자동' },
   IGNORED: { shape: '✕', label: '넘김' },
 }
+// 그래프 위 추천 핀: 위의 처리 상태에 "추천 중"(아직 처리 전)을 더함
+const PIN_INFO = { ...STATUS_INFO, RECOMMENDED: { shape: '○', label: '추천 중' } }
+const ACTION_LABELS = { CHARGE: '충전', DISCHARGE: '방전', IDLE: '대기' }
+// 요금 시간대 이름 (순위 보기에서 시각 옆에 적음)
+const PERIOD_LABELS = { PEAK: '최대부하', MID: '중간부하', LIGHT: '경부하' }
 
 // ---- 조회 조건 ----
 const preset = ref('week') // today(오늘) | week(최근 7일) | month(이번 달) | custom(직접 입력)
@@ -43,6 +56,8 @@ const toDate = ref('')
 const interval = ref('HOUR')
 const shown = ref(ITEMS.map((item) => item.key)) // 켜져 있는 항목들
 const focusAt = ref('') // "눈에 띄는 구간"에서 고른 시각 (그래프에 세로선으로 표시)
+const hourlyView = ref('time') // 시간대별 사용 패턴 보기: time(시간 순 막대) | rank(많이 쓴 순위)
+const showPins = ref(true) // 전력 그래프 위에 추천 기호를 보일지
 
 // "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
 const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) ?? '')
@@ -73,6 +88,8 @@ function applyPreset(name) {
 function load(showLoading = true) {
   if (!fromDate.value || !toDate.value || dateError.value) return
   analysisStore.fetchTrend(fromDate.value, toDate.value, interval.value, showLoading)
+  // 같은 기간의 추천 이력도 받아 그래프 위에 핀으로 꽂음
+  historyStore.fetchDecisions(fromDate.value, toDate.value, showLoading)
 }
 
 // 기간이나 간격이 바뀌면 다시 조회
@@ -209,19 +226,59 @@ const legend = {
   textStyle: { color: COLOR.ink2 },
 }
 
-// "눈에 띄는 구간"에서 고른 시각이 그래프의 어느 칸인지 (그 시각이 들어 있는 칸)
-const focusLabel = computed(() => {
-  if (!focusAt.value) return null
+// 어떤 시각이 그래프의 어느 칸인지 (그 시각이 들어 있는 칸의 가로축 글자)
+function slotLabelOf(at) {
   let found = null
   points.value.forEach((item, index) => {
-    if (item.recordedAt <= focusAt.value) found = labels.value[index]
+    if (item.recordedAt <= at) found = labels.value[index]
   })
   return found
+}
+
+// "눈에 띄는 구간"에서 고른 시각이 그래프의 어느 칸인지
+const focusLabel = computed(() => (focusAt.value ? slotLabelOf(focusAt.value) : null))
+
+// ---- 추천 핀 ----
+// 조회 기간 안의 추천을 그래프 칸별로 묶음. 예: { '11-13 10:00': [추천, 추천] }
+const pinsByLabel = computed(() => {
+  const result = {}
+  if (!trend.value) return result
+  const from = `${trend.value.from}T00:00:00`
+  const to = `${trend.value.to}T23:59:59`
+  for (const item of historyStore.decisions) {
+    // 다른 화면에서 받아 둔 다른 기간의 이력이 섞이지 않게 기간 안의 것만 씀
+    if (!PIN_INFO[item.status] || item.decidedAt < from || item.decidedAt > to) continue
+    const label = slotLabelOf(item.decidedAt)
+    if (!label) continue
+    if (!result[label]) result[label] = []
+    result[label].push(item)
+  }
+  return result
 })
 
-// 기준선(가로)과 고른 시각(세로)을 그리는 설정
+// 핀에 적는 기호: 그 칸에 나온 추천들의 처리 상태 (같은 기호는 한 번만)
+function pinShapes(list) {
+  return [...new Set(list.map((item) => PIN_INFO[item.status].shape))].join('')
+}
+
+// 전력 그래프 툴팁 아래에 붙이는 그 칸의 추천 목록
+function pinTooltip(label) {
+  if (!showPins.value) return ''
+  const list = pinsByLabel.value[label] ?? []
+  if (!list.length) return ''
+  const rows = list.slice(0, 4).map((item) => {
+    const power = item.action === 'IDLE' ? '' : ` ${formatKw(item.powerKw)} kW`
+    const info = PIN_INFO[item.status]
+    return `${info.shape} ${formatHourMinute(item.decidedAt)} ${ACTION_LABELS[item.action]}${power} · ${info.label}`
+  })
+  if (list.length > 4) rows.push(`외 ${list.length - 4}건`)
+  return `<br/><strong>추천</strong><br/>${rows.join('<br/>')}`
+}
+
+// 기준선(가로), 추천 기호, 고른 시각(세로)을 그리는 설정
 // lines 예: [{ value: 1800, text: '목표 피크 1,800', color: COLOR.crit, dashed: false }]
-function markLines(lines) {
+// withPins = true면 그래프 위쪽 띠에 추천 기호를 적음 (전력 그래프만)
+function markLines(lines, withPins = false) {
   const data = lines.map((item) => ({
     yAxis: item.value,
     lineStyle: {
@@ -236,6 +293,18 @@ function markLines(lines) {
       fontWeight: 'bold',
     },
   }))
+  // 추천은 세로선을 긋지 않고(선이 많으면 그래프가 지저분해짐) 그래프 위쪽 띠에 기호만 적음.
+  // 선 색을 투명하게 두고 선 끝의 글자(기호)만 보이게 하는 방식. 자세한 내용은 툴팁으로 봄
+  // (opacity: 0을 쓰면 글자까지 같이 사라져서 색을 투명하게 함)
+  if (withPins && showPins.value) {
+    for (const [label, list] of Object.entries(pinsByLabel.value)) {
+      data.push({
+        xAxis: label,
+        lineStyle: { color: 'rgba(0, 0, 0, 0)' },
+        label: { formatter: pinShapes(list), position: 'end', color: COLOR.ink2, fontSize: 11 },
+      })
+    }
+  }
   if (focusLabel.value) {
     data.push({
       xAxis: focusLabel.value,
@@ -280,13 +349,24 @@ const powerOption = computed(() => {
   const lines = shown.value.includes('grid')
     ? [{ value: target, text: `목표 피크 ${formatKw(target)}`, color: COLOR.crit }]
     : []
-  if (series.length) series[0].markLine = markLines(lines)
+  if (series.length) series[0].markLine = markLines(lines, true)
 
   return {
     animation: false,
-    grid: { left: 52, right: 20, top: 34, bottom: 24 },
+    // 위쪽에 범례와 추천 핀 기호가 들어가므로 여백을 넉넉히 둠
+    grid: { left: 52, right: 20, top: 44, bottom: 24 },
     legend,
-    tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatKw(value)} kW` },
+    tooltip: {
+      trigger: 'axis',
+      // 값 목록 아래에 그 칸에 나온 추천을 함께 보여 줌
+      formatter: (params) => {
+        const label = params[0].axisValue
+        const rows = params.map(
+          (item) => `${item.marker}${item.seriesName} <strong>${formatKw(item.value)} kW</strong>`,
+        )
+        return `${label}<br/>${rows.join('<br/>')}${pinTooltip(label)}`
+      },
+    },
     xAxis: timeAxis(false),
     yAxis: valueAxis,
     series,
@@ -339,6 +419,21 @@ const tempOption = computed(() => {
 })
 
 // ---- 시간대별 사용 패턴 ----
+// 순위 보기: 백엔드가 준 시각별 평균을 큰 순서로 정렬만 함. 막대 길이는 1위를 100%로 본 비율(표시용)
+const RANK_COUNT = 10 // 순위 보기에서 보여 줄 개수
+const hourlyRanks = computed(() => {
+  const sorted = [...(trend.value?.hourly ?? [])].sort((a, b) => b.avgGridKw - a.avgGridKw)
+  const top = sorted[0]?.avgGridKw || 1
+  return sorted.slice(0, RANK_COUNT).map((item, index) => ({
+    rank: index + 1,
+    hour: item.hour,
+    avgGridKw: item.avgGridKw,
+    period: PERIOD_LABELS[item.period] ?? '',
+    isPeak: item.period === 'PEAK',
+    width: (item.avgGridKw / top) * 100,
+  }))
+})
+
 const hourlyOption = computed(() => {
   const hourly = trend.value.hourly
   const names = hourly.map((item) => `${item.hour}시`)
@@ -540,12 +635,24 @@ const hourlyOption = computed(() => {
         <!-- 왼쪽: 같은 시간 축을 쓰는 그래프 세 개 -->
         <section class="card charts">
           <template v-if="powerItems.length">
-            <h2 class="chart-title">전력 <small>kW</small></h2>
+            <h2 class="chart-title">
+              전력 <small>kW</small>
+              <span v-if="showPins" class="chart-note">
+                위쪽 기호 = 추천 (● 적용 · ◇ 자동 · ✕ 넘김 · ○ 추천 중), 올리면 자세히
+              </span>
+              <label class="check pin-toggle">
+                <input v-model="showPins" type="checkbox" />
+                추천 표시
+              </label>
+            </h2>
+            <p v-if="historyStore.errorMessage" class="pin-error" role="alert">
+              추천 기록을 불러오지 못해 핀을 표시하지 못했습니다. ({{ historyStore.errorMessage }})
+            </p>
             <!--
               key: 켜 둔 항목이 바뀌면 그래프를 새로 만듦.
               Chart.vue는 이전 설정에 새 설정을 덮어쓰는 방식이라, 선의 개수가 줄면 꺼 둔 선이 남기 때문
             -->
-            <Chart :key="powerItems.join()" :option="powerOption" :height="270" />
+            <Chart :key="`${powerItems.join()}-${showPins}`" :option="powerOption" :height="270" />
           </template>
 
           <template v-if="shown.includes('soc')">
@@ -572,10 +679,44 @@ const hourlyOption = computed(() => {
           <section class="card">
             <div class="card-head">
               <h2 class="card-title">시간대별 사용 패턴</h2>
-              <span class="note">시각별 평균 한전 구매 (kW)</span>
+              <div class="presets view-switch" role="group" aria-label="보기 방식">
+                <button
+                  :class="{ active: hourlyView === 'time' }"
+                  :aria-pressed="hourlyView === 'time'"
+                  @click="hourlyView = 'time'"
+                >
+                  시간 순
+                </button>
+                <button
+                  :class="{ active: hourlyView === 'rank' }"
+                  :aria-pressed="hourlyView === 'rank'"
+                  @click="hourlyView = 'rank'"
+                >
+                  순위
+                </button>
+              </div>
             </div>
-            <Chart :option="hourlyOption" :height="190" />
-            <p class="foot-note">회색 띠는 요금이 비싼 최대부하 시간대입니다.</p>
+            <!-- Chart.vue는 크기가 0이면 오류가 나므로 v-show 대신 v-if로 바꿔 끼움 -->
+            <template v-if="hourlyView === 'time'">
+              <Chart :option="hourlyOption" :height="190" />
+              <p class="foot-note">
+                시각별 평균 한전 구매 (kW). 회색 띠는 요금이 비싼 최대부하 시간대입니다.
+              </p>
+            </template>
+            <template v-else>
+              <ol class="ranks">
+                <li v-for="item in hourlyRanks" :key="item.hour">
+                  <span class="rank num">{{ item.rank }}</span>
+                  <strong class="rank-hour num">{{ item.hour }}시</strong>
+                  <span class="rank-track" aria-hidden="true">
+                    <span class="rank-bar" :style="{ width: `${item.width}%` }"></span>
+                  </span>
+                  <span class="rank-kw num">{{ formatKw(item.avgGridKw) }} kW</span>
+                  <span class="rank-period" :class="{ peak: item.isPeak }">{{ item.period }}</span>
+                </li>
+              </ol>
+              <p class="foot-note">한전 구매가 많은 시간부터 {{ RANK_COUNT }}개 (시각별 평균)</p>
+            </template>
           </section>
 
           <section class="card">
@@ -891,6 +1032,63 @@ const hourlyOption = computed(() => {
 .table .right-text {
   text-align: right;
 }
+.pin-toggle {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 400;
+}
+.pin-error {
+  font-size: 12px;
+  color: var(--crit);
+}
+
+/* 시간대별 사용 패턴: 보기 방식 전환 */
+.view-switch {
+  margin-left: auto;
+}
+.view-switch button {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+/* 순위 보기 */
+.ranks {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ranks li {
+  display: grid;
+  grid-template-columns: 22px 40px minmax(0, 1fr) 76px 60px;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+.rank {
+  color: var(--mute);
+  text-align: right;
+}
+.rank-track {
+  height: 10px;
+  background: var(--line);
+}
+.rank-bar {
+  display: block;
+  height: 100%;
+  background: var(--src-grid);
+}
+.rank-kw {
+  text-align: right;
+}
+.rank-period {
+  font-size: 12px;
+  color: var(--mute);
+}
+.rank-period.peak {
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
 .track {
   display: inline-block;
   width: 80px;
