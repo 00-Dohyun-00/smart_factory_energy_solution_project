@@ -1,5 +1,5 @@
 <!--
-  지금 15분 구간 카드
+  현재 15분 피크 구간 카드
   왼쪽: 예상 평균(큰 숫자), 한 줄 판정, 단계
   오른쪽: 피크 게이지(정상·주의·경고 띠 위에 예상 평균 표시), 목표·예상·필요 전력·남은 시간, 구간 진행 막대
 
@@ -23,11 +23,15 @@ const STAGE_INFO = {
   WARNING: { shape: '▲', label: '주의', className: 'warn' },
   CRITICAL: { shape: '■', label: '경고', className: 'crit' },
   LOST: { shape: '◆', label: '통신 단절', className: 'lost' },
+  WAITING: { shape: '○', label: '불러오는 중', className: 'lost' },
 }
 
-// 화면에 보여 줄 단계. 연결이 끊겼거나 값이 없으면 통신 단절
+// 화면에 보여 줄 단계
+// - 연결이 끊겼으면 통신 단절
+// - 아직 첫 값을 받기 전이면 "불러오는 중" (처음 열었을 때 통신 단절로 잘못 보이지 않게)
 const stage = computed(() => {
-  if (props.stale || !props.status) return STAGE_INFO.LOST
+  if (props.stale) return STAGE_INFO.LOST
+  if (!props.status) return STAGE_INFO.WAITING
   return STAGE_INFO[props.status.peakStatus]
 })
 
@@ -37,8 +41,8 @@ const verdict = computed(() => {
   if (!status) return '값을 기다리는 중입니다'
   if (props.stale) return `연결이 끊겨 ${formatClock(status.recordedAt)} 값에서 멈춰 있습니다`
   const target = `목표 ${formatKw(status.targetPeakKw)} kW`
-  if (status.peakStatus === 'CRITICAL')
-    return `${target}를 ${formatKw(status.defenseKw)} kW 넘습니다`
+  // defenseKw는 "넘는 양"이 아니라 "더 방전해야 하는 전력"이라 여기에 쓰지 않음 (아래 숫자 칸에 따로 보임)
+  if (status.peakStatus === 'CRITICAL') return `${target}를 넘을 것으로 보입니다`
   if (status.peakStatus === 'WARNING') return `${target}에 거의 닿았습니다`
   return `${target} 안쪽입니다`
 })
@@ -80,7 +84,7 @@ const elapsedPercent = computed(() =>
 <template>
   <section class="card window" :class="stage.className">
     <div class="head">
-      <h2 class="card-title">지금 15분 구간</h2>
+      <h2 class="card-title">현재 15분 피크 구간</h2>
       <span class="range num">
         {{ formatHourMinute(status?.windowStart) }} – {{ formatHourMinute(status?.windowEnd) }}
       </span>
@@ -183,6 +187,10 @@ const elapsedPercent = computed(() =>
 .window.warn {
   --state: var(--warn);
 }
+/* 통신 단절·불러오는 중: 회색으로 멈춘 값임을 보여 줌 */
+.window.lost {
+  --state: var(--lost);
+}
 .window.crit {
   --state: var(--crit);
   border: 2px solid var(--crit);
@@ -247,11 +255,12 @@ const elapsedPercent = computed(() =>
 }
 
 /* 오른쪽 */
+/* 옆의 ESS 추천 카드가 더 길어 이 카드가 늘어나도, 내용 사이가 벌어지지 않게 위로 모음 */
 .right {
   display: flex;
   flex-direction: column;
   flex: 1;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 14px;
   min-width: 0;
 }
@@ -401,6 +410,12 @@ const elapsedPercent = computed(() =>
   }
   .big {
     font-size: 52px;
+  }
+  /* 좁은 화면(1366 등)에서는 숫자 네 개가 한 줄에 다 안 들어가 카드 밖으로 넘치므로 2×2로 놓음 */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 16px;
   }
   .stats dd {
     font-size: 20px;

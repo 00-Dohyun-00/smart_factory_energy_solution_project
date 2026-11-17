@@ -63,7 +63,9 @@ const router = createRouter({
 })
 
 // 화면을 옮길 때마다 브라우저 탭 제목을 화면 이름으로 바꿈 (탭이 여러 개일 때 구분하기 쉽게)
-router.afterEach((to) => {
+// failure: 이동이 취소된 경우(예: 환경 설정에서 "저장하지 않고 갈까요?"에 아니오)에는 값이 들어옴 → 제목을 바꾸지 않음
+router.afterEach((to, from, failure) => {
+  if (failure) return
   document.title = to.meta.title ? `${to.meta.title} · WATTever` : 'WATTever'
 })
 

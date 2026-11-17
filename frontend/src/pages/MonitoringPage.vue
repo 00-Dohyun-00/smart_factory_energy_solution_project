@@ -1,8 +1,8 @@
 <!--
   모니터링 > 통합
   1줄: KPI 5개 (공장 소비전력 · 한전 구매전력 · 태양광 발전량 · ESS 충·방전 · 배터리 잔량)
-  2줄: 지금 15분 구간(피크 게이지) · ESS 추천
-  3줄: 오늘 전력 추이 · 이벤트 로그
+  2줄: 현재 15분 피크 구간(피크 게이지) · ESS 추천
+  3줄: 오늘 공장 소비 / 오늘 한전 구매 그래프 · 이벤트 로그
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
@@ -76,7 +76,9 @@ const SLOTS = Array.from({ length: 96 }, (_, index) => {
   return `${hour}:${minute}`
 })
 
-const trendOption = computed(() => {
+// 공장 소비와 한전 구매는 그래프를 나눠 그림 (한 그래프에 선이 많으면 비교가 어려움)
+// 두 그래프는 같은 가로축, 같은 요금 띠, 같은 "지금" 세로선을 씀
+function makeTrendOption(lines, withTarget) {
   const list = realtimeStore.todayStatuses
   const target = status.value?.targetPeakKw
   const lastTime = list.length ? formatHourMinute(list[list.length - 1].recordedAt) : null
@@ -94,26 +96,23 @@ const trendOption = computed(() => {
       { xAxis: item.to === '24:00' ? '23:45' : item.to },
     ])
 
-  const lineSeries = (name, field, color) => ({
-    name,
+  const series = lines.map((line) => ({
+    name: line.name,
     type: 'line',
     showSymbol: false,
     connectNulls: false,
-    data: values(field),
-    lineStyle: { color, width: 2.5 },
-    itemStyle: { color },
-  })
+    data: values(line.field),
+    lineStyle: { color: line.color, width: 2.5, type: line.dashed ? 'dashed' : 'solid' },
+    itemStyle: { color: line.color },
+  }))
 
-  const load = lineSeries('공장 소비', 'loadKw', COLOR.ink)
-  const grid = lineSeries('한전 구매', 'gridKw', COLOR.grid)
-  const solar = lineSeries('태양광', 'solarKw', COLOR.solar)
-
-  // 목표 피크선과 요금 띠는 한전 구매 선에, "지금" 세로선은 공장 소비 선에 붙임
-  grid.markArea = { silent: true, data: tariffAreas }
-  if (target) {
-    grid.markLine = {
-      silent: true,
-      symbol: 'none',
+  // 요금 띠와 "지금" 세로선은 첫 번째 선에, 목표 피크선은 한전 구매 그래프에만 붙임
+  const first = series[0]
+  first.markArea = { silent: true, data: tariffAreas }
+  const markLines = []
+  if (withTarget && target) {
+    markLines.push({
+      yAxis: target,
       lineStyle: { color: COLOR.crit, width: 2, type: 'solid' },
       label: {
         formatter: `목표 피크 ${formatKw(target)}`,
@@ -121,27 +120,25 @@ const trendOption = computed(() => {
         color: COLOR.crit,
         fontWeight: 'bold',
       },
-      data: [{ yAxis: target }],
-    }
+    })
   }
   if (lastTime) {
-    load.markLine = {
-      silent: true,
-      symbol: 'none',
+    // 세로선은 지금 구간의 칸에 긋고, 글자에는 서버가 보낸 지금 시각을 적음
+    markLines.push({
+      xAxis: lastTime,
       lineStyle: { color: COLOR.ink2, width: 1, type: 'solid' },
-      // 세로선은 지금 구간의 칸에 긋고, 글자에는 서버가 보낸 지금 시각을 적음
       label: {
         formatter: `지금 ${formatHourMinute(status.value?.recordedAt)}`,
         position: 'end',
         color: COLOR.ink,
       },
-      data: [{ xAxis: lastTime }],
-    }
+    })
   }
+  first.markLine = { silent: true, symbol: 'none', data: markLines }
 
   return {
     animation: false,
-    grid: { left: 52, right: 20, top: 40, bottom: 24 },
+    grid: { left: 52, right: 20, top: 28, bottom: 24 },
     legend: {
       right: 0,
       top: 0,
@@ -165,9 +162,31 @@ const trendOption = computed(() => {
       axisLabel: { color: COLOR.mute },
       splitLine: { lineStyle: { color: COLOR.line } },
     },
-    series: [load, grid, solar],
+    series,
   }
-})
+}
+
+// 오늘 그래프 두 개 (위: 공장 소비 / 아래: 한전 구매)
+const trendCards = computed(() => [
+  {
+    key: 'load',
+    title: '오늘 공장 소비',
+    note: '15분 평균 (kW), 회색 띠는 요금 비싼 시간',
+    option: makeTrendOption(
+      [
+        { name: '공장 소비', field: 'loadKw', color: COLOR.ink },
+        { name: '태양광', field: 'solarKw', color: COLOR.solar, dashed: true },
+      ],
+      false,
+    ),
+  },
+  {
+    key: 'grid',
+    title: '오늘 한전 구매',
+    note: '15분 평균 (kW), 피크는 이 값으로 정해짐',
+    option: makeTrendOption([{ name: '한전 구매', field: 'gridKw', color: COLOR.grid }], true),
+  },
+])
 </script>
 
 <template>
@@ -179,6 +198,11 @@ const trendOption = computed(() => {
       <p v-if="status" class="tariff">
         요금 시간대 <strong>{{ status.tariff.label }}</strong>
         <span class="num">{{ status.tariff.until }}</span>부터 {{ status.tariff.nextLabel }}
+      </p>
+      <!-- 자동 모드일 때 멀리서도 보이게 제목 줄에 크게 표시 (실제 제어가 아니라 시뮬레이션) -->
+      <p v-if="settingsStore.values.operationMode === 'AUTO'" class="mode-band">
+        <strong>운영 모드: 자동 (시뮬레이션)</strong>
+        <span class="mode-sub">추천을 자동으로 적용 중</span>
       </p>
     </div>
 
@@ -205,21 +229,23 @@ const trendOption = computed(() => {
       </div>
     </div>
 
-    <!-- 3줄: 오늘 전력 추이 + 이벤트 로그 -->
+    <!-- 3줄: 오늘 그래프 두 개(공장 소비 / 한전 구매) + 이벤트 로그 -->
     <div class="row bottom">
-      <section class="card trend">
-        <div class="card-head">
-          <h2 class="card-title">오늘 전력 추이</h2>
-          <span class="note">15분 평균 (kW), 회색 띠는 요금 비싼 시간</span>
-        </div>
-        <Chart v-if="realtimeStore.todayStatuses.length" :option="trendOption" :height="330" />
-        <p v-else-if="realtimeStore.todayLoading" class="empty">불러오는 중입니다.</p>
-        <p v-else-if="realtimeStore.todayError" class="empty" role="alert">
-          그래프를 불러오지 못했습니다. ({{ realtimeStore.todayError }})
-          <button class="text-button" @click="realtimeStore.fetchToday()">다시 시도</button>
-        </p>
-        <p v-else class="empty">오늘 기록이 아직 없습니다.</p>
-      </section>
+      <div class="trends">
+        <section v-for="card in trendCards" :key="card.key" class="card trend">
+          <div class="card-head">
+            <h2 class="card-title">{{ card.title }}</h2>
+            <span class="note">{{ card.note }}</span>
+          </div>
+          <Chart v-if="realtimeStore.todayStatuses.length" :option="card.option" :height="170" />
+          <p v-else-if="realtimeStore.todayLoading" class="empty chart-empty">불러오는 중입니다.</p>
+          <p v-else-if="realtimeStore.todayError" class="empty chart-empty" role="alert">
+            그래프를 불러오지 못했습니다. ({{ realtimeStore.todayError }})
+            <button class="text-button" @click="realtimeStore.fetchToday()">다시 시도</button>
+          </p>
+          <p v-else class="empty chart-empty">오늘 기록이 아직 없습니다.</p>
+        </section>
+      </div>
 
       <section class="card events-card">
         <div class="card-head">
@@ -254,6 +280,21 @@ const trendOption = computed(() => {
   margin-left: auto;
   font-size: 13px;
   color: var(--mute);
+}
+/* 자동 모드 띠: 상태색이 아니라 먹색 바탕으로 눈에 띄게 함 */
+.mode-band {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-left: 16px;
+  padding: 5px 12px;
+  background: var(--ink);
+  color: var(--card);
+  font-size: 14px;
+}
+.mode-sub {
+  font-size: 12px;
+  color: var(--line);
 }
 .tariff strong {
   margin: 0 6px;
@@ -316,9 +357,15 @@ const trendOption = computed(() => {
 .bottom {
   flex: 1;
 }
-.trend {
+.trends {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 16px;
   min-width: 0;
+}
+.chart-empty {
+  height: 170px;
 }
 .events-card {
   display: flex;

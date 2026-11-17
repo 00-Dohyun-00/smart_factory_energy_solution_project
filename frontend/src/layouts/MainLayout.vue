@@ -35,7 +35,11 @@ onBeforeUnmount(() => {
   clearInterval(timer)
 })
 
+// 자동 모드인지 (실제 제어가 아니라 시뮬레이션이라는 점을 함께 알림)
+const isAuto = computed(() => settingsStore.values.operationMode === 'AUTO')
+
 // 왼쪽 메뉴. 하위 화면은 만들 때마다 children에 한 줄씩 추가합니다.
+// 환경 설정은 자주 쓰지 않으므로 이 목록에서 빼고 메뉴 맨 아래에 따로 둡니다.
 const menus = [
   {
     label: '모니터링',
@@ -53,7 +57,6 @@ const menus = [
   },
   { label: '보고서', children: [{ label: '월간 성적표', to: '/report' }] },
   { label: '운영 로그', children: [{ label: '추천 이력', to: '/logs' }] },
-  { label: '환경 설정', children: [{ label: '기준값', to: '/settings' }] },
 ]
 
 // 왼쪽 메뉴 전체를 접었는지. 접으면 좁은 띠만 남고 본문이 넓어짐
@@ -148,8 +151,22 @@ const peakMark = computed(() => {
         <RouterLink v-if="!collapsed" to="/" class="brand">WATTever</RouterLink>
       </div>
 
-      <!-- 접었을 때: 메뉴 대신 지금 피크 단계와 연결 상태만 도형으로 보여 줌 -->
+      <!-- 자동 모드는 어느 화면에서든 바로 보이게 메뉴 맨 위에 둠 (실제 제어가 아니라 시뮬레이션) -->
+      <p v-if="isAuto && !collapsed" class="auto-badge">
+        자동 모드 <span class="auto-sub">시뮬레이션</span>
+      </p>
+
+      <!-- 접었을 때: 메뉴 대신 자동 모드, 지금 피크 단계, 연결 상태만 짧게 보여 줌 -->
       <div v-if="collapsed" class="rail">
+        <span
+          v-if="isAuto"
+          class="rail-auto"
+          role="img"
+          aria-label="자동 모드 (시뮬레이션)"
+          title="자동 모드 (시뮬레이션)"
+        >
+          자동
+        </span>
         <span
           v-if="peakMark"
           class="mark"
@@ -206,15 +223,12 @@ const peakMark = computed(() => {
       </nav>
 
       <div v-if="!collapsed" class="foot">
+        <RouterLink to="/settings" class="settings-link">환경 설정</RouterLink>
         <!-- 시각은 브라우저 시계가 아니라 서버가 보낸 값(recordedAt)을 씀 -->
         <p class="clock num">{{ formatClock(realtimeStore.status?.recordedAt) }}</p>
         <!-- 시계가 실제보다 빨리 가는 이유를 알려 줌 (시뮬레이션이 배속으로 돌 때만) -->
         <p v-if="realtimeStore.status?.simulationSpeed > 1" class="speed">
           시뮬레이션 <span class="num">{{ realtimeStore.status.simulationSpeed }}</span>배속
-        </p>
-        <!-- 자동 모드는 실제 제어가 아니라는 점을 모든 화면에서 알려 줌 -->
-        <p v-if="settingsStore.values.operationMode === 'AUTO'" class="speed">
-          자동 모드 (시뮬레이션)
         </p>
         <p v-if="realtimeStore.status" class="weather">
           {{ realtimeStore.status.weather.text }}
@@ -315,6 +329,28 @@ const peakMark = computed(() => {
 .rail-connection {
   font-size: 12px;
 }
+.rail-auto {
+  padding: 1px 4px;
+  border: 1.5px solid var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+}
+/* 메뉴 맨 위의 자동 모드 표시 */
+.auto-badge {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0 12px 10px;
+  padding: 7px 10px;
+  border: 1.5px solid var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+.auto-sub {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--mute);
+}
 .rail-connection.on {
   color: var(--ok);
 }
@@ -385,6 +421,25 @@ const peakMark = computed(() => {
 
 .foot {
   padding: 12px 20px 0;
+  border-top: 1px solid var(--line);
+}
+/* 메뉴 맨 아래의 환경 설정 링크 */
+.settings-link {
+  display: block;
+  margin: -4px -20px 10px;
+  padding: 9px 20px;
+  font-size: 15px;
+  color: var(--ink-2);
+}
+.settings-link:hover {
+  background: var(--bg);
+}
+.settings-link.router-link-exact-active {
+  padding-left: 16px;
+  background: var(--bg);
+  border-left: 4px solid var(--ink);
+  font-weight: 700;
+  color: var(--ink);
 }
 .clock {
   font-size: 22px;

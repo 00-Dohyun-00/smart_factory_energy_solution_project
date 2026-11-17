@@ -1,12 +1,13 @@
 <!--
   환경 설정 > 기준값
-  묶음 세 개(피크 · 요금 / ESS / 운영)를 나란히 두고 묶음마다 저장합니다. 아래에는 변경 기록.
+  묶음 세 개(피크 / ESS / 운영)를 나란히 두고 묶음마다 저장합니다. 아래에는 변경 기록.
 
   - 바꿨지만 아직 저장하지 않은 값은 왼쪽 굵은 줄과 "저장 전 값 → 바꾼 값"으로 표시합니다.
   - 값이 올바른지는 백엔드도 확인하지만, 빈칸이나 범위를 벗어난 값은 화면에서 먼저 알려 줍니다.
 -->
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { formatInteger, formatKw, formatOneDecimal } from '@/utils/format'
@@ -21,40 +22,17 @@ const MODES = [
 const MODE_LABELS = { MANUAL: '운영자 승인', AUTO: '자동 모드 (시뮬레이션)' }
 
 // 화면에 놓을 항목들. key는 백엔드 설정 이름과 같아야 함
-// min, max: 화면에서 먼저 걸러 주는 범위 / decimal: 소수 1자리까지 쓰는 값 / period: 요금 시간대
+// min, max: 화면에서 먼저 걸러 주는 범위 / decimal: 소수 1자리까지 쓰는 값
+// (2026-11-17, UI 피드백) 요금 단가 4개는 요금 기준표에서, 충·방전 효율은 외부에서 받아오는 값이라
+// 여기서 고치지 않도록 화면에서 뺐음
 const GROUPS = [
   {
     key: 'peak',
-    title: '피크 · 요금',
-    note: '피크 단계와 요금 계산의 기준',
+    title: '피크',
+    note: '피크 단계를 나누는 기준',
     fields: [
       { key: 'targetPeakKw', label: '목표 피크', unit: 'kW', min: 100, max: 100000 },
       { key: 'warnPercent', label: '주의선', unit: '%', min: 50, max: 100 },
-      {
-        key: 'priceLightWon',
-        label: '경부하 단가',
-        unit: '원/kWh',
-        min: 1,
-        max: 10000,
-        period: 'LIGHT',
-      },
-      {
-        key: 'priceMidWon',
-        label: '중간부하 단가',
-        unit: '원/kWh',
-        min: 1,
-        max: 10000,
-        period: 'MID',
-      },
-      {
-        key: 'pricePeakWon',
-        label: '최대부하 단가',
-        unit: '원/kWh',
-        min: 1,
-        max: 10000,
-        period: 'PEAK',
-      },
-      { key: 'basePriceWon', label: '기본요금 단가', unit: '원/kW', min: 1, max: 100000 },
     ],
   },
   {
@@ -66,14 +44,6 @@ const GROUPS = [
       { key: 'maxPowerKw', label: '최대 충·방전 출력', unit: 'kW', min: 1, max: 100000 },
       { key: 'socLowPercent', label: '잔량 하한', unit: '%', min: 0.1, max: 99 },
       { key: 'socHighPercent', label: '잔량 상한', unit: '%', min: 1, max: 100 },
-      {
-        key: 'efficiencyPercent',
-        label: '충·방전 효율',
-        unit: '%',
-        min: 1,
-        max: 100,
-        decimal: true,
-      },
       { key: 'roomTempLimitC', label: '배터리실 온도 제한', unit: '℃', min: 1, max: 80 },
     ],
   },
@@ -89,6 +59,22 @@ const GROUPS = [
   },
 ]
 const ALL_FIELDS = GROUPS.flatMap((group) => group.fields.map((field) => ({ ...field, group })))
+
+// 화면에서는 뺐지만 예전 변경 기록에는 남아 있을 수 있는 항목.
+// 기록이 'pricePeakWon' 같은 영문 이름으로 보이지 않게 이름과 단위만 둠 (고치는 칸은 만들지 않음)
+const RETIRED_FIELDS = [
+  { key: 'priceLightWon', label: '경부하 단가', unit: '원/kWh', group: { title: '요금' } },
+  { key: 'priceMidWon', label: '중간부하 단가', unit: '원/kWh', group: { title: '요금' } },
+  { key: 'pricePeakWon', label: '최대부하 단가', unit: '원/kWh', group: { title: '요금' } },
+  { key: 'basePriceWon', label: '기본요금 단가', unit: '원/kW', group: { title: '요금' } },
+  {
+    key: 'efficiencyPercent',
+    label: '충·방전 효율',
+    unit: '%',
+    decimal: true,
+    group: { title: 'ESS' },
+  },
+]
 
 // ---- 저장된 값과 고치는 중인 값 ----
 const saved = computed(() => settingsStore.values) // 저장된 값 (key → 값)
@@ -118,6 +104,31 @@ watch(
 
 const isChanged = (field) => draft.value[field.key] !== saved.value[field.key]
 const changedFields = (group) => group.fields.filter(isChanged)
+
+// ---- 저장하지 않은 값이 있을 때 화면을 떠나지 못하게 한 번 물어봄 ----
+// 바꾼 값은 이 화면 안에만 있어서, 묻지 않으면 다른 메뉴를 누르는 순간 말없이 사라짐
+const unsavedCount = computed(() => {
+  if (!Object.keys(draft.value).length) return 0 // 아직 값을 받기 전
+  return GROUPS.reduce((sum, group) => sum + changedFields(group).length, 0)
+})
+
+// 앱 안에서 다른 화면으로 갈 때 (왼쪽 메뉴, 링크)
+onBeforeRouteLeave(() => {
+  if (!unsavedCount.value) return true
+  return window.confirm(
+    `저장하지 않은 값이 ${unsavedCount.value}건 있습니다. 저장하지 않고 다른 화면으로 갈까요?`,
+  )
+})
+
+// 새로 고침, 탭 닫기, 주소 직접 입력 (브라우저가 정한 문구로 물어봄)
+function warnBeforeUnload(event) {
+  if (!unsavedCount.value) return
+  event.preventDefault()
+  event.returnValue = '' // 예전 브라우저도 묻게 하려면 이 값이 필요함
+}
+
+onMounted(() => window.addEventListener('beforeunload', warnBeforeUnload))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', warnBeforeUnload))
 
 // 값이 잘못됐으면 그 이유, 괜찮으면 ''
 function errorOf(field) {
@@ -167,14 +178,6 @@ function valueText(field, value) {
   return `${number} ${field.unit}`
 }
 
-// 요금 시간대의 시간 구간 글자 (예: '09:00 ~ 12:00, 16:00 ~ 19:00'). 구분은 백엔드가 준 값
-function periodTimes(period) {
-  return (realtimeStore.status?.tariff.periods ?? [])
-    .filter((item) => item.period === period)
-    .map((item) => `${item.from} ~ ${item.to}`)
-    .join(', ')
-}
-
 // 항목 아래의 도움말
 function helpOf(field) {
   if (field.key === 'targetPeakKw') return '15분 평균이 이 값을 넘으면 경고'
@@ -185,8 +188,6 @@ function helpOf(field) {
       ? `목표의 이 비율부터 주의. 지금 값으로는 ${formatKw(Math.round(warnKw))} kW부터`
       : '목표의 이 비율부터 주의'
   }
-  if (field.period) return periodTimes(field.period)
-  if (field.key === 'basePriceWon') return '단가는 임시 값입니다. 실제 계약 요금으로 바꿔야 합니다'
   if (field.key === 'maxPowerKw') return '추천 전력은 이 값을 넘지 않음'
   if (field.key === 'socLowPercent') return '이 아래로는 방전하지 않음'
   if (field.key === 'socHighPercent') return '이 위로는 충전하지 않음'
@@ -215,7 +216,7 @@ function lastSaved(group) {
 // 변경 기록의 한 줄을 화면용으로 (항목 이름과 단위는 위의 항목 목록에서 찾음)
 const historyRows = computed(() =>
   settingsStore.history.map((item) => {
-    const field = ALL_FIELDS.find((one) => one.key === item.key)
+    const field = [...ALL_FIELDS, ...RETIRED_FIELDS].find((one) => one.key === item.key)
     return {
       id: item.id,
       changedAt: dateTimeText(item.changedAt),

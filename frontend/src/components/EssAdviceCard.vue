@@ -3,7 +3,7 @@
   추천 판단은 백엔드가 하고, 여기서는 보여 주고 버튼 입력만 받습니다.
 -->
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { formatClock, formatKw } from '@/utils/format'
 
 const props = defineProps({
@@ -28,6 +28,13 @@ const needsAnswer = computed(
   () => props.decision?.status === 'RECOMMENDED' && props.decision?.action !== 'IDLE',
 )
 
+// 카드 맨 아래(버튼 또는 처리 결과)에 보여 줄 것이 있는지. 아직 처리 전인 대기 추천은 없음
+const showAnswer = computed(
+  () =>
+    props.decision?.action !== 'IDLE' ||
+    ['APPLIED', 'AUTO', 'IGNORED'].includes(props.decision?.status),
+)
+
 // 판단 근거: 백엔드가 준 목록(usedValues)을 그대로 보여 줌. 숫자는 자릿수만 맞춤
 const usedValues = computed(() =>
   (props.decision?.usedValues ?? []).map((item) => ({
@@ -35,6 +42,14 @@ const usedValues = computed(() =>
     text: typeof item.value === 'number' ? formatKw(item.value) : item.value,
     unit: item.unit,
   })),
+)
+
+// 판단 근거는 항목이 많아(11개) 카드가 길어지면 좁은 화면에서 [적용] 버튼이 첫 화면 아래로 밀림.
+// 그래서 앞의 몇 개(백엔드가 앞에 둔 중요한 값)만 보이고, 나머지는 [모두 보기]로 펼침
+const SHOWN_COUNT = 4
+const showAllUsed = ref(false)
+const visibleUsed = computed(() =>
+  showAllUsed.value ? usedValues.value : usedValues.value.slice(0, SHOWN_COUNT),
 )
 </script>
 
@@ -59,16 +74,26 @@ const usedValues = computed(() =>
 
       <!-- 판단 근거 -->
       <div v-if="usedValues.length" class="used">
-        <h3>판단 근거</h3>
+        <div class="used-head">
+          <h3>판단 근거</h3>
+          <button
+            v-if="usedValues.length > SHOWN_COUNT"
+            class="more-used"
+            :aria-expanded="showAllUsed"
+            @click="showAllUsed = !showAllUsed"
+          >
+            {{ showAllUsed ? '접기' : `모두 보기 (${usedValues.length}개)` }}
+          </button>
+        </div>
         <dl>
-          <div v-for="item in usedValues" :key="item.label">
+          <div v-for="item in visibleUsed" :key="item.label">
             <dt>{{ item.label }}</dt>
             <dd class="num">{{ item.text }} {{ item.unit }}</dd>
           </div>
         </dl>
       </div>
 
-      <div class="answer">
+      <div v-if="showAnswer" class="answer">
         <template v-if="needsAnswer">
           <div class="buttons">
             <button class="apply" :disabled="busy || offline" @click="emit('apply')">
@@ -96,7 +121,8 @@ const usedValues = computed(() =>
           <span class="done-sub num">{{ formatClock(decision.appliedAt) }}</span>
         </p>
         <p v-else-if="decision.status === 'IGNORED'" class="done quiet">이번 추천은 넘겼습니다</p>
-        <p v-else class="done quiet">지금은 할 일이 없습니다</p>
+        <!-- 대기 추천은 이유 문장이 이미 "할 일 없음"을 설명하므로 상자를 따로 띄우지 않음 (카드가 길어지지 않게) -->
+        <p v-else-if="decision.action !== 'IDLE'" class="done quiet">지금은 할 일이 없습니다</p>
       </div>
     </template>
   </section>
@@ -147,27 +173,40 @@ const usedValues = computed(() =>
   color: var(--ink-2);
 }
 
-/* 판단 근거 */
+/* 판단 근거: 항목이 11개라 촘촘하게 잡아 옆의 15분 구간 카드보다 너무 길어지지 않게 함 */
 .used {
-  padding: 10px 12px;
+  padding: 8px 12px;
   background: var(--bg);
 }
+.used-head {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
 .used h3 {
-  margin-bottom: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
+}
+.more-used {
+  margin-left: auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--ink-2);
+  font-size: 12px;
+  color: var(--ink-2);
 }
 .used dl {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px 12px;
+  gap: 4px 12px;
 }
 .used dt {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--mute);
 }
 .used dd {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
 }
 
