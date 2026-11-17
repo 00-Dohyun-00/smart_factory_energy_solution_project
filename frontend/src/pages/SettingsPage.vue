@@ -6,7 +6,8 @@
   - 값이 올바른지는 백엔드도 확인하지만, 빈칸이나 범위를 벗어난 값은 화면에서 먼저 알려 줍니다.
 -->
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { formatInteger, formatKw, formatOneDecimal } from '@/utils/format'
@@ -103,6 +104,31 @@ watch(
 
 const isChanged = (field) => draft.value[field.key] !== saved.value[field.key]
 const changedFields = (group) => group.fields.filter(isChanged)
+
+// ---- 저장하지 않은 값이 있을 때 화면을 떠나지 못하게 한 번 물어봄 ----
+// 바꾼 값은 이 화면 안에만 있어서, 묻지 않으면 다른 메뉴를 누르는 순간 말없이 사라짐
+const unsavedCount = computed(() => {
+  if (!Object.keys(draft.value).length) return 0 // 아직 값을 받기 전
+  return GROUPS.reduce((sum, group) => sum + changedFields(group).length, 0)
+})
+
+// 앱 안에서 다른 화면으로 갈 때 (왼쪽 메뉴, 링크)
+onBeforeRouteLeave(() => {
+  if (!unsavedCount.value) return true
+  return window.confirm(
+    `저장하지 않은 값이 ${unsavedCount.value}건 있습니다. 저장하지 않고 다른 화면으로 갈까요?`,
+  )
+})
+
+// 새로 고침, 탭 닫기, 주소 직접 입력 (브라우저가 정한 문구로 물어봄)
+function warnBeforeUnload(event) {
+  if (!unsavedCount.value) return
+  event.preventDefault()
+  event.returnValue = '' // 예전 브라우저도 묻게 하려면 이 값이 필요함
+}
+
+onMounted(() => window.addEventListener('beforeunload', warnBeforeUnload))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', warnBeforeUnload))
 
 // 값이 잘못됐으면 그 이유, 괜찮으면 ''
 function errorOf(field) {
