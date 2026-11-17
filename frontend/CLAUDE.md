@@ -168,7 +168,7 @@ src/
 - 아래의 변경 기록은 백엔드가 준 목록(저장 시각, 항목, 저장 전·후 값, 변경자)을 그대로 보여 준다.
 - 설정은 `useSettingsStore`에 있고 공통 틀(`MainLayout.vue`)이 처음에 한 번 받아 둔다. "화면 갱신 주기"는 공통 틀의 폴링 주기로 쓰이고, 운영 모드가 자동이면 왼쪽 메뉴 맨 위, 통합 화면 제목 줄, ESS 추천 카드에 자동 모드(시뮬레이션)임을 표시한다.
 - 가짜 백엔드에서는 저장한 값이 바로 반영된다: 목표 피크·주의선(통합의 단계와 게이지), 최대 출력(추천 kW), 배터리 용량·잔량 하한/상한·온도 제한(분석), 운영 모드(자동이면 추천을 바로 적용한 것으로 기록). 추천 유효 시간은 저장만 되고 계산에는 쓰이지 않는다. 새로 고치면 처음 값으로 돌아간다.
-- 이 화면용 가짜 데이터(백엔드와 확정 필요): `GET /api/energy-settings` → `[{ key, value, updatedAt, updatedBy }]`, `PUT /api/energy-settings/{key}`(본문 `{ value }`), 변경 기록 `[{ id, changedAt, key, before, after, changedBy }]`(주소 미정). 설정 이름: `targetPeakKw`, `warnPercent`, `priceLightWon`, `priceMidWon`, `pricePeakWon`, `basePriceWon`, `capacityKwh`, `maxPowerKw`, `socLowPercent`, `socHighPercent`, `efficiencyPercent`, `roomTempLimitC`, `operationMode`(`MANUAL`·`AUTO`), `pollSeconds`, `decisionValidMinutes`.
+- 명세 v0.2 모양(2026-11-17): `GET /api/settings` → `[{ key, group, label, value(문자열), unit, updatedAt, updatedBy }]`, `PUT /api/settings`(본문 `[{ key, value }]`, 묶음의 바뀐 값을 한 번에), `GET /api/setting-histories?from=&to=` → `[{ id, changedAt, key, label, oldValue, newValue, changedBy }]`(서버 날짜 기준 최근 30일). 화면의 설정 키: `peak.target_kw`, `peak.warn_ratio`, `ess.capacity_kwh`·`ess.max_power_kw`(명세 "보기만" → 읽기 전용), `ess.soc_low`, `ess.soc_high`, `ess.room_temp_limit`, `operation.auto_mode`(`"true"`/`"false"`). `operation.poll_seconds`, `operation.decision_valid_minutes`는 명세에 없어 화면에서 뺄지 팀 결정 대기.
 
 ### 모니터링 > 설비 모니터링 세부
 
@@ -223,25 +223,30 @@ src/
 
 - 흐름: 페이지 → Store(`use{기능}Store.js`) → API 함수(`{기능}Api.js`) → `api()`. 페이지에서 `fetch`를 직접 부르지 않는다.
 - 필드 이름은 **Swagger(http://localhost:8080/swagger-ui.html)에 나온 그대로** 쓴다. 이름을 바꾸는 변환 코드를 두지 않는다.
-- 주소 규칙은 `/api/{복수형 명사}`다. `api()`에는 `/api`를 뺀 경로를 넘긴다. (예: `api('/battery-statuses/latest')`)
+- 주소 규칙은 `/api/{복수형 명사}`다. `api()`에는 `/api`를 뺀 경로를 넘긴다. (예: `api('/site-powers/latest')`)
 - **백엔드가 아직 없는 API**는 해당 `{기능}Api.js` 함수가 임시로 가짜 데이터를 돌려주게 만든다. 함수 이름과 응답 모양은 실제와 같게 하고, `// TODO: 백엔드 연결 후 교체` 주석을 남긴다. Store와 페이지는 고치지 않아도 되게 한다.
-- 현재 백엔드에는 API가 하나도 없다. 아래는 기획 초안이며 백엔드와 확정되면 `api/` 폴더만 고친다.
+- 주소와 응답 모양의 기준은 **팀 API 명세 v0.2**(구글 시트 "(api 명세서) 2조 에너지솔루션")다. 명세와 화면의 차이·백엔드 요청 목록은 `docs/api-spec-diff.md`에 있다. (예전 `docs/api-spec.md`는 v0.1 주소라 쓰지 않는다)
+- 지금은 백엔드 API가 없어 `api/` 함수가 가짜 데이터(`fakeBackend.js`)를 돌려준다. 함수 이름은 그대로 두고, 백엔드가 열리면 각 파일 맨 위 주석의 "교체 예" 한 줄로 바꾼다. 가짜 응답도 명세 v0.2 모양에 맞춰 두었다(2026-11-17).
 
-| 메서드 | 주소 | 용도 |
-|---|---|---|
-| GET | `/api/battery-statuses/latest` | 실시간 관제용 최신 1건 |
-| GET | `/api/battery-statuses?from=&to=` | 그래프용 기간 조회 |
-| GET | `/api/battery-decisions?from=&to=` | 운영 이력 |
-| PATCH | `/api/battery-decisions/{id}` | 적용 / 무시 |
-| GET | `/api/reports?month=` | 성적표 |
-| GET | `/api/energy-settings` | 설정 조회 |
-| PUT | `/api/energy-settings/{key}` | 설정 변경 |
+| 명세 번호 | 메서드 | 주소 (v0.2) | 프론트 함수 | 쓰는 화면 |
+|---|---|---|---|---|
+| 1 | GET | `/api/site-powers/latest` | `getLatestBatteryStatus` | 공통 틀, 통합, 설비 모니터링 |
+| 2 | GET | `/api/recommendations/latest` (없으면 204) | `getLatestBatteryDecision` | 통합 |
+| 3 | PATCH | `/api/recommendations/{id}` 본문 `{ status }` | `updateBatteryDecision` | 통합 |
+| 4 | GET | `/api/events?limit=10` | `getRecentEvents` | 통합 |
+| 5 | GET | `/api/site-powers/today` | `getTodayBatteryStatuses` | 통합 |
+| 7 | GET | `/api/zones/{zoneName}` (예: `Z2`) | `getZoneRecent` | 설비 모니터링 |
+| 8 | GET | `/api/recommendations?from=&to=` | `getBatteryDecisions` | 추천 이력, 추이 분석 |
+| 9 | GET | `/api/reports?month=` | `getReport` | 월간 성적표 |
+| 10 | GET | `/api/analyses/trend?from=&to=&interval=` | `getTrendAnalysis` | 추이 분석 |
+| 11 | GET | `/api/settings` | `getSettings` | 공통 틀, 환경 설정 |
+| 12 | PUT | `/api/settings` 본문 `[{ key, value }]` | `updateSettings` | 환경 설정 |
+| 13 | GET | `/api/setting-histories?from=&to=` | `getSettingHistories` | 환경 설정 |
+| 16 | GET | `/api/demand-intervals?from=&to=&limit=8` | `getDemandIntervals` | 피크 분석 |
+| (추가 요청) | GET | `/api/analyses/peak?from=&to=` | `getPeakAnalysis` | 피크 분석 |
 
-주요 값 (초안, 확인 필요):
-
-- 상태 1건: `recordedAt`, `loadKw`, `solarKw`, `chargeKw`, `dischargeKw`, `gridKw`, `socPercent`, `windowKwh`, `predictedKw`
-- 추천 1건: `decidedAt`, `ruleNo`, `action`(`CHARGE`/`DISCHARGE`/`IDLE`), `powerKw`, `reason`, `status`(`RECOMMENDED`/`APPLIED`/`IGNORED`/`AUTO`), `appliedBy`, `appliedAt`, `resultPeakKw`
-- 배터리실 온도, 날씨, 값의 출처 구분, 설비별 소비전력·공급원 비율 필드는 확인 필요.
+- 명세 6번(`/api/site-powers/recent`)은 쓰는 화면이 없어 함수를 지웠다.
+- 설정 값은 명세대로 **문자열**로 오고 간다. `useSettingsStore`가 `values`에서 숫자·`true`/`false`로 바꿔 주고, 저장할 때 다시 문자열로 보낸다. 키 이름은 명세 그대로 쓴다(예: `settingsStore.values['ess.max_power_kw']`).
 - 가짜 데이터에 임시로 넣어 쓰는 값(백엔드와 확정 필요): 15분 구간 누적 `windowPoints[{ minute, demandKw }]`, 최대 피크 `todayPeakKw`·`monthPeakKw`, 요금 시간대 `tariff{ period, label, until, nextLabel, periods[] }`, ESS `pcsStatus`·`sohPercent`.
 
 성적표의 운영 방식 비교(한전 100% / 태양광 자가소비 / 태양광+ESS 추천 운영)는 **지금 성적표 화면에 넣지 않는다** (2026-11-15 결정). 나중에 백엔드의 가상 시나리오 시뮬레이션이 연결되면 그때 비교 화면을 만든다. 만들 때는 개수를 코드에 박지 않고 API가 주는 배열을 `v-for`로 그대로 그린다.
