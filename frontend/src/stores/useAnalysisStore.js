@@ -8,20 +8,32 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const loading = ref(false)
   const errorMessage = ref('')
 
+  // 요청 번호. 기간을 빨리 바꾸면 요청이 여러 개 동시에 나가는데,
+  // 늦게 온 이전 응답이 새 결과를 덮어쓰지 않게 가장 최근 요청의 응답만 반영함
+  let latestTrendRequest = 0
+
   // 추이 분석 조회 (from, to 예: '2026-11-10' / interval: 'QUARTER' | 'HOUR' | 'DAY')
   // showLoading = false 로 부르면 "불러오는 중" 표시 없이 조용히 새로 받아 옴 (자동 갱신용)
   async function fetchTrend(from, to, interval, showLoading = true) {
+    const requestId = ++latestTrendRequest
     if (showLoading) {
       loading.value = true
     }
     try {
-      trend.value = await getTrendAnalysis(from, to, interval)
+      const result = await getTrendAnalysis(from, to, interval)
+      // 그 사이 새 요청이 나갔으면 이 응답은 버림
+      if (requestId !== latestTrendRequest) return
+      trend.value = result
       errorMessage.value = ''
     } catch (error) {
+      if (requestId !== latestTrendRequest) return
       // 실패해도 이미 받아 둔 결과는 지우지 않음
       errorMessage.value = error.message
     } finally {
-      loading.value = false
+      // "불러오는 중" 표시도 가장 최근 요청이 끝났을 때만 끔
+      if (requestId === latestTrendRequest) {
+        loading.value = false
+      }
     }
   }
 
@@ -29,32 +41,44 @@ export const useAnalysisStore = defineStore('analysis', () => {
   const peak = ref(null) // 피크 분석 결과 (아직 못 받았으면 null)
   const peakLoading = ref(false)
   const peakError = ref('')
+  let latestPeakRequest = 0 // 가장 최근 요청의 응답만 반영하기 위한 번호 (위 latestTrendRequest 와 같은 이유)
 
   // 피크 분석 조회 (from, to 예: '2026-11-01')
   async function fetchPeak(from, to, showLoading = true) {
+    const requestId = ++latestPeakRequest
     if (showLoading) {
       peakLoading.value = true
     }
     try {
-      peak.value = await getPeakAnalysis(from, to)
+      const result = await getPeakAnalysis(from, to)
+      if (requestId !== latestPeakRequest) return
+      peak.value = result
       peakError.value = ''
     } catch (error) {
+      if (requestId !== latestPeakRequest) return
       // 실패해도 이미 받아 둔 결과는 지우지 않음
       peakError.value = error.message
     } finally {
-      peakLoading.value = false
+      if (requestId === latestPeakRequest) {
+        peakLoading.value = false
+      }
     }
   }
 
   // ---- 피크가 높았던 구간 순위 (명세 16번: demand-intervals) ----
   const peakWindows = ref([]) // [{ windowStart, windowEnd, peakKw, noEssPeakKw, reducedKw, action, status }]
   const peakWindowsError = ref('')
+  let latestPeakWindowsRequest = 0 // 가장 최근 요청의 응답만 반영하기 위한 번호
 
   async function fetchPeakWindows(from, to, limit) {
+    const requestId = ++latestPeakWindowsRequest
     try {
-      peakWindows.value = await getDemandIntervals(from, to, limit)
+      const result = await getDemandIntervals(from, to, limit)
+      if (requestId !== latestPeakWindowsRequest) return
+      peakWindows.value = result
       peakWindowsError.value = ''
     } catch (error) {
+      if (requestId !== latestPeakWindowsRequest) return
       // 실패해도 이미 받아 둔 순위는 지우지 않음
       peakWindowsError.value = error.message
     }
