@@ -70,6 +70,10 @@ function load(showLoading = true) {
 // "피크가 높았던 구간" 표에서 누른 구간의 시작 시각 (히트맵에 그 칸을 표시)
 const selectedStart = ref('')
 
+// "피크가 높았던 구간" 표의 필터 (머리줄의 처리 · 결과 칸)
+const windowStatus = ref('ALL') // ALL | APPLIED | AUTO | IGNORED | NONE(추천 없음)
+const windowResult = ref('ALL') // ALL | DEFENDED(목표 이내) | EXCEEDED(목표 초과)
+
 function toggleWindow(windowStart) {
   selectedStart.value = selectedStart.value === windowStart ? '' : windowStart
 }
@@ -79,6 +83,34 @@ watch([fromDate, toDate], () => {
   selectedStart.value = ''
   load()
 })
+
+// 표에 보여 줄 줄: 순위는 거르기 전 순위를 그대로 둠. 결과는 목표 피크와 비교한 표시용 구분
+const windowRows = computed(() =>
+  (peak.value?.topWindows ?? []).map((item, index) => {
+    const overKw = item.peakKw - peak.value.targetPeakKw
+    return {
+      ...item,
+      rank: index + 1,
+      statusKey: item.status ?? 'NONE',
+      result: overKw > 0 ? 'EXCEEDED' : 'DEFENDED',
+      overKw,
+    }
+  }),
+)
+const filteredWindows = computed(() =>
+  windowRows.value.filter((row) => {
+    if (windowStatus.value !== 'ALL' && row.statusKey !== windowStatus.value) return false
+    if (windowResult.value !== 'ALL' && row.result !== windowResult.value) return false
+    return true
+  }),
+)
+const isWindowFiltered = computed(
+  () => windowStatus.value !== 'ALL' || windowResult.value !== 'ALL',
+)
+function resetWindowFilter() {
+  windowStatus.value = 'ALL'
+  windowResult.value = 'ALL'
+}
 
 // 서버 날짜를 처음 알게 되면 "이번 달"로 조회 시작
 watch(
@@ -385,8 +417,9 @@ const heatOption = computed(() => {
 
     <template v-else>
       <!-- 요약 숫자 4개 -->
-      <dl class="summary">
-        <div class="card">
+      <!-- 추이 분석의 기간 요약과 같은 모양 (카드 하나를 칸으로 나눔) -->
+      <dl class="card summary">
+        <div>
           <dt>기간 중 최대 피크</dt>
           <dd :class="{ over: summary.maxPeakKw > peak.targetPeakKw }">
             <span class="num">{{ formatKw(summary.maxPeakKw) }}</span> <small>kW</small>
@@ -396,7 +429,7 @@ const heatOption = computed(() => {
             {{ summary.maxPeakKw > peak.targetPeakKw ? '목표 초과' : '목표 이내' }}
           </p>
         </div>
-        <div class="card">
+        <div>
           <dt>목표를 넘은 구간</dt>
           <dd>
             <span class="num">{{ formatInteger(summary.exceededCount) }}</span> <small>회</small>
@@ -407,7 +440,7 @@ const heatOption = computed(() => {
           </dd>
           <p class="num">15분 구간 {{ formatInteger(summary.windowCount) }}개 중</p>
         </div>
-        <div class="card">
+        <div>
           <dt>평균 피크 저감</dt>
           <dd>
             <span class="num">{{ formatKw(summary.avgReductionKw) }}</span> <small>kW</small>
@@ -417,7 +450,7 @@ const heatOption = computed(() => {
             {{ formatKw(summary.maxReductionKw) }} kW
           </p>
         </div>
-        <div class="card">
+        <div>
           <dt>피크가 잦은 시간</dt>
           <dd class="num">{{ summary.busyFrom }} ~ {{ summary.busyTo }}</dd>
           <p>{{ summary.busyPeriodLabel }} 시간대</p>
@@ -450,50 +483,79 @@ const heatOption = computed(() => {
         <section class="card top">
           <div class="card-head">
             <h2 class="card-title">피크가 높았던 구간</h2>
-            <span class="note">누르면 히트맵에 표시</span>
+            <span class="note">
+              <span class="num">{{ filteredWindows.length }}건</span> · 누르면 히트맵에 표시
+            </span>
+            <button v-if="isWindowFiltered" class="filter-reset" @click="resetWindowFilter">
+              필터 초기화
+            </button>
           </div>
-          <table class="table">
-            <thead>
-              <tr>
-                <th class="rank-col">순위</th>
-                <th>15분 구간</th>
-                <th class="right-text">피크</th>
-                <th>그때의 추천 처리</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="(item, index) in peak.topWindows"
-                :key="item.windowStart"
-                class="window-row"
-                :class="{ active: selectedStart === item.windowStart }"
-                @click="toggleWindow(item.windowStart)"
-              >
-                <td class="rank-col num">{{ index + 1 }}</td>
-                <td class="num">
-                  <!-- 키보드로도 고를 수 있게 버튼으로 둠 (줄 어디를 눌러도 같은 동작) -->
-                  <button
-                    class="window-button"
-                    :aria-pressed="selectedStart === item.windowStart"
-                    @click.stop="toggleWindow(item.windowStart)"
-                  >
-                    {{ shortTime(item.windowStart) }}~{{ formatHourMinute(item.windowEnd) }}
-                  </button>
-                </td>
-                <td class="right-text num">
-                  <strong :class="{ over: item.peakKw > peak.targetPeakKw }">
-                    {{ formatKw(item.peakKw) }} kW
+          <!-- 칸: 순위 | 15분 구간 | 피크 | 처리 | 결과. 머리줄의 처리 · 결과 칸이 곧 필터 -->
+          <div class="windows">
+            <div class="windows-head">
+              <span>순위</span>
+              <span class="col-time">15분 구간</span>
+              <span class="right-text">피크</span>
+              <span class="col-detail">
+                <select
+                  v-model="windowStatus"
+                  class="head-select"
+                  :class="{ on: windowStatus !== 'ALL' }"
+                  aria-label="처리 필터"
+                >
+                  <option value="ALL">처리</option>
+                  <option value="APPLIED">적용</option>
+                  <option value="AUTO">자동</option>
+                  <option value="IGNORED">넘김</option>
+                  <option value="NONE">추천 없음</option>
+                </select>
+              </span>
+              <span class="col-value">
+                <select
+                  v-model="windowResult"
+                  class="head-select"
+                  :class="{ on: windowResult !== 'ALL' }"
+                  aria-label="결과 필터"
+                >
+                  <option value="ALL">결과</option>
+                  <option value="DEFENDED">목표 이내</option>
+                  <option value="EXCEEDED">목표 초과</option>
+                </select>
+              </span>
+            </div>
+            <ul v-if="filteredWindows.length">
+              <li v-for="row in filteredWindows" :key="row.windowStart">
+                <!-- 줄 전체가 버튼: 누르면 히트맵에 그 칸을 표시, 다시 누르면 지움 -->
+                <button
+                  class="window-row"
+                  :class="{ active: selectedStart === row.windowStart }"
+                  :aria-pressed="selectedStart === row.windowStart"
+                  @click="toggleWindow(row.windowStart)"
+                >
+                  <span class="rank num">{{ row.rank }}</span>
+                  <span class="col-time num">
+                    {{ shortTime(row.windowStart) }}~{{ formatHourMinute(row.windowEnd) }}
+                  </span>
+                  <strong class="right-text num" :class="{ over: row.overKw > 0 }">
+                    {{ formatKw(row.peakKw) }} kW
                   </strong>
-                </td>
-                <td>
-                  <span v-if="item.status" aria-hidden="true">{{
-                    STATUS_SHAPES[item.status]
-                  }}</span>
-                  {{ item.note }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                  <span class="col-detail window-detail" :title="row.note">
+                    <span v-if="row.status" aria-hidden="true">{{
+                      STATUS_SHAPES[row.status]
+                    }}</span>
+                    {{ row.note }}
+                  </span>
+                  <span class="col-value window-result num" :class="{ over: row.overKw > 0 }">
+                    <template v-if="row.overKw > 0">
+                      목표 초과 +{{ formatKw(row.overKw) }}
+                    </template>
+                    <template v-else>목표 이내</template>
+                  </span>
+                </button>
+              </li>
+            </ul>
+            <p v-else class="windows-empty">조건에 맞는 구간이 없습니다. 필터를 바꿔 보세요.</p>
+          </div>
           <RouterLink to="/logs" class="more">추천 이력 보기</RouterLink>
         </section>
       </div>
@@ -597,37 +659,55 @@ const heatOption = computed(() => {
   color: var(--crit);
 }
 
-/* 요약 숫자 4개 */
+/* 기간 요약 (추이 분석 · 피크 분석이 같은 모양·같은 크기를 씀. 한쪽을 고치면 다른 쪽도 같이 고침) */
 .summary {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  display: flex;
+  padding: 16px 20px;
+}
+.summary > div {
+  flex: 1;
+  min-width: 0;
+  margin-right: 20px;
+  padding-right: 20px;
+  border-right: 1px solid var(--line);
+}
+.summary > div:last-child {
+  margin-right: 0;
+  padding-right: 0;
+  border-right: 0;
 }
 .summary dt {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-2);
 }
 .summary dd {
-  font-size: 28px;
+  font-size: 30px;
   font-weight: 700;
   line-height: 1.3;
   white-space: nowrap;
 }
 .summary small {
-  margin-left: 2px;
-  font-size: 14px;
+  margin-left: 4px;
+  font-size: 16px;
   font-weight: 400;
   color: var(--ink-2);
 }
 .summary .pct {
   margin-left: 6px;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--ink-2);
 }
 .summary p {
-  font-size: 12px;
+  overflow: hidden;
+  font-size: 13px;
   color: var(--mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 카드·그래프 제목: 멀리서도 잘 보이게 키움 (두 분석 화면 같은 크기) */
+.card-title {
+  font-size: 19px;
 }
 
 .card-head {
@@ -656,65 +736,126 @@ const heatOption = computed(() => {
   display: flex;
   flex: none;
   flex-direction: column;
-  width: 520px;
+  width: 620px;
 }
-.table {
-  width: 100%;
-  border-collapse: collapse;
+
+/* 피크가 높았던 구간: 추이 분석의 이벤트 히스토리와 같은 칸 구분 방식
+   칸: 순위 | 15분 구간 | 피크 | 처리 | 결과. 칸 사이 간격 없이 붙여 칸마다 칠한 옅은 바탕이 띠처럼 보이게 함 */
+.windows-head,
+.window-row {
+  display: grid;
+  grid-template-columns: 44px 156px 92px minmax(0, 1fr) 128px;
+  align-items: stretch;
 }
-.table th {
-  padding: 6px 12px 6px 0;
+.windows-head > span,
+.window-row > span,
+.window-row > strong {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+.right-text {
+  justify-content: flex-end;
+}
+/* 칸별 옅은 바탕: 15분 구간(푸른 회색) · 처리(따뜻한 회색) · 결과(녹회색) */
+.col-time {
+  background: var(--col-cool);
+}
+.col-detail {
+  background: var(--col-warm);
+}
+.col-value {
+  justify-content: flex-end;
+  background: var(--col-sage);
+}
+.windows-head {
+  background: var(--card);
   border-bottom: 1px solid var(--ink);
   font-size: 12px;
-  font-weight: 400;
-  color: var(--mute);
-  text-align: left;
-  white-space: nowrap;
-}
-.table td {
-  padding: 9px 12px 9px 0;
-  border-bottom: 1px solid var(--line);
-  white-space: nowrap;
-}
-.table th:last-child,
-.table td:last-child {
-  padding-right: 0;
-}
-.table .right-text {
-  text-align: right;
-}
-/* 누르면 히트맵에 표시되는 줄 */
-.window-row {
-  cursor: pointer;
-}
-.window-row:hover {
-  background: var(--bg);
-}
-.window-row.active {
-  background: var(--bg);
   font-weight: 700;
+  color: var(--ink-2);
 }
-/* 고른 줄은 왼쪽에 굵은 줄 (안 고른 줄도 같은 폭을 투명하게 두어 글자가 밀리지 않게 함) */
-.window-row td:first-child {
-  border-left: 4px solid transparent;
-  padding-left: 6px;
-}
-.window-row.active td:first-child {
-  border-left-color: var(--ink);
-}
-.window-button {
+.window-row {
+  width: 100%;
   padding: 0;
   background: none;
   border: 0;
-  font: inherit;
-  color: inherit;
-  text-decoration: underline;
-  text-decoration-color: var(--line-strong);
-  text-underline-offset: 3px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-align: left;
 }
-.rank-col {
-  width: 36px;
+/* 마우스를 올리거나 고른 줄은 칸 색 위에 옅은 먹색을 한 겹 더 얹음 */
+.window-row:hover > span,
+.window-row:hover > strong {
+  background-image: linear-gradient(rgba(20, 24, 28, 0.05), rgba(20, 24, 28, 0.05));
+}
+.window-row.active > span,
+.window-row.active > strong {
+  background-image: linear-gradient(rgba(20, 24, 28, 0.09), rgba(20, 24, 28, 0.09));
+}
+/* 고른 줄: 맨 왼쪽 칸에 굵은 줄 */
+.window-row.active .rank {
+  box-shadow: inset 4px 0 0 var(--ink);
+}
+.rank {
   color: var(--mute);
+}
+/* 처리: 길면 한 줄에서 말줄임 (마우스를 올리면 전체 글자) */
+.window-row > .window-detail {
+  display: block;
+  overflow: hidden;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.window-result {
+  font-size: 13px;
+}
+.windows-empty {
+  padding: 16px 0;
+  color: var(--mute);
+}
+/* 머리줄의 필터 선택 상자: 평소엔 칸 이름처럼 보이고(테두리 없음), 고르면 먹색 바탕 */
+.head-select {
+  width: 100%;
+  height: 24px;
+  padding: 0 2px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--faint);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.head-select:hover {
+  border-bottom-color: var(--ink-2);
+}
+.head-select.on {
+  padding: 0 4px;
+  background: var(--ink);
+  border-bottom-color: var(--ink);
+  color: var(--card);
+}
+.head-select option {
+  background: var(--card);
+  color: var(--ink);
+}
+.filter-reset {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.filter-reset:hover {
+  background: var(--bg);
 }
 /* 카드 맨 아래 오른쪽의 링크 */
 .more {
@@ -724,12 +865,5 @@ const heatOption = computed(() => {
   font-size: 13px;
   color: var(--ink-2);
   text-decoration: underline;
-}
-
-/* 화면이 좁으면 오른쪽 표를 줄여 히트맵 자리를 남김 */
-@media (max-width: 1600px) {
-  .top {
-    width: 440px;
-  }
 }
 </style>
