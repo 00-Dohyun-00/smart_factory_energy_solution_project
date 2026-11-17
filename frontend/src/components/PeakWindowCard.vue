@@ -1,5 +1,5 @@
 <!--
-  지금 15분 구간 카드
+  현재 15분 피크 구간 카드
   왼쪽: 예상 평균(큰 숫자), 한 줄 판정, 단계
   오른쪽: 피크 게이지(정상·주의·경고 띠 위에 예상 평균 표시), 목표·예상·필요 전력·남은 시간, 구간 진행 막대
 
@@ -80,7 +80,7 @@ const elapsedPercent = computed(() =>
 <template>
   <section class="card window" :class="stage.className">
     <div class="head">
-      <h2 class="card-title">지금 15분 구간</h2>
+      <h2 class="card-title">현재 15분 피크 구간</h2>
       <span class="range num">
         {{ formatHourMinute(status?.windowStart) }} – {{ formatHourMinute(status?.windowEnd) }}
       </span>
@@ -247,11 +247,12 @@ const elapsedPercent = computed(() =>
 }
 
 /* 오른쪽 */
+/* 옆의 ESS 추천 카드가 더 길어 이 카드가 늘어나도, 내용 사이가 벌어지지 않게 위로 모음 */
 .right {
   display: flex;
   flex-direction: column;
   flex: 1;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 14px;
   min-width: 0;
 }
