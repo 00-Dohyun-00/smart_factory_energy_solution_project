@@ -13,7 +13,10 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-// event_log 테이블 (운영 로그: 단계 변경, 추천, 처리, 통신, 설정 변경 등)
+/**
+ * 시스템 이벤트 기록 (event_log 테이블).
+ * 피크 단계 변화, 추천 적용/넘김, 통신 끊김 같은 일이 생길 때 1줄씩 쌓입니다.
+ */
 @Entity
 @Table(name = "event_log")
 @Getter
@@ -28,14 +31,17 @@ public class EventLog {
     @Column(name = "occurred_at", nullable = false)
     private LocalDateTime occurredAt;
 
+    // 이벤트 종류 (예: STAGE_CHANGE 단계 변화, RECOMMEND 추천, COMM 통신)
     @Enumerated(EnumType.STRING)
     @Column(name = "event_type", nullable = false, length = 15)
     private EventType eventType;
 
+    // 단계: NORMAL(정상) / CAUTION(주의) / WARNING(경고)
     @Enumerated(EnumType.STRING)
     @Column(length = 10)
     private EventStage stage;
 
+    // 화면에 그대로 보여 줄 문장
     @Column(nullable = false, columnDefinition = "text")
     private String message;
 

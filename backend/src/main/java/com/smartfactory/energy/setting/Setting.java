@@ -11,24 +11,30 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-// setting 테이블 (환경 설정 값, key-value)
+/**
+ * 기준값 설정 (setting 테이블). 키-값 한 쌍이 1줄입니다. 예: peak.target_kw = 1800
+ */
 @Entity
 @Table(name = "setting")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Setting {
 
+    // 설정 이름 (예: peak.target_kw)
     @Id
     @Column(name = "setting_key", length = 40)
     private String settingKey;
 
+    // 묶음: PEAK_TARIFF(요금) / ESS / OPERATION(운영) / SOLAR(태양광) / ENVIRONMENT(환경)
     @Enumerated(EnumType.STRING)
     @Column(name = "group_name", nullable = false, length = 15)
     private SettingGroup groupName;
 
+    // 화면에 보여 줄 이름 (예: 목표 피크)
     @Column(nullable = false, length = 50)
     private String label;
 
+    // 설정값. 숫자도 글자로 저장하고, 쓸 때 숫자로 바꿉니다.
     @Column(nullable = false, length = 50)
     private String value;
 

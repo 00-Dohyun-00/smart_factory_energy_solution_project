@@ -11,7 +11,9 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-// power_minute 테이블 (설비별 1분 집계)
+/**
+ * 설비별 1분 전력 (power_minute 테이블). 설비 1개 × 1분 = 1줄.
+ */
 @Entity
 @Table(name = "power_minute")
 @IdClass(PowerMinuteId.class)

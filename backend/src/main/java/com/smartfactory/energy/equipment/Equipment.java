@@ -12,7 +12,9 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-// equipment 테이블 (설비 기준 데이터)
+/**
+ * 설비 (equipment 테이블). 생산 설비 + 태양광・ESS・한전 계량점까지 모두 여기에 등록합니다.
+ */
 @Entity
 @Table(name = "equipment")
 @Getter
@@ -30,6 +32,7 @@ public class Equipment {
     @Column(nullable = false, length = 50)
     private String name;
 
+    // 역할: GRID(한전) / SOLAR(태양광) / ESS / LOAD(생산 설비)
     @Enumerated(EnumType.STRING)
     @Column(name = "equipment_role", nullable = false, length = 10)
     private EquipmentRole equipmentRole;

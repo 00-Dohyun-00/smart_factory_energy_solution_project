@@ -11,7 +11,9 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-// setting_history 테이블 (설정 변경 이력)
+/**
+ * 설정 변경 이력 (setting_history 테이블). 설정을 바꿀 때마다 1줄씩 쌓입니다.
+ */
 @Entity
 @Table(name = "setting_history")
 @Getter

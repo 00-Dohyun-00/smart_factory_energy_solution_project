@@ -13,7 +13,9 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-// solar_power 테이블 (태양광 발전/계통 전력 원본 데이터)
+/**
+ * 전력원별 전력 원본 (solar_power 테이블). 시각 1개 × 종류 1개 = 1줄.
+ */
 @Entity
 @Table(name = "solar_power")
 @IdClass(SolarPowerId.class)
@@ -24,6 +26,7 @@ public class SolarPower {
     @Id
     private LocalDateTime ts;
 
+    // 종류: SOLAR / GRID / ESS / LOAD
     @Id
     @Enumerated(EnumType.STRING)
     @Column(name = "power_type", length = 10)
