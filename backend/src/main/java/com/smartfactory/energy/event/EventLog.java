@@ -2,6 +2,8 @@ package com.smartfactory.energy.event;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -21,27 +23,38 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class EventLog {
 
-    // 이벤트 번호 (자동 증가)
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "event_id")
     private Long eventId;
 
-    // 발생 시각
-    @Column(nullable = false)
+    @Column(name = "occurred_at", nullable = false)
     private LocalDateTime occurredAt;
 
     // 이벤트 종류 (예: STAGE_CHANGE 단계 변화, RECOMMEND 추천, COMM 통신)
-    @Column(nullable = false, length = 15)
-    private String eventType;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "event_type", nullable = false, length = 15)
+    private EventType eventType;
 
-    // 단계: NORMAL(정상) / WARNING(주의) / CRITICAL(경고)
+    // 단계: NORMAL(정상) / CAUTION(주의) / WARNING(경고)
+    @Enumerated(EnumType.STRING)
     @Column(length = 10)
-    private String stage;
+    private EventStage stage;
 
     // 화면에 그대로 보여 줄 문장
     @Column(nullable = false, columnDefinition = "text")
     private String message;
 
-    // 관련 추천 번호 (recommendation.recommendation_id). 없으면 null
+    // recommendation과 관계로 묶지 않고 recommendationId 값만 둡니다. (단순하게 유지)
+    @Column(name = "recommendation_id")
     private Long recommendationId;
+
+    public EventLog(LocalDateTime occurredAt, EventType eventType, EventStage stage, String message,
+                     Long recommendationId) {
+        this.occurredAt = occurredAt;
+        this.eventType = eventType;
+        this.stage = stage;
+        this.message = message;
+        this.recommendationId = recommendationId;
+    }
 }

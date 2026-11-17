@@ -20,28 +20,33 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class SettingHistory {
 
-    // 이력 번호 (자동 증가)
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "history_id")
     private Long historyId;
 
-    // 바꾼 시각
-    @Column(nullable = false)
+    @Column(name = "changed_at", nullable = false)
     private LocalDateTime changedAt;
 
-    // 바꾼 설정 이름 (setting.setting_key)
-    @Column(nullable = false, length = 40)
+    // setting과 관계로 묶지 않고 settingKey 값만 둡니다. (단순하게 유지)
+    @Column(name = "setting_key", nullable = false, length = 40)
     private String settingKey;
 
-    // 바꾸기 전 값
-    @Column(length = 50)
+    @Column(name = "old_value", length = 50)
     private String oldValue;
 
-    // 바꾼 뒤 값
-    @Column(length = 50)
+    @Column(name = "new_value", nullable = false, length = 50)
     private String newValue;
 
-    // 바꾼 사람
-    @Column(length = 30)
+    @Column(name = "changed_by", nullable = false, length = 30)
     private String changedBy;
+
+    public SettingHistory(LocalDateTime changedAt, String settingKey, String oldValue, String newValue,
+                           String changedBy) {
+        this.changedAt = changedAt;
+        this.settingKey = settingKey;
+        this.oldValue = oldValue;
+        this.newValue = newValue;
+        this.changedBy = changedBy;
+    }
 }

@@ -19,19 +19,26 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Zone {
 
-    // 구역 번호 (자동 증가)
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "zone_id")
     private Long zoneId;
 
     // 구역 이름 (예: 브레이징)
-    @Column(nullable = false, unique = true, length = 30)
+    @Column(nullable = false, length = 30)
     private String name;
 
     // 화면에 보여 줄 순서
+    @Column(name = "display_order", nullable = false)
     private Integer displayOrder;
 
     // 구역 코드 (예: Z2). 화면과 API 주소에서 쓰는 값
-    @Column(nullable = false, unique = true, length = 10)
+    @Column(name = "zone_code", nullable = false, length = 10)
     private String zoneCode;
+
+    public Zone(String name, Integer displayOrder, String zoneCode) {
+        this.name = name;
+        this.displayOrder = displayOrder;
+        this.zoneCode = zoneCode;
+    }
 }

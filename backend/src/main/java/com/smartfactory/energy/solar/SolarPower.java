@@ -1,10 +1,13 @@
-package com.smartfactory.energy.raw;
+package com.smartfactory.energy.solar;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.IdClass;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -15,21 +18,26 @@ import lombok.NoArgsConstructor;
  */
 @Entity
 @Table(name = "solar_power")
-@IdClass(SolarPowerId.class) // 기본키가 ts + powerType 두 칸
+@IdClass(SolarPowerId.class)
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class SolarPower {
 
-    // 측정 시각
     @Id
     private LocalDateTime ts;
 
     // 종류: SOLAR / GRID / ESS / LOAD
     @Id
-    @Column(length = 10)
-    private String powerType;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "power_type", length = 10)
+    private SolarPowerType powerType;
 
-    // 전력 kW
-    @Column(columnDefinition = "numeric")
-    private Double powerKw;
+    @Column(name = "power_kw", nullable = false, precision = 10, scale = 2)
+    private BigDecimal powerKw;
+
+    public SolarPower(LocalDateTime ts, SolarPowerType powerType, BigDecimal powerKw) {
+        this.ts = ts;
+        this.powerType = powerType;
+        this.powerKw = powerKw;
+    }
 }
