@@ -23,6 +23,16 @@ const realtimeStore = useRealtimeStore()
 
 // 처리 상태는 색만으로 구분하지 않도록 도형을 함께 표시 (운영 로그 화면과 같은 표시)
 const STATUS_SHAPES = { APPLIED: '●', AUTO: '◇', IGNORED: '✕' }
+const TOP_COUNT = 8 // "피크가 높았던 구간"에 보여 줄 개수
+
+// 그 구간의 추천 처리를 한 줄 문구로 (명세 16번은 action·status 코드만 주므로 화면에서 글자로 바꿈)
+function windowNote(item) {
+  if (!item.action) return '방전 추천 없음'
+  if (item.status === 'IGNORED') return '추천을 넘김'
+  if (item.status === 'AUTO') return '자동 방전 (시뮬레이션)'
+  if (item.status === 'APPLIED') return '방전 적용'
+  return '추천 중'
+}
 
 // ---- 조회 조건 ----
 const preset = ref('month') // month(이번 달) | lastMonth(지난 달) | week(최근 7일) | custom(직접 입력)
@@ -65,6 +75,8 @@ function applyPreset(name) {
 function load(showLoading = true) {
   if (!fromDate.value || !toDate.value || dateError.value) return
   analysisStore.fetchPeak(fromDate.value, toDate.value, showLoading)
+  // "피크가 높았던 구간" 표는 명세 16번(demand-intervals)으로 따로 받음
+  analysisStore.fetchPeakWindows(fromDate.value, toDate.value, TOP_COUNT)
 }
 
 // "피크가 높았던 구간" 표에서 누른 구간의 시작 시각 (히트맵에 그 칸을 표시)
@@ -211,7 +223,9 @@ const heatOption = computed(() => {
   if (selectedStart.value) {
     const hour = Number(selectedStart.value.slice(11, 13))
     const row = dates.indexOf(selectedStart.value.slice(0, 10))
-    const picked = peak.value.topWindows.find((item) => item.windowStart === selectedStart.value)
+    const picked = analysisStore.peakWindows.find(
+      (item) => item.windowStart === selectedStart.value,
+    )
     if (row >= 0 && picked) {
       outlines.push({
         x0: hour,
@@ -463,7 +477,7 @@ const heatOption = computed(() => {
             </thead>
             <tbody>
               <tr
-                v-for="(item, index) in peak.topWindows"
+                v-for="(item, index) in analysisStore.peakWindows"
                 :key="item.windowStart"
                 class="window-row"
                 :class="{ active: selectedStart === item.windowStart }"
@@ -489,11 +503,17 @@ const heatOption = computed(() => {
                   <span v-if="item.status" aria-hidden="true">{{
                     STATUS_SHAPES[item.status]
                   }}</span>
-                  {{ item.note }}
+                  {{ windowNote(item) }}
                 </td>
               </tr>
             </tbody>
           </table>
+          <p v-if="analysisStore.peakWindowsError" class="windows-error" role="alert">
+            구간 순위를 불러오지 못했습니다. ({{ analysisStore.peakWindowsError }})
+          </p>
+          <p v-else-if="!analysisStore.peakWindows.length" class="windows-empty">
+            이 기간에는 구간 기록이 없습니다.
+          </p>
           <RouterLink to="/logs" class="more">추천 이력 보기</RouterLink>
         </section>
       </div>

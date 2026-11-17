@@ -82,7 +82,7 @@ function seedEventsOnce(now) {
   if (eventsSeeded) return
   eventsSeeded = true
   const ago = (minutes) => new Date(now.getTime() - minutes * 60000)
-  addEvent('INFO', '고요금 방전 추천을 넘김 (운영자)', ago(47))
+  addEvent('INFO', '계획 방전 추천을 넘김 (운영자)', ago(47))
   addEvent('WARNING', '주의 단계 진입', ago(31))
   addEvent('CRITICAL', '목표 초과 예상, 방전 500 kW 추천', ago(30))
   addEvent('INFO', '방전 500 kW 적용 (운영자)', ago(29))
@@ -425,6 +425,12 @@ function tariffAt(now) {
   }
 }
 
+// 명세 v0.2의 tariff 모양만 남김 (계절 정보는 가짜 백엔드 안에서만 씀)
+function specTariffOf(tariff) {
+  const { period, label, until, nextLabel, periods } = tariff
+  return { period, label, until, nextLabel, periods }
+}
+
 // ---- 추천 판단 흉내 ----
 // 하루 계획(planDay)을 따르되, 실제 전력이 계획과 달라 방어선을 넘을 것 같으면 그 구간만 피크 방어를 추천합니다.
 //   피크 방어 · 안전 제한 : 그 15분 구간이 끝날 때까지 유지 (방전 → 대기 → 방전 깜빡임 방지)
@@ -620,7 +626,7 @@ function updateDecision(now, info) {
   // 자동 모드면 사람이 누르지 않아도 바로 반영한 것으로 처리 (실제 제어가 아니라 시뮬레이션)
   if (settings.operationMode === 'AUTO') {
     currentDecision.status = 'AUTO'
-    currentDecision.appliedBy = '자동 모드 (시뮬레이션)'
+    currentDecision.appliedBy = '자동 모드' // 명세 v0.2 값. 화면이 "(시뮬레이션)"을 붙여 보여 줌
     currentDecision.appliedAt = toLocalDateTime(now)
     appliedEssKw = followKw(currentDecision)
     addEvent('INFO', `${ACTION_TEXTS[action]} ${powerKw} kW 자동 적용 (시뮬레이션)`, now)
@@ -640,10 +646,11 @@ const HISTORY_TEMPLATES = [
     time: '02:15',
     action: 'CHARGE',
     ruleNo: 4,
-    ruleLabel: '저요금 충전',
+    ruleLabel: '계획 충전',
     powerKw: 300,
     status: 'AUTO',
-    reason: '경부하 시간대이고 배터리 잔량이 낮아 충전을 추천합니다.',
+    reason:
+      '하루 계획에 따라 충전합니다. 지금(경부하) 채워 두었다가 뒤에 올 피크와 비싼 시간대에 씁니다.',
   },
   {
     time: '09:30',
@@ -694,10 +701,10 @@ const HISTORY_TEMPLATES = [
     time: '17:15',
     action: 'DISCHARGE',
     ruleNo: 5,
-    ruleLabel: '고요금 방전',
+    ruleLabel: '계획 방전',
     powerKw: 200,
     status: 'IGNORED',
-    reason: '최대부하 시간대라 방전하면 전력량 요금을 줄일 수 있습니다.',
+    reason: '하루 계획에 따라 방전합니다. 지금은 최대부하라 배터리 전기를 쓰는 편이 쌉니다.',
   },
   {
     time: '18:00',
@@ -712,10 +719,11 @@ const HISTORY_TEMPLATES = [
     time: '23:00',
     action: 'CHARGE',
     ruleNo: 4,
-    ruleLabel: '저요금 충전',
+    ruleLabel: '계획 충전',
     powerKw: 300,
     status: 'AUTO',
-    reason: '경부하 시간대이고 배터리 잔량이 낮아 충전을 추천합니다.',
+    reason:
+      '하루 계획에 따라 충전합니다. 지금(경부하) 채워 두었다가 뒤에 올 피크와 비싼 시간대에 씁니다.',
   },
 ]
 
@@ -786,7 +794,7 @@ function buildHistoryOfDay(date, now) {
         { label: '기온', value: Math.round(9 + random(9) * 11), unit: '℃' },
       ],
       status: template.status,
-      appliedBy: template.status === 'AUTO' ? '자동 모드 (시뮬레이션)' : '운영자',
+      appliedBy: template.status === 'AUTO' ? '자동 모드' : '운영자',
       appliedAt: toLocalDateTime(answeredAt),
       resultPeakKw,
       resultStatus:
@@ -1211,9 +1219,8 @@ export async function fakeGetLatestStatus() {
     gridKw: round1(gridKw),
     socPercent: round1(socPercent),
     batteryTempC: round1(24 + Math.sin(seconds / 200)),
-    // ESS 전력변환장치(PCS) 상태와 배터리 건강 상태(SOH). 필드는 확인 필요
+    // ESS 전력변환장치(PCS) 상태. 배터리 건강도(SOH)는 팀 결정으로 보내지 않음 (명세 확인 필요 11번)
     pcsStatus: dischargeKw > 0 ? 'DISCHARGING' : chargeKw > 0 ? 'CHARGING' : 'STANDBY',
-    sohPercent: 98.2,
     weather: { text: weatherOf(now), tempC: Math.round(outsideTempAt(now)) },
     // 시뮬레이션 배속 (1이면 실제 속도). 화면에 "10배속"처럼 알려 주기 위한 값. 필드는 확인 필요
     simulationSpeed: SIMULATION_SPEED,
@@ -1229,18 +1236,13 @@ export async function fakeGetLatestStatus() {
     defenseKw: Math.ceil(
       neededDischargeKw(predictedKw, remainingMinutes, lineKw, livePlan.marginKw),
     ),
-    // 오늘 방어선: 하루 계획이 지키려는 선. 목표 피크를 다 지킬 수 없는 날만 목표보다 높음. 필드는 확인 필요
-    defenseLineKw: lineKw,
-    // 구간 시작부터 지금까지 쌓인 값 (그래프용). 필드는 확인 필요
+    // 구간 시작부터 지금까지 쌓인 값 (명세 1번에 있음. 지금 화면은 안 씀)
     windowPoints: windowState.points.slice(),
-    // 지금까지의 최대 피크. 필드는 확인 필요
+    // 오늘·이번 달 최대 피크 (명세 1번에 있음. 지금 화면은 안 씀)
     todayPeakKw: todayPeakOf(now),
     monthPeakKw: peakRecord.month.peakKw,
-    // 12개월 최고 피크: 기본요금을 정하는 값. 이보다 낮은 피크는 막아도 기본요금이 줄지 않음
-    yearPeakKw: peakRecord.year.peakKw,
-    yearPeakAt: peakRecord.year.at,
-    // 요금 시간대
-    tariff: tariffAt(now),
+    // 요금 시간대 (명세 1번의 필드만 보냄: period, label, until, nextLabel, periods)
+    tariff: specTariffOf(tariffAt(now)),
     // 공급원 비율 (공장 전체 기준, 계산 방식은 확인 필요)
     sourceRatio: {
       gridPercent: round1((gridKw / loadKw) * 100),
@@ -1296,21 +1298,6 @@ export async function fakeUpdateDecision(id, status) {
     addEvent('INFO', `${currentDecision.ruleLabel} 추천을 넘김 (운영자)`)
   }
   return { ...currentDecision }
-}
-
-// GET /api/battery-statuses?from=&to= 흉내: 최근 1시간, 1분 간격 (모니터링의 전력 추세 그래프용)
-export async function fakeGetRecentStatuses() {
-  failIfOffline()
-  const now = simNow()
-  const list = []
-  for (let minutesAgo = 60; minutesAgo >= 0; minutesAgo--) {
-    const time = new Date(now.getTime() - minutesAgo * 60000)
-    list.push({
-      recordedAt: toLocalDateTime(time),
-      gridKw: Math.round(minuteAverage(gridWithoutEssAt, time)),
-    })
-  }
-  return list
 }
 
 // GET /api/events?limit= 흉내: 최근 이벤트 (최신 순). 주소와 필드는 확인 필요
@@ -1727,25 +1714,6 @@ const settings = {
   pollSeconds: 5,
   decisionValidMinutes: 15,
 }
-// 이벤트 로그에 남길 때 쓰는 항목 이름
-const SETTING_LABELS = {
-  targetPeakKw: '목표 피크',
-  warnPercent: '주의선',
-  priceLightWon: '경부하 단가',
-  priceMidWon: '중간부하 단가',
-  pricePeakWon: '최대부하 단가',
-  basePriceWon: '기본요금 단가',
-  capacityKwh: '배터리 용량',
-  maxPowerKw: '최대 충·방전 출력',
-  socLowPercent: '잔량 하한',
-  socHighPercent: '잔량 상한',
-  efficiencyPercent: '충·방전 효율',
-  roomTempLimitC: '배터리실 온도 제한',
-  operationMode: '운영 모드',
-  pollSeconds: '화면 갱신 주기',
-  decisionValidMinutes: '추천 유효 시간',
-}
-const MODE_LABELS = { MANUAL: '운영자 승인 모드', AUTO: '자동 모드 (시뮬레이션)' }
 
 const settingSavedAt = {} // 항목별 마지막 저장 시각
 const settingHistory = [] // 변경 기록 (최신 순)
@@ -1777,19 +1745,20 @@ function seedSettingsOnce() {
   for (const key of Object.keys(settings)) settingSavedAt[key] = savedAtByGroup[groupOf(key)]
 
   const past = [
-    [daysAgo(2, 16, 20), 'targetPeakKw', 1850, 1800],
-    [daysAgo(2, 16, 20), 'warnPercent', 95, 97],
-    [daysAgo(6, 9, 5), 'socLowPercent', 15, 20],
-    [daysAgo(8, 11, 42), 'operationMode', 'AUTO', 'MANUAL'],
-    [daysAgo(13, 14, 10), 'roomTempLimitC', 40, 35],
+    [daysAgo(2, 16, 20), 'peak.target_kw', '1850', '1800'],
+    [daysAgo(2, 16, 20), 'peak.warn_ratio', '95', '97'],
+    [daysAgo(6, 9, 5), 'ess.soc_low', '15', '20'],
+    [daysAgo(8, 11, 42), 'operation.auto_mode', 'true', 'false'],
+    [daysAgo(13, 14, 10), 'ess.room_temp_limit', '40', '35'],
   ]
-  for (const [changedAt, key, before, after] of past) {
+  for (const [changedAt, key, oldValue, newValue] of past) {
     settingHistory.push({
       id: nextSettingHistoryId++,
       changedAt,
       key,
-      before,
-      after,
+      label: SPEC_SETTINGS.find((item) => item.key === key).label,
+      oldValue,
+      newValue,
       changedBy: '운영자',
     })
   }
@@ -1813,75 +1782,182 @@ function applySettings() {
 }
 
 // GET /api/energy-settings 흉내: 기준값 목록
+// ---- 명세 v0.2 모양으로 주고받기 (GET·PUT /api/settings, GET /api/setting-histories) ----
+// 가짜 서버 안의 계산은 위 settings(camelCase)를 그대로 쓰고, 화면과는 명세의 키(점 이름)와 문자열 값으로 주고받음
+// readOnly: 명세 "setting 키" 시트에서 "보기만"인 항목 (화면에서 고칠 수 없음)
+const SPEC_SETTINGS = [
+  { key: 'peak.target_kw', from: 'targetPeakKw', group: '피크', label: '목표 피크', unit: 'kW' },
+  {
+    key: 'peak.warn_ratio',
+    from: 'warnPercent',
+    group: '피크',
+    label: '주의선 (목표 대비)',
+    unit: '%',
+  },
+  {
+    key: 'ess.capacity_kwh',
+    from: 'capacityKwh',
+    group: 'ESS',
+    label: '배터리 용량',
+    unit: 'kWh',
+    readOnly: true,
+  },
+  {
+    key: 'ess.max_power_kw',
+    from: 'maxPowerKw',
+    group: 'ESS',
+    label: '배터리 최대 출력',
+    unit: 'kW',
+    readOnly: true,
+  },
+  { key: 'ess.soc_low', from: 'socLowPercent', group: 'ESS', label: '잔량 하한', unit: '%' },
+  { key: 'ess.soc_high', from: 'socHighPercent', group: 'ESS', label: '잔량 상한', unit: '%' },
+  {
+    key: 'ess.room_temp_limit',
+    from: 'roomTempLimitC',
+    group: 'ESS',
+    label: '배터리실 온도 한계',
+    unit: '℃',
+  },
+  {
+    key: 'solar.capacity_kw',
+    fixed: 1000,
+    group: '태양광',
+    label: '태양광 용량',
+    unit: 'kW',
+    readOnly: true,
+  },
+  {
+    key: 'tariff.base_charge',
+    from: 'basePriceWon',
+    group: '운영',
+    label: '기본요금 단가',
+    unit: '원/kW',
+    readOnly: true,
+  },
+  {
+    key: 'carbon.emission_factor',
+    fixed: EMISSION_FACTOR,
+    group: '운영',
+    label: '탄소 배출계수',
+    unit: 'kgCO2/kWh',
+    readOnly: true,
+  },
+  {
+    key: 'operation.auto_mode',
+    from: 'operationMode',
+    group: '운영',
+    label: '자동 모드',
+    unit: '',
+  },
+  // 아래 두 개는 명세에 없음 (화면에서 뺄지 팀 결정 대기, docs/api-spec-diff.md 2-10)
+  {
+    key: 'operation.poll_seconds',
+    from: 'pollSeconds',
+    group: '운영',
+    label: '화면 갱신 주기',
+    unit: '초',
+  },
+  {
+    key: 'operation.decision_valid_minutes',
+    from: 'decisionValidMinutes',
+    group: '운영',
+    label: '추천 유효 시간',
+    unit: '분',
+  },
+]
+const specSettingOf = (key) => SPEC_SETTINGS.find((item) => item.key === key)
+
+// 가짜 서버 안의 값 → 명세의 문자열 값 (DB가 VARCHAR라 문자열로 보냄)
+function specValueOf(item) {
+  if (item.fixed !== undefined) return String(item.fixed)
+  if (item.from === 'operationMode') return settings.operationMode === 'AUTO' ? 'true' : 'false'
+  return String(settings[item.from])
+}
+
+// GET /api/settings 흉내 (명세 11번)
 export async function fakeGetSettings() {
   failIfOffline()
   seedSettingsOnce()
-  return Object.keys(settings).map((key) => ({
-    key,
-    value: settings[key],
-    updatedAt: settingSavedAt[key],
+  return SPEC_SETTINGS.map((item) => ({
+    key: item.key,
+    group: item.group,
+    label: item.label,
+    value: specValueOf(item),
+    unit: item.unit,
+    updatedAt: settingSavedAt[item.from] ?? settingSavedAt.targetPeakKw,
     updatedBy: '운영자',
   }))
 }
 
-// PUT /api/energy-settings/{key} 흉내: 기준값 하나 바꾸기
-// 잘못된 값이면 오류를 던짐 (실제 백엔드라면 400 응답)
-export async function fakeUpdateSetting(key, value) {
+// PUT /api/settings 흉내 (명세 12번): 여러 개를 한 번에 저장. changes 예: [{ key: 'peak.target_kw', value: '1750' }]
+// 하나라도 잘못되면 아무것도 저장하지 않고 오류를 던짐 (실제 백엔드라면 400 응답)
+export async function fakeUpdateSettings(changes) {
   failIfOffline()
   seedSettingsOnce()
-  if (!(key in settings)) {
-    throw new Error('없는 설정 항목입니다.')
-  }
-  if (key === 'operationMode') {
-    if (!MODE_LABELS[value]) throw new Error('운영 모드 값이 올바르지 않습니다.')
-  } else {
-    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-      throw new Error(`${SETTING_LABELS[key]}에는 0보다 큰 숫자를 넣어야 합니다.`)
-    }
-    const low = key === 'socLowPercent' ? value : settings.socLowPercent
-    const high = key === 'socHighPercent' ? value : settings.socHighPercent
-    if (low >= high) throw new Error('잔량 하한은 잔량 상한보다 작아야 합니다.')
-  }
 
-  const before = settings[key]
+  // 1) 먼저 모두 검사하고, 가짜 서버 안의 값으로 바꿔 둠
+  const next = {}
+  for (const change of changes) {
+    const item = specSettingOf(change.key)
+    if (!item) throw new Error('없는 설정 항목입니다.')
+    if (item.readOnly) throw new Error(`${item.label}은(는) 화면에서 고칠 수 없는 항목입니다.`)
+    if (typeof change.value !== 'string') throw new Error('설정 값은 문자열로 보내야 합니다.')
+    if (item.from === 'operationMode') {
+      if (!['true', 'false'].includes(change.value))
+        throw new Error('자동 모드 값이 올바르지 않습니다.')
+      next.operationMode = change.value === 'true' ? 'AUTO' : 'MANUAL'
+    } else {
+      const number = Number(change.value)
+      if (change.value.trim() === '' || !Number.isFinite(number) || number <= 0) {
+        throw new Error(`${item.label}에는 0보다 큰 숫자를 넣어야 합니다.`)
+      }
+      next[item.from] = number
+    }
+  }
+  const low = next.socLowPercent ?? settings.socLowPercent
+  const high = next.socHighPercent ?? settings.socHighPercent
+  if (low >= high) throw new Error('잔량 하한은 잔량 상한보다 작아야 합니다.')
+
+  // 2) 값이 바뀐 항목만 저장하고, 변경 기록과 이벤트를 남김
   const now = simNow()
-  settings[key] = value
-  settingSavedAt[key] = toLocalDateTime(now)
-  settingHistory.unshift({
-    id: nextSettingHistoryId++,
-    changedAt: toLocalDateTime(now),
-    key,
-    before,
-    after: value,
-    changedBy: '운영자',
-  })
+  for (const change of changes) {
+    const item = specSettingOf(change.key)
+    const oldValue = specValueOf(item)
+    if (oldValue === change.value) continue
+    settings[item.from] = next[item.from]
+    settingSavedAt[item.from] = toLocalDateTime(now)
+    settingHistory.unshift({
+      id: nextSettingHistoryId++,
+      changedAt: toLocalDateTime(now),
+      key: item.key,
+      label: item.label,
+      oldValue,
+      newValue: change.value,
+      changedBy: '운영자',
+    })
+    addEvent('INFO', `설정 변경: ${item.label} ${oldValue} → ${change.value} (운영자)`, now)
+  }
   applySettings()
 
-  // 이벤트 로그에도 남김
-  const text = (item) =>
-    key === 'operationMode' ? MODE_LABELS[item] : item.toLocaleString('ko-KR')
-  addEvent(
-    'INFO',
-    `설정 변경: ${SETTING_LABELS[key]} ${text(before)} → ${text(value)} (운영자)`,
-    now,
-  )
-
-  return { key, value, updatedAt: settingSavedAt[key], updatedBy: '운영자' }
+  // 저장된 전체 목록 (11번과 같은 모양)
+  return fakeGetSettings()
 }
 
-// GET /api/energy-settings/history 흉내: 변경 기록 (최신 순). 주소와 필드는 확인 필요
-export async function fakeGetSettingHistory(limit = 20) {
+// GET /api/setting-histories?from=&to= 흉내 (명세 13번): 기간 안의 변경 기록, 최신 순
+export async function fakeGetSettingHistories(from, to) {
   failIfOffline()
   seedSettingsOnce()
-  return settingHistory.slice(0, limit).map((item) => ({ ...item }))
+  return settingHistory
+    .filter((item) => from <= item.changedAt.slice(0, 10) && item.changedAt.slice(0, 10) <= to)
+    .map((item) => ({ ...item }))
 }
 
 // ---- 분석 > 피크 분석 ----
 // GET /api/analyses/peak?from=&to= 흉내 (주소와 필드는 확인 필요). from, to 예: '2026-11-01'
 // 월간 성적표(fakeGetReport)와 같은 데이터에서 기간만 잘라 만듭니다. 그래서 같은 달이면 두 화면의 숫자가 같습니다.
-export async function fakeGetPeakAnalysis(from, to) {
-  failIfOffline()
-
+// 피크 분석에 쓰는 값을 한 번에 만듦. 아래 두 API(피크 분석, 높았던 구간 순위)가 같이 씀
+async function buildPeakAnalysis(from, to) {
   // 1) 기간에 걸친 달들의 성적표를 받아, 기간 안의 날짜만 모음
   const dailyPeaks = []
   const heatmap = []
@@ -1912,8 +1988,10 @@ export async function fakeGetPeakAnalysis(from, to) {
         windowStart: over.windowStart,
         windowEnd: over.windowEnd,
         peakKw: day.peakKw,
+        noEssPeakKw: day.expectedKw,
+        reducedKw: day.expectedKw - day.peakKw,
+        action: over.action,
         status: over.status,
-        note: over.cause,
       }
     }
     const seed = Number(day.date.replaceAll('-', ''))
@@ -1923,21 +2001,19 @@ export async function fakeGetPeakAnalysis(from, to) {
     // 예상과 실제가 거의 같으면 방전 추천이 없었던 날로 봄
     const noAdvice = day.expectedKw - day.peakKw < 45
     const auto = fakeRandom(seed + 77) < 0.3
-    let status = auto ? 'AUTO' : 'APPLIED'
-    let note = auto ? '자동 방전 (시뮬레이션)' : '방전 적용'
-    if (noAdvice) {
-      status = null
-      note = '방전 추천 없음'
-    }
     return {
       windowStart: toLocalDateTime(start),
       windowEnd: toLocalDateTime(new Date(start.getTime() + WINDOW_MS)),
       peakKw: day.peakKw,
-      status,
-      note,
+      noEssPeakKw: day.expectedKw,
+      reducedKw: day.expectedKw - day.peakKw,
+      // 그 구간에 추천이 없었으면 null (명세 16번)
+      action: noAdvice ? null : 'DISCHARGE',
+      status: noAdvice ? null : auto ? 'AUTO' : 'APPLIED',
     }
   })
-  const topWindows = [...windows].sort((a, b) => b.peakKw - a.peakKw).slice(0, 8)
+  // 피크가 높은 순서
+  const sortedWindows = [...windows].sort((a, b) => b.peakKw - a.peakKw)
 
   // 3) 피크가 잦은 시간대: 요금 시간대 묶음마다 평균을 내어 가장 높은 묶음을 고름
   let busiest = null
@@ -1966,8 +2042,8 @@ export async function fakeGetPeakAnalysis(from, to) {
     hasData: true,
     targetPeakKw: TARGET_PEAK_KW,
     summary: {
-      maxPeakKw: topWindows[0].peakKw,
-      maxPeakAt: topWindows[0].windowStart,
+      maxPeakKw: sortedWindows[0].peakKw,
+      maxPeakAt: sortedWindows[0].windowStart,
       exceededCount: exceeded.length,
       windowCount,
       avgReductionKw: Math.round(
@@ -1980,6 +2056,25 @@ export async function fakeGetPeakAnalysis(from, to) {
     },
     dailyPeaks,
     heatmap,
-    topWindows,
+    sortedWindows,
   }
+}
+
+// 피크 분석: 요약 · 일별 최대 피크 · 히트맵
+// 명세 v0.2에 없어서 백엔드에 추가 요청한 모양 (docs/api-spec-diff.md 2-9). 높았던 구간 순위는 아래 16번으로 따로 받음
+export async function fakeGetPeakAnalysis(from, to) {
+  failIfOffline()
+  const result = await buildPeakAnalysis(from, to)
+  if (!result.hasData) return result
+  const analysis = { ...result }
+  delete analysis.sortedWindows // 구간 순위는 이 API가 아니라 16번으로 보냄
+  return analysis
+}
+
+// GET /api/demand-intervals?from=&to=&limit= 흉내 (명세 16번): 피크가 높았던 15분 구간 순위
+export async function fakeGetDemandIntervals(from, to, limit = 5) {
+  failIfOffline()
+  const result = await buildPeakAnalysis(from, to)
+  if (!result.hasData) return []
+  return result.sortedWindows.slice(0, limit)
 }

@@ -2,7 +2,6 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   getLatestBatteryStatus,
-  getRecentBatteryStatuses,
   getTodayBatteryStatuses,
   getZoneRecent,
 } from '@/api/batteryStatusApi'
@@ -19,7 +18,6 @@ export const useRealtimeStore = defineStore('realtime', () => {
   const todayLoading = ref(true) // 처음에는 아직 받기 전이라 true
   const todayError = ref('')
 
-  const recentStatuses = ref([]) // 최근 1시간 목록 (실시간 전력 추세용)
   const zoneDetail = ref(null) // 설비 모니터링 화면에서 고른 구역의 상세
   const zoneError = ref('') // 구역 상세를 받지 못했을 때의 메시지
 
@@ -63,20 +61,11 @@ export const useRealtimeStore = defineStore('realtime', () => {
     }
   }
 
-  // 실패하면 이전 그래프를 그대로 둠 (다음 갱신 때 다시 시도)
-  async function fetchRecent() {
-    try {
-      recentStatuses.value = await getRecentBatteryStatuses()
-    } catch {
-      // 연결 상태는 fetchLatest가 표시하므로 여기서는 따로 알리지 않음
-    }
-  }
-
   // 실패하면 이전 값은 그대로 두고 메시지만 남김 (화면에서 "다시 시도"를 보여 주기 위해)
-  async function fetchZoneDetail(zoneId) {
+  async function fetchZoneDetail(zoneName) {
     zoneError.value = ''
     try {
-      zoneDetail.value = await getZoneRecent(zoneId)
+      zoneDetail.value = await getZoneRecent(zoneName)
     } catch (error) {
       zoneError.value = error.message
     }
@@ -95,14 +84,12 @@ export const useRealtimeStore = defineStore('realtime', () => {
     todayStatuses,
     todayLoading,
     todayError,
-    recentStatuses,
     zoneDetail,
     zoneError,
     connected,
     errorMessage,
     fetchLatest,
     fetchToday,
-    fetchRecent,
     fetchZoneDetail,
     changeDecisionStatus,
   }

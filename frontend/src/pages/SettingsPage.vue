@@ -15,24 +15,23 @@ import { formatInteger, formatKw, formatOneDecimal } from '@/utils/format'
 const settingsStore = useSettingsStore()
 const realtimeStore = useRealtimeStore()
 
+// 운영 모드: 명세 키 operation.auto_mode의 값(true / false)으로 고름
 const MODES = [
-  { value: 'MANUAL', label: '운영자 승인 모드', note: '추천을 사람이 보고 적용' },
-  { value: 'AUTO', label: '자동 모드 (시뮬레이션)', note: '추천을 바로 반영한 것으로 표시' },
+  { value: false, label: '운영자 승인 모드', note: '추천을 사람이 보고 적용' },
+  { value: true, label: '자동 모드 (시뮬레이션)', note: '추천을 바로 반영한 것으로 표시' },
 ]
-const MODE_LABELS = { MANUAL: '운영자 승인 모드', AUTO: '자동 모드 (시뮬레이션)' }
 
-// 화면에 놓을 항목들. key는 백엔드 설정 이름과 같아야 함
-// min, max: 화면에서 먼저 걸러 주는 범위 / decimal: 소수 1자리까지 쓰는 값
-// (2026-11-17, UI 피드백) 요금 단가 4개는 요금 기준표에서, 충·방전 효율은 외부에서 받아오는 값이라
-// 여기서 고치지 않도록 화면에서 뺐음
+// 화면에 놓을 항목들. key는 명세 v0.2의 설정 키 그대로 (예: 'peak.target_kw')
+// min, max: 화면에서 먼저 걸러 주는 범위 / readOnly: 명세에서 "보기만"인 항목 (고칠 수 없음)
+// (2026-11-17, UI 피드백) 요금 단가와 충·방전 효율은 요금 기준표·외부에서 받아오는 값이라 화면에서 뺐음
 const GROUPS = [
   {
     key: 'peak',
     title: '피크',
     note: '피크 단계를 나누는 기준',
     fields: [
-      { key: 'targetPeakKw', label: '목표 피크', unit: 'kW', min: 100, max: 100000 },
-      { key: 'warnPercent', label: '주의선', unit: '%', min: 50, max: 100 },
+      { key: 'peak.target_kw', label: '목표 피크', unit: 'kW', min: 100, max: 100000 },
+      { key: 'peak.warn_ratio', label: '주의선', unit: '%', min: 50, max: 100 },
     ],
   },
   {
@@ -40,11 +39,11 @@ const GROUPS = [
     title: 'ESS',
     note: '배터리를 안전하게 쓰는 범위',
     fields: [
-      { key: 'capacityKwh', label: '배터리 용량', unit: 'kWh', min: 1, max: 100000 },
-      { key: 'maxPowerKw', label: '최대 충·방전 출력', unit: 'kW', min: 1, max: 100000 },
-      { key: 'socLowPercent', label: '잔량 하한', unit: '%', min: 0.1, max: 99 },
-      { key: 'socHighPercent', label: '잔량 상한', unit: '%', min: 1, max: 100 },
-      { key: 'roomTempLimitC', label: '배터리실 온도 제한', unit: '℃', min: 1, max: 80 },
+      { key: 'ess.capacity_kwh', label: '배터리 용량', unit: 'kWh', readOnly: true },
+      { key: 'ess.max_power_kw', label: '최대 충·방전 출력', unit: 'kW', readOnly: true },
+      { key: 'ess.soc_low', label: '잔량 하한', unit: '%', min: 1, max: 99 },
+      { key: 'ess.soc_high', label: '잔량 상한', unit: '%', min: 1, max: 100 },
+      { key: 'ess.room_temp_limit', label: '배터리실 온도 제한', unit: '℃', min: 1, max: 80 },
     ],
   },
   {
@@ -52,32 +51,25 @@ const GROUPS = [
     title: '운영',
     note: '추천을 반영하는 방식',
     fields: [
-      { key: 'operationMode', label: '운영 모드', mode: true },
-      { key: 'pollSeconds', label: '화면 갱신 주기', unit: '초', min: 1, max: 60 },
-      { key: 'decisionValidMinutes', label: '추천 유효 시간', unit: '분', min: 1, max: 60 },
+      { key: 'operation.auto_mode', label: '운영 모드', mode: true },
+      // 아래 두 개는 명세에 키가 없음 → 화면에서 뺄지 팀 결정 대기 (docs/api-spec-diff.md 2-10)
+      { key: 'operation.poll_seconds', label: '화면 갱신 주기', unit: '초', min: 1, max: 60 },
+      {
+        key: 'operation.decision_valid_minutes',
+        label: '추천 유효 시간',
+        unit: '분',
+        min: 1,
+        max: 60,
+      },
     ],
   },
 ]
 const ALL_FIELDS = GROUPS.flatMap((group) => group.fields.map((field) => ({ ...field, group })))
-
-// 화면에서는 뺐지만 예전 변경 기록에는 남아 있을 수 있는 항목.
-// 기록이 'pricePeakWon' 같은 영문 이름으로 보이지 않게 이름과 단위만 둠 (고치는 칸은 만들지 않음)
-const RETIRED_FIELDS = [
-  { key: 'priceLightWon', label: '경부하 단가', unit: '원/kWh', group: { title: '요금' } },
-  { key: 'priceMidWon', label: '중간부하 단가', unit: '원/kWh', group: { title: '요금' } },
-  { key: 'pricePeakWon', label: '최대부하 단가', unit: '원/kWh', group: { title: '요금' } },
-  { key: 'basePriceWon', label: '기본요금 단가', unit: '원/kW', group: { title: '요금' } },
-  {
-    key: 'efficiencyPercent',
-    label: '충·방전 효율',
-    unit: '%',
-    decimal: true,
-    group: { title: 'ESS' },
-  },
-]
+// 고칠 수 있는 항목만 (보기만 항목은 저장·되돌리기·검사 대상이 아님)
+const editableFields = (group) => group.fields.filter((field) => !field.readOnly)
 
 // ---- 저장된 값과 고치는 중인 값 ----
-const saved = computed(() => settingsStore.values) // 저장된 값 (key → 값)
+const saved = computed(() => settingsStore.values) // 저장된 값 (key → 숫자 또는 true/false)
 const draft = ref({}) // 화면에서 고치는 중인 값 (key → 값)
 const savingGroup = ref('') // 저장 요청 중인 묶음
 const savedGroup = ref('') // 방금 저장을 마친 묶음 ("저장했습니다" 표시용)
@@ -85,13 +77,35 @@ const saveErrors = ref({}) // 묶음별 저장 실패 메시지
 
 // 묶음의 값을 저장된 값으로 되돌림 (처음 받았을 때, 저장한 뒤, [되돌리기])
 function resetGroup(group) {
-  for (const field of group.fields) draft.value[field.key] = saved.value[field.key]
+  for (const field of editableFields(group)) draft.value[field.key] = saved.value[field.key]
 }
 
-onMounted(() => {
-  settingsStore.fetchSettings()
-  settingsStore.fetchHistory()
-})
+// 변경 기록은 서버 날짜 기준 최근 30일을 받음 (명세 13번은 기간으로 조회)
+const HISTORY_DAYS = 30
+const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) ?? '')
+
+function daysBefore(date, days) {
+  const [year, month, day] = date.split('-').map(Number)
+  const result = new Date(year, month - 1, day - days)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${result.getFullYear()}-${pad(result.getMonth() + 1)}-${pad(result.getDate())}`
+}
+
+function loadHistory() {
+  if (!serverDate.value) return
+  settingsStore.fetchHistory(daysBefore(serverDate.value, HISTORY_DAYS - 1), serverDate.value)
+}
+
+onMounted(() => settingsStore.fetchSettings())
+
+// 서버 날짜를 알게 되면 변경 기록을 받음 (처음 한 번)
+watch(
+  serverDate,
+  (date, before) => {
+    if (date && !before) loadHistory()
+  },
+  { immediate: true },
+)
 
 // 값을 처음 받으면 고치는 칸에 채워 넣음
 watch(
@@ -102,7 +116,7 @@ watch(
   { immediate: true },
 )
 
-const isChanged = (field) => draft.value[field.key] !== saved.value[field.key]
+const isChanged = (field) => !field.readOnly && draft.value[field.key] !== saved.value[field.key]
 const changedFields = (group) => group.fields.filter(isChanged)
 
 // ---- 저장하지 않은 값이 있을 때 화면을 떠나지 못하게 한 번 물어봄 ----
@@ -132,19 +146,20 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', warnBeforeUnloa
 
 // 값이 잘못됐으면 그 이유, 괜찮으면 ''
 function errorOf(field) {
-  if (field.mode) return ''
+  if (field.mode || field.readOnly) return ''
   const value = draft.value[field.key]
   if (typeof value !== 'number' || !Number.isFinite(value)) return '숫자를 넣어 주세요.'
   if (value < field.min || value > field.max) {
     return `${formatInteger(field.min)} ~ ${formatInteger(field.max)} 사이로 넣어 주세요.`
   }
-  if (field.key === 'socLowPercent' && value >= draft.value.socHighPercent) {
+  if (field.key === 'ess.soc_low' && value >= draft.value['ess.soc_high']) {
     return '잔량 하한은 잔량 상한보다 작아야 합니다.'
   }
   return ''
 }
 const hasError = (group) => group.fields.some((field) => errorOf(field))
 
+// 묶음의 바뀐 값을 한 번에 저장 (명세 12번: PUT /api/settings. 문자열로 바꾸는 것은 Store가 함)
 async function saveGroup(group) {
   const changes = changedFields(group).map((field) => ({
     key: field.key,
@@ -170,35 +185,36 @@ function saveLabel(group) {
 }
 
 // ---- 표시용 글자 ----
-// 값 + 단위 (예: '1,800 kW', '89.5 %', '자동 모드 (시뮬레이션)')
+// 값 + 단위 (예: '1,800 kW', '자동 모드 (시뮬레이션)')
 function valueText(field, value) {
-  if (field.mode) return MODE_LABELS[value] ?? '—'
+  if (field.mode) return MODES.find((mode) => mode.value === value)?.label ?? '—'
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
-  const number = field.decimal ? formatOneDecimal(value) : formatInteger(value)
-  return `${number} ${field.unit}`
+  return `${formatInteger(value)} ${field.unit}`
 }
 
 // 항목 아래의 도움말
 function helpOf(field) {
-  if (field.key === 'targetPeakKw') return '15분 평균이 이 값을 넘으면 경고'
-  if (field.key === 'warnPercent') {
+  if (field.readOnly) return '수정할 수 없는 값 (설비 사양)'
+  if (field.key === 'peak.target_kw') return '15분 평균이 이 값을 넘으면 경고'
+  if (field.key === 'peak.warn_ratio') {
     // 주의가 시작되는 kW = 목표 피크 × 주의선 % (고치는 중인 값으로 미리 보여 주는 표시용 계산)
-    const warnKw = (draft.value.targetPeakKw * draft.value.warnPercent) / 100
+    const warnKw = (draft.value['peak.target_kw'] * draft.value['peak.warn_ratio']) / 100
     return Number.isFinite(warnKw)
       ? `목표의 이 비율부터 주의. 지금 값으로는 ${formatKw(Math.round(warnKw))} kW부터`
       : '목표의 이 비율부터 주의'
   }
-  if (field.key === 'maxPowerKw') return '추천 전력은 이 값을 넘지 않음'
-  if (field.key === 'socLowPercent') return '이 아래로는 방전하지 않음'
-  if (field.key === 'socHighPercent') return '이 위로는 충전하지 않음'
-  if (field.key === 'roomTempLimitC') {
+  if (field.key === 'ess.soc_low') return '이 아래로는 방전하지 않음'
+  if (field.key === 'ess.soc_high') return '이 위로는 충전하지 않음'
+  if (field.key === 'ess.room_temp_limit') {
     const now = realtimeStore.status
       ? `, 지금 ${formatOneDecimal(realtimeStore.status.batteryTempC)} ℃`
       : ''
     return `넘으면 충·방전을 멈추고 대기${now}`
   }
-  if (field.key === 'pollSeconds') return '화면이 서버에서 새 값을 받아 오는 간격'
-  if (field.key === 'decisionValidMinutes') return '구간이 끝나면 추천도 끝남 (확인 필요)'
+  if (field.key === 'operation.poll_seconds') return '화면이 서버에서 새 값을 받아 오는 간격'
+  if (field.key === 'operation.decision_valid_minutes') {
+    return '구간이 끝나면 추천도 끝남 (확인 필요)'
+  }
   return ''
 }
 
@@ -213,17 +229,24 @@ function lastSaved(group) {
   return items.reduce((latest, item) => (item.updatedAt > latest.updatedAt ? item : latest))
 }
 
-// 변경 기록의 한 줄을 화면용으로 (항목 이름과 단위는 위의 항목 목록에서 찾음)
+// 변경 기록 값('1800', 'true')을 화면 글자로. 화면에 없는 항목(예: 예전 요금 단가)은 받은 글자 그대로
+function historyValueText(field, value) {
+  if (!field) return value
+  if (field.mode) return valueText(field, value === 'true')
+  return valueText(field, Number(value))
+}
+
+// 변경 기록의 한 줄을 화면용으로. 항목 이름은 서버가 준 label을 씀
 const historyRows = computed(() =>
   settingsStore.history.map((item) => {
-    const field = [...ALL_FIELDS, ...RETIRED_FIELDS].find((one) => one.key === item.key)
+    const field = ALL_FIELDS.find((one) => one.key === item.key)
     return {
       id: item.id,
       changedAt: dateTimeText(item.changedAt),
       group: field?.group.title ?? '—',
-      label: field?.label ?? item.key,
-      before: field ? valueText(field, item.before) : item.before,
-      after: field ? valueText(field, item.after) : item.after,
+      label: item.label ?? field?.label ?? item.key,
+      before: historyValueText(field, item.oldValue),
+      after: historyValueText(field, item.newValue),
       changedBy: item.changedBy,
     }
   }),
@@ -300,16 +323,23 @@ const historyRows = computed(() =>
 
             <!-- 숫자 항목 -->
             <template v-else>
-              <label class="item-label" :for="`setting-${field.key}`">{{ field.label }}</label>
-              <input
-                :id="`setting-${field.key}`"
-                v-model.number="draft[field.key]"
-                type="number"
-                class="box num"
-                :min="field.min"
-                :max="field.max"
-                :step="field.decimal ? 0.1 : 1"
-              />
+              <!-- 보기만 항목(명세): 입력칸 대신 값만 보여 줌 -->
+              <template v-if="field.readOnly">
+                <span class="item-label">{{ field.label }}</span>
+                <span class="box readonly num">{{ formatInteger(saved[field.key]) }}</span>
+              </template>
+              <template v-else>
+                <label class="item-label" :for="`setting-${field.key}`">{{ field.label }}</label>
+                <input
+                  :id="`setting-${field.key}`"
+                  v-model.number="draft[field.key]"
+                  type="number"
+                  class="box num"
+                  :min="field.min"
+                  :max="field.max"
+                  step="1"
+                />
+              </template>
               <span class="unit">{{ field.unit }}</span>
               <p v-if="errorOf(field)" class="item-error" role="alert">{{ errorOf(field) }}</p>
               <p v-else-if="isChanged(field)" class="item-note num">
@@ -359,9 +389,17 @@ const historyRows = computed(() =>
       <section class="card history">
         <div class="card-head">
           <h2 class="card-title">변경 기록</h2>
-          <span class="note">저장할 때마다 저장 전 값과 저장 후 값이 남습니다</span>
+          <span class="note">
+            최근 {{ HISTORY_DAYS }}일 · 저장할 때마다 저장 전 값과 저장 후 값이 남습니다
+          </span>
         </div>
-        <p v-if="!historyRows.length" class="empty">변경 기록이 없습니다.</p>
+        <p v-if="settingsStore.historyError && !historyRows.length" class="empty" role="alert">
+          변경 기록을 불러오지 못했습니다. ({{ settingsStore.historyError }})
+          <button class="button" @click="loadHistory">다시 시도</button>
+        </p>
+        <p v-else-if="!historyRows.length" class="empty">
+          최근 {{ HISTORY_DAYS }}일 동안의 변경 기록이 없습니다.
+        </p>
         <div v-else class="table-wrap">
           <table class="table">
             <thead>
@@ -475,6 +513,15 @@ const historyRows = computed(() =>
   font-weight: 700;
   color: var(--ink);
   text-align: right;
+}
+/* 보기만 항목: 고칠 수 없다는 게 보이게 회색 바탕 + 점선 */
+.box.readonly {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  background: var(--bg);
+  border-style: dashed;
+  color: var(--ink-2);
 }
 .unit {
   font-size: 13px;

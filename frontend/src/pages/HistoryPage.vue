@@ -105,6 +105,12 @@ onBeforeUnmount(() => {
   clearInterval(timer)
 })
 
+// 처리자 표시: 명세는 자동일 때 "자동 모드"를 보냄 → 실제 제어가 아니라는 뜻으로 "(시뮬레이션)"을 붙임
+function handlerText(appliedBy) {
+  if (!appliedBy) return '—'
+  return appliedBy === '자동 모드' ? '자동 모드 (시뮬레이션)' : appliedBy
+}
+
 // ---- 표에 보여 줄 목록 (행동, 상태, 검색어로 거름) ----
 const filtered = computed(() => {
   const word = keyword.value.trim()
@@ -113,7 +119,7 @@ const filtered = computed(() => {
     if (statusFilter.value !== 'ALL' && item.status !== statusFilter.value) return false
     if (ruleFilter.value !== 'ALL' && item.ruleLabel !== ruleFilter.value) return false
     if (word) {
-      const text = `${item.reason} ${item.ruleLabel} ${item.appliedBy ?? ''}`
+      const text = `${item.reason} ${item.ruleLabel} ${handlerText(item.appliedBy)}`
       if (!text.includes(word)) return false
     }
     return true
@@ -293,7 +299,7 @@ function toggle(id) {
                   <span aria-hidden="true">{{ STATUS_INFO[item.status].shape }}</span>
                   {{ STATUS_INFO[item.status].label }}
                 </td>
-                <td>{{ item.appliedBy ?? '—' }}</td>
+                <td>{{ handlerText(item.appliedBy) }}</td>
                 <td class="num">
                   {{ item.appliedAt ? formatHourMinute(item.appliedAt) : '—' }}
                 </td>
@@ -323,8 +329,9 @@ function toggle(id) {
                   <!-- 통합 화면의 ESS 추천 카드와 같은 이름(이유 / 판단 근거)으로 나눠 보여 줌 -->
                   <h4 class="detail-title">이유</h4>
                   <p class="reason">{{ item.reason }}</p>
-                  <h4 class="detail-title">판단 근거</h4>
-                  <dl class="used">
+                  <!-- 판단 근거(usedValues)는 명세에서 보류 중이라 없을 수 있음 → 없으면 제목째 숨김 -->
+                  <h4 v-if="item.usedValues?.length" class="detail-title">판단 근거</h4>
+                  <dl v-if="item.usedValues?.length" class="used">
                     <div v-for="used in item.usedValues" :key="used.label" class="used-item">
                       <dt>{{ used.label }}</dt>
                       <dd class="num">
