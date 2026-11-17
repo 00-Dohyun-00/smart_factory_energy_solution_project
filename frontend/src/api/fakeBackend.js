@@ -1671,6 +1671,25 @@ export async function fakeGetTrendAnalysis(from, to, interval) {
     })
   }
 
+  // 4-1) 4시간 묶음별 평균 한전 구매전력 (0~4시, 4~8시 … 20~24시). 최근 7일처럼 며칠을 볼 때 씀
+  //      peak: 묶음 안에 최대부하 시각이 하나라도 있으면 true
+  const hourBlocks = []
+  for (let fromHour = 0; fromHour < 24; fromHour += 4) {
+    const list = raw.filter((item) => item.hour >= fromHour && item.hour < fromHour + 4)
+    hourBlocks.push({
+      fromHour,
+      toHour: fromHour + 4,
+      avgGridKw: list.length ? Math.round(average(list, 'gridKw')) : null,
+      peak: hourly.slice(fromHour, fromHour + 4).some((item) => item.period === 'PEAK'),
+    })
+  }
+
+  // 4-2) 날짜별 평균 한전 구매전력. 한 달처럼 긴 기간을 볼 때 씀
+  const daily = weather.map((item) => {
+    const list = raw.filter((one) => one.recordedAt.startsWith(item.date))
+    return { date: item.date, avgGridKw: list.length ? Math.round(average(list, 'gridKw')) : null }
+  })
+
   // 5) 방전 추천을 처리(적용·자동·넘김)별로 묶은 결과. 추천 이력과 같은 데이터에서 셈
   const decisions = (await fakeGetDecisions(from, to)).filter(
     (item) => item.action === 'DISCHARGE' && item.resultStatus,
@@ -1699,6 +1718,8 @@ export async function fakeGetTrendAnalysis(from, to, interval) {
     points,
     weather,
     hourly,
+    hourBlocks,
+    daily,
     byStatus,
     highlights,
   }

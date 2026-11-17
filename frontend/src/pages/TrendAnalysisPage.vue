@@ -8,6 +8,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import Chart from '@/components/Chart.vue'
+import FitChart from '@/components/FitChart.vue'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
 import { useHistoryStore } from '@/stores/useHistoryStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
@@ -55,8 +56,12 @@ const fromDate = ref('') // 예: '2026-11-10'
 const toDate = ref('')
 const interval = ref('HOUR')
 const shown = ref(ITEMS.map((item) => item.key)) // 켜져 있는 항목들
-const focusAt = ref('') // "눈에 띄는 구간"에서 고른 시각 (그래프에 세로선으로 표시)
+const focusAt = ref('') // 이벤트 히스토리에서 고른 시각 (그래프에 세로선으로 표시)
 const hourlyView = ref('time') // 시간대별 사용 패턴 보기: time(시간 순 막대) | rank(많이 쓴 순위)
+// 이벤트 히스토리 필터
+const historyKind = ref('ALL') // ALL | DECISION(추천) | HIGHLIGHT(구간)
+const historyStatus = ref('ALL') // ALL | APPLIED | AUTO | IGNORED | RECOMMENDED (추천에만 해당)
+const historyResult = ref('ALL') // ALL | DEFENDED | EXCEEDED (추천에만 해당)
 const showPins = ref(true) // 전력 그래프 위에 추천 기호를 보일지
 
 // "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
@@ -136,6 +141,74 @@ function toggleFocus(at) {
   focusAt.value = focusAt.value === at ? '' : at
 }
 
+// ---- 이벤트 히스토리 ----
+// 추천(몇 시에 무슨 추천이 나와 어떻게 처리됐나)과 눈에 띄는 구간을 한 줄씩 로그처럼 모아 최신 순으로 보여 줌
+const RESULT_TEXTS = { DEFENDED: '목표 이내', EXCEEDED: '목표 초과' }
+
+// 처리 글자 (자동은 실제 제어가 아니라 시뮬레이션이라는 점을 함께 적음)
+function processText(item) {
+  const label = PIN_INFO[item.status].label
+  if (item.status === 'AUTO') return `${label} (시뮬레이션)`
+  return item.appliedBy ? `${label} · ${item.appliedBy}` : label
+}
+
+const historyRows = computed(() => {
+  const decisions = periodDecisions.value.map((item) => {
+    const power = item.action === 'IDLE' ? '' : ` ${formatKw(item.powerKw)} kW`
+    const info = PIN_INFO[item.status]
+    return {
+      key: `decision-${item.id}`,
+      at: item.decidedAt,
+      kind: 'DECISION',
+      status: item.status,
+      resultStatus: item.resultStatus,
+      tag: '추천',
+      shape: info.shape,
+      text: `${item.ruleLabel} · ${ACTION_LABELS[item.action]}${power}`, // 구분 칸에 "추천"이 있어 뒤에 붙이지 않음
+      // 처리: 적용 · 운영자 / 자동 (시뮬레이션) / 넘김 · 운영자 / 추천 중
+      detail: processText(item),
+      // 결과: 구간이 끝났으면 실제 피크와 목표 달성 여부
+      value: item.resultStatus
+        ? `${RESULT_TEXTS[item.resultStatus]} ${formatKw(item.resultPeakKw)} kW`
+        : '구간 진행 중',
+      over: item.resultStatus === 'EXCEEDED',
+    }
+  })
+  const highlights = (trend.value?.highlights ?? []).map((item) => ({
+    key: `highlight-${item.label}`,
+    at: item.at,
+    kind: 'HIGHLIGHT',
+    status: null,
+    resultStatus: null,
+    tag: '구간',
+    shape: item.level === 'CRITICAL' ? '■' : '',
+    text: item.label,
+    detail: '',
+    value: `${highlightValue(item)} ${item.unit}`,
+    over: item.level === 'CRITICAL',
+  }))
+  return [...decisions, ...highlights].sort((a, b) => (a.at < b.at ? 1 : -1))
+})
+
+// 필터를 적용한 목록. 처리·결과 조건을 고르면 그 값이 없는 구간 기록은 빠짐
+const filteredHistory = computed(() =>
+  historyRows.value.filter((row) => {
+    if (historyKind.value !== 'ALL' && row.kind !== historyKind.value) return false
+    if (historyStatus.value !== 'ALL' && row.status !== historyStatus.value) return false
+    if (historyResult.value !== 'ALL' && row.resultStatus !== historyResult.value) return false
+    return true
+  }),
+)
+const isHistoryFiltered = computed(
+  () =>
+    historyKind.value !== 'ALL' || historyStatus.value !== 'ALL' || historyResult.value !== 'ALL',
+)
+function resetHistoryFilter() {
+  historyKind.value = 'ALL'
+  historyStatus.value = 'ALL'
+  historyResult.value = 'ALL'
+}
+
 // ---- 그래프 공통 ----
 // ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
 const COLOR = {
@@ -177,6 +250,16 @@ const dayNumbers = computed(() => {
 // 날짜가 많으면 가로축 글자가 겹치므로 며칠에 하나씩만 적음
 const dayStep = computed(() => Math.ceil((trend.value?.weather.length ?? 1) / 10))
 
+// 그래프 글자 크기 (px). 멀리서도 읽히게 키우고, 그만큼 그래프 둘레 여백(grid)을 넓혀 겹치지 않게 함
+const FONT = {
+  axis: 14, // 축 눈금 글자
+  legend: 14, // 범례
+  mark: 13, // 기준선 글자 (목표 피크, 하한·상한 등)
+  pin: 13, // 추천 기호
+}
+// 기준선 글자 밑에 까는 옅은 흰 바탕: 그래프 선 위에 글자가 겹쳐도 읽히게 함
+const MARK_LABEL_BOX = { backgroundColor: 'rgba(255, 255, 255, 0.85)', padding: [1, 4] }
+
 // 세 그래프가 같이 쓰는 가로축. withWeather = true면 날짜 아래에 날씨도 적음
 function timeAxis(withWeather) {
   return {
@@ -186,6 +269,9 @@ function timeAxis(withWeather) {
     axisTick: { show: false },
     axisLabel: {
       color: COLOR.mute,
+      fontSize: FONT.axis,
+      lineHeight: FONT.axis + 4, // 날짜·날씨 두 줄일 때 줄 간격
+      margin: 10, // 축과 글자 사이
       // 어느 칸에 글자를 적을지
       interval: (index, value) => {
         const date = value.slice(0, 5)
@@ -213,7 +299,7 @@ function timeAxis(withWeather) {
 
 const valueAxis = {
   type: 'value',
-  axisLabel: { color: COLOR.mute },
+  axisLabel: { color: COLOR.mute, fontSize: FONT.axis, margin: 10 },
   splitLine: { lineStyle: { color: COLOR.line } },
 }
 
@@ -221,9 +307,10 @@ const legend = {
   right: 0,
   top: 0,
   icon: 'rect',
-  itemWidth: 10,
-  itemHeight: 10,
-  textStyle: { color: COLOR.ink2 },
+  itemWidth: 12,
+  itemHeight: 12,
+  itemGap: 16,
+  textStyle: { color: COLOR.ink2, fontSize: FONT.legend },
 }
 
 // 어떤 시각이 그래프의 어느 칸인지 (그 시각이 들어 있는 칸의 가로축 글자)
@@ -239,15 +326,21 @@ function slotLabelOf(at) {
 const focusLabel = computed(() => (focusAt.value ? slotLabelOf(focusAt.value) : null))
 
 // ---- 추천 핀 ----
+// 조회 기간 안의 추천 목록 (그래프 핀과 이벤트 히스토리가 같이 씀)
+// 다른 화면에서 받아 둔 다른 기간의 이력이 섞이지 않게 기간 안의 것만 씀
+const periodDecisions = computed(() => {
+  if (!trend.value) return []
+  const from = `${trend.value.from}T00:00:00`
+  const to = `${trend.value.to}T23:59:59`
+  return historyStore.decisions.filter(
+    (item) => PIN_INFO[item.status] && item.decidedAt >= from && item.decidedAt <= to,
+  )
+})
+
 // 조회 기간 안의 추천을 그래프 칸별로 묶음. 예: { '11-13 10:00': [추천, 추천] }
 const pinsByLabel = computed(() => {
   const result = {}
-  if (!trend.value) return result
-  const from = `${trend.value.from}T00:00:00`
-  const to = `${trend.value.to}T23:59:59`
-  for (const item of historyStore.decisions) {
-    // 다른 화면에서 받아 둔 다른 기간의 이력이 섞이지 않게 기간 안의 것만 씀
-    if (!PIN_INFO[item.status] || item.decidedAt < from || item.decidedAt > to) continue
+  for (const item of periodDecisions.value) {
     const label = slotLabelOf(item.decidedAt)
     if (!label) continue
     if (!result[label]) result[label] = []
@@ -291,6 +384,8 @@ function markLines(lines, withPins = false) {
       position: 'insideEndTop',
       color: item.color,
       fontWeight: 'bold',
+      fontSize: FONT.mark,
+      ...MARK_LABEL_BOX,
     },
   }))
   // 추천은 세로선을 긋지 않고(선이 많으면 그래프가 지저분해짐) 그래프 위쪽 띠에 기호만 적음.
@@ -301,7 +396,12 @@ function markLines(lines, withPins = false) {
       data.push({
         xAxis: label,
         lineStyle: { color: 'rgba(0, 0, 0, 0)' },
-        label: { formatter: pinShapes(list), position: 'end', color: COLOR.ink2, fontSize: 11 },
+        label: {
+          formatter: pinShapes(list),
+          position: 'end',
+          color: COLOR.ink2,
+          fontSize: FONT.pin,
+        },
       })
     }
   }
@@ -309,7 +409,13 @@ function markLines(lines, withPins = false) {
     data.push({
       xAxis: focusLabel.value,
       lineStyle: { color: COLOR.ink, width: 2, type: 'solid' },
-      label: { formatter: '선택', position: 'end', color: COLOR.ink, fontWeight: 'bold' },
+      label: {
+        formatter: '선택',
+        position: 'end',
+        color: COLOR.ink,
+        fontWeight: 'bold',
+        fontSize: FONT.mark,
+      },
     })
   }
   return { silent: true, symbol: 'none', data }
@@ -354,7 +460,7 @@ const powerOption = computed(() => {
   return {
     animation: false,
     // 위쪽에 범례와 추천 핀 기호가 들어가므로 여백을 넉넉히 둠
-    grid: { left: 52, right: 20, top: 44, bottom: 24 },
+    grid: { left: 64, right: 24, top: 58, bottom: 32 },
     legend,
     tooltip: {
       trigger: 'axis',
@@ -392,7 +498,7 @@ const socOption = computed(() => {
   ])
   return {
     animation: false,
-    grid: { left: 52, right: 20, top: 16, bottom: 24 },
+    grid: { left: 64, right: 24, top: 20, bottom: 32 },
     tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} %` },
     xAxis: timeAxis(false),
     yAxis: { ...valueAxis, min: 0, max: 100, interval: 50 },
@@ -409,7 +515,7 @@ const tempOption = computed(() => {
   return {
     animation: false,
     // 가로축에 날짜와 날씨를 두 줄로 적으므로 아래 여백을 넉넉히 둠
-    grid: { left: 52, right: 20, top: 34, bottom: 40 },
+    grid: { left: 64, right: 24, top: 40, bottom: 54 },
     legend,
     tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} ℃` },
     xAxis: timeAxis(true),
@@ -419,32 +525,81 @@ const tempOption = computed(() => {
 })
 
 // ---- 시간대별 사용 패턴 ----
-// 순위 보기: 백엔드가 준 시각별 평균을 큰 순서로 정렬만 함. 막대 길이는 1위를 100%로 본 비율(표시용)
-const RANK_COUNT = 10 // 순위 보기에서 보여 줄 개수
-const hourlyRanks = computed(() => {
-  const sorted = [...(trend.value?.hourly ?? [])].sort((a, b) => b.avgGridKw - a.avgGridKw)
-  const top = sorted[0]?.avgGridKw || 1
-  return sorted.slice(0, RANK_COUNT).map((item, index) => ({
-    rank: index + 1,
-    hour: item.hour,
+// 막대 단위는 고른 기간에 따라 바뀜: 오늘 = 1시간, 최근 7일 = 4시간, 이번 달 = 하루
+// (직접 입력한 기간은 길이로 정함: 하루 = 1시간, 7일 이하 = 4시간, 그보다 길면 하루)
+// 각 단위의 평균은 백엔드가 계산해 준 값(hourly / hourBlocks / daily)을 그대로 씀
+const patternUnit = computed(() => {
+  if (preset.value === 'today') return 'HOUR'
+  if (preset.value === 'week') return 'BLOCK'
+  if (preset.value === 'month') return 'DAY'
+  const days = trend.value?.weather.length ?? 1
+  if (days <= 1) return 'HOUR'
+  return days <= 7 ? 'BLOCK' : 'DAY'
+})
+const PATTERN_TITLES = {
+  HOUR: '시간대별 사용 패턴',
+  BLOCK: '시간대별 사용 패턴 (4시간)',
+  DAY: '날짜별 사용 패턴',
+}
+const PATTERN_NOTES = {
+  HOUR: '1시간 단위 평균 한전 구매 (kW). 회색 띠는 요금이 비싼 최대부하 시간대입니다.',
+  BLOCK: '4시간 단위 평균 한전 구매 (kW). 회색 띠는 최대부하 시간이 들어 있는 구간입니다.',
+  DAY: '하루 단위 평균 한전 구매 (kW).',
+}
+
+// 막대 목록: [{ key, label, avgGridKw, period, isPeak }]
+const patternItems = computed(() => {
+  if (!trend.value) return []
+  if (patternUnit.value === 'BLOCK') {
+    return (trend.value.hourBlocks ?? []).map((item) => ({
+      key: `b${item.fromHour}`,
+      label: `${item.fromHour}~${item.toHour}시`,
+      avgGridKw: item.avgGridKw,
+      period: item.peak ? '최대부하 포함' : '',
+      isPeak: item.peak,
+    }))
+  }
+  if (patternUnit.value === 'DAY') {
+    return (trend.value.daily ?? []).map((item) => ({
+      key: item.date,
+      label: item.date.slice(5),
+      avgGridKw: item.avgGridKw,
+      period: '',
+      isPeak: false,
+    }))
+  }
+  return trend.value.hourly.map((item) => ({
+    key: `h${item.hour}`,
+    label: `${item.hour}시`,
     avgGridKw: item.avgGridKw,
     period: PERIOD_LABELS[item.period] ?? '',
     isPeak: item.period === 'PEAK',
+  }))
+})
+
+// 순위 보기: 같은 단위의 평균을 큰 순서로 정렬만 함. 막대 길이는 1위를 100%로 본 비율(표시용)
+const RANK_COUNT = 10 // 순위 보기에서 보여 줄 개수
+const hourlyRanks = computed(() => {
+  const sorted = [...patternItems.value].sort((a, b) => b.avgGridKw - a.avgGridKw)
+  const top = sorted[0]?.avgGridKw || 1
+  return sorted.slice(0, RANK_COUNT).map((item, index) => ({
+    ...item,
+    rank: index + 1,
     width: (item.avgGridKw / top) * 100,
   }))
 })
 
 const hourlyOption = computed(() => {
-  const hourly = trend.value.hourly
-  const names = hourly.map((item) => `${item.hour}시`)
+  const items = patternItems.value
+  const names = items.map((item) => item.label)
 
-  // 최대부하 시간대(이어진 시각들)를 회색 띠로 표시. 시간대 구분은 백엔드가 준 값
+  // 최대부하 시간대(이어진 막대들)를 회색 띠로 표시. 시간대 구분은 백엔드가 준 값
   const areas = []
   let start = null
-  hourly.forEach((item, index) => {
-    const isPeak = item.period === 'PEAK'
+  items.forEach((item, index) => {
+    const isPeak = item.isPeak
     if (isPeak && start === null) start = index
-    const isLast = index === hourly.length - 1
+    const isLast = index === items.length - 1
     if (start !== null && (!isPeak || isLast)) {
       const end = isPeak ? index : index - 1
       areas.push([
@@ -456,9 +611,12 @@ const hourlyOption = computed(() => {
   })
 
   const target = trend.value.targetPeakKw
+  let labelStep = 1
+  if (patternUnit.value === 'HOUR') labelStep = 6
+  if (patternUnit.value === 'DAY') labelStep = Math.ceil(items.length / 6)
   return {
     animation: false,
-    grid: { left: 48, right: 12, top: 22, bottom: 24 },
+    grid: { left: 60, right: 16, top: 28, bottom: 32 },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
@@ -469,15 +627,22 @@ const hourlyOption = computed(() => {
       data: names,
       axisLine: { lineStyle: { color: COLOR.line } },
       axisTick: { show: false },
-      axisLabel: { color: COLOR.mute, interval: (index) => index % 6 === 0 },
+      axisLabel: {
+        color: COLOR.mute,
+        fontSize: FONT.axis,
+        margin: 10,
+        // 1시간 단위는 6시간마다, 하루 단위는 날짜 수에 맞춰 몇 개마다, 4시간 단위는 모두 적음
+        interval: (index) => index % labelStep === 0,
+      },
     },
-    yAxis: valueAxis,
+    // 그래프가 낮아 눈금 글자가 붙지 않게 눈금 수를 줄임
+    yAxis: { ...valueAxis, splitNumber: 3 },
     series: [
       {
         name: '평균 한전 구매',
         type: 'bar',
         barCategoryGap: '25%',
-        data: hourly.map((item) => item.avgGridKw),
+        data: items.map((item) => item.avgGridKw),
         itemStyle: { color: COLOR.grid },
         markArea: { silent: true, data: areas },
         markLine: {
@@ -489,6 +654,8 @@ const hourlyOption = computed(() => {
             position: 'insideEndTop',
             color: COLOR.crit,
             fontWeight: 'bold',
+            fontSize: FONT.mark,
+            ...MARK_LABEL_BOX,
           },
           data: [{ yAxis: target }],
         },
@@ -662,7 +829,13 @@ const hourlyOption = computed(() => {
               key: 켜 둔 항목이 바뀌면 그래프를 새로 만듦.
               Chart.vue는 이전 설정에 새 설정을 덮어쓰는 방식이라, 선의 개수가 줄면 꺼 둔 선이 남기 때문
             -->
-            <Chart :key="`${powerItems.join()}-${showPins}`" :option="powerOption" :height="270" />
+            <!-- 남은 높이를 전력 2 : 잔량 1 : 온도 1.3 으로 나눠 채움 -->
+            <FitChart
+              :key="`${powerItems.join()}-${showPins}`"
+              class="fit-power"
+              :option="powerOption"
+              :min-height="200"
+            />
           </template>
 
           <template v-if="shown.includes('soc')">
@@ -670,7 +843,7 @@ const hourlyOption = computed(() => {
               배터리 잔량 <small>%</small>
               <span class="chart-note">점선은 잔량 하한과 상한</span>
             </h2>
-            <Chart :option="socOption" :height="130" />
+            <FitChart class="fit-soc" :option="socOption" :min-height="100" />
           </template>
 
           <template v-if="shown.includes('temp')">
@@ -678,7 +851,7 @@ const hourlyOption = computed(() => {
               온도 <small>℃</small> · 날씨
               <span class="chart-note">날짜 아래에 그날 날씨</span>
             </h2>
-            <Chart :option="tempOption" :height="170" />
+            <FitChart class="fit-temp" :option="tempOption" :min-height="130" />
           </template>
 
           <p v-if="!shown.length" class="state">"보기"에서 볼 항목을 하나 이상 골라 주세요.</p>
@@ -688,7 +861,7 @@ const hourlyOption = computed(() => {
         <div class="right">
           <section class="card">
             <div class="card-head">
-              <h2 class="card-title">시간대별 사용 패턴</h2>
+              <h2 class="card-title">{{ PATTERN_TITLES[patternUnit] }}</h2>
               <div class="presets view-switch" role="group" aria-label="보기 방식">
                 <button
                   :class="{ active: hourlyView === 'time' }"
@@ -708,16 +881,15 @@ const hourlyOption = computed(() => {
             </div>
             <!-- Chart.vue는 크기가 0이면 오류가 나므로 v-show 대신 v-if로 바꿔 끼움 -->
             <template v-if="hourlyView === 'time'">
-              <Chart :option="hourlyOption" :height="190" />
-              <p class="foot-note">
-                시각별 평균 한전 구매 (kW). 회색 띠는 요금이 비싼 최대부하 시간대입니다.
-              </p>
+              <!-- key: 단위가 바뀌면 막대 개수가 바뀌므로 그래프를 새로 만듦 -->
+              <Chart :key="patternUnit" :option="hourlyOption" :height="190" />
+              <p class="foot-note">{{ PATTERN_NOTES[patternUnit] }}</p>
             </template>
             <template v-else>
               <ol class="ranks">
-                <li v-for="item in hourlyRanks" :key="item.hour">
+                <li v-for="item in hourlyRanks" :key="item.key">
                   <span class="rank num">{{ item.rank }}</span>
-                  <strong class="rank-hour num">{{ item.hour }}시</strong>
+                  <strong class="rank-hour num">{{ item.label }}</strong>
                   <span class="rank-track" aria-hidden="true">
                     <span class="rank-bar" :style="{ width: `${item.width}%` }"></span>
                   </span>
@@ -725,77 +897,114 @@ const hourlyOption = computed(() => {
                   <span class="rank-period" :class="{ peak: item.isPeak }">{{ item.period }}</span>
                 </li>
               </ol>
-              <p class="foot-note">한전 구매가 많은 시간부터 {{ RANK_COUNT }}개 (시각별 평균)</p>
+              <p class="foot-note">
+                한전 구매가 많은 순서로 {{ hourlyRanks.length }}개 ({{
+                  patternUnit === 'DAY'
+                    ? '날짜별'
+                    : patternUnit === 'BLOCK'
+                      ? '4시간 단위'
+                      : '시각별'
+                }}
+                평균)
+              </p>
             </template>
           </section>
 
-          <section class="card">
+          <!-- 이벤트 히스토리: 추천과 눈에 띄는 구간을 시간순 로그로 (누르면 그래프에 그 시각을 표시) -->
+          <section class="card history-card">
             <div class="card-head">
-              <h2 class="card-title">추천 처리별 결과</h2>
-              <span class="note">결과가 나온 방전 추천</span>
+              <h2 class="card-title">이벤트 히스토리</h2>
+              <span class="note">
+                <span class="num">{{ filteredHistory.length }}건</span> · 최신 순 · 누르면 그래프에
+                그 시각을 표시
+              </span>
+              <button v-if="isHistoryFiltered" class="filter-reset" @click="resetHistoryFilter">
+                필터 초기화
+              </button>
             </div>
-            <table class="table">
-              <thead>
-                <tr>
-                  <th>처리</th>
-                  <th class="right-text">건수</th>
-                  <th>목표 이내</th>
-                  <th class="right-text">평균 결과 피크</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in trend.byStatus" :key="item.status">
-                  <td>
-                    <strong>
-                      <span aria-hidden="true">{{ STATUS_INFO[item.status].shape }}</span>
-                      {{ STATUS_INFO[item.status].label }}
-                    </strong>
-                  </td>
-                  <td class="right-text num">{{ item.count }}</td>
-                  <td class="num">
-                    <template v-if="item.count">
-                      <span class="track" aria-hidden="true">
-                        <span class="bar" :style="{ width: `${item.defendedPercent}%` }"></span>
+            <p v-if="historyStore.errorMessage" class="pin-error" role="alert">
+              추천 기록을 불러오지 못했습니다. ({{ historyStore.errorMessage }})
+            </p>
+            <!-- 칸: 시각 | 구분 | 내용 | 처리 | 결과 (머리줄과 각 줄이 같은 칸 너비를 씀) -->
+            <!-- 머리줄의 구분 · 처리 · 결과 칸이 곧 필터 (처리·결과는 추천에만 있는 값이라 고르면 구간 기록은 빠짐) -->
+            <div v-if="historyRows.length" class="history">
+              <div class="history-head">
+                <span class="col-time">시각</span>
+                <span class="col-tag">
+                  <select
+                    v-model="historyKind"
+                    class="head-select"
+                    :class="{ on: historyKind !== 'ALL' }"
+                    aria-label="구분 필터"
+                  >
+                    <option value="ALL">구분</option>
+                    <option value="DECISION">추천</option>
+                    <option value="HIGHLIGHT">구간</option>
+                  </select>
+                </span>
+                <span class="col-main">내용</span>
+                <span class="col-detail">
+                  <select
+                    v-model="historyStatus"
+                    class="head-select"
+                    :class="{ on: historyStatus !== 'ALL' }"
+                    aria-label="처리 필터"
+                  >
+                    <option value="ALL">처리</option>
+                    <option value="APPLIED">적용</option>
+                    <option value="AUTO">자동</option>
+                    <option value="IGNORED">넘김</option>
+                    <option value="RECOMMENDED">추천 중</option>
+                  </select>
+                </span>
+                <span class="col-value">
+                  <select
+                    v-model="historyResult"
+                    class="head-select"
+                    :class="{ on: historyResult !== 'ALL' }"
+                    aria-label="결과 필터"
+                  >
+                    <option value="ALL">결과</option>
+                    <option value="DEFENDED">목표 이내</option>
+                    <option value="EXCEEDED">목표 초과</option>
+                  </select>
+                </span>
+              </div>
+              <ul v-if="filteredHistory.length">
+                <li v-for="row in filteredHistory" :key="row.key">
+                  <button
+                    class="history-row"
+                    :class="{ active: focusAt === row.at }"
+                    :aria-pressed="focusAt === row.at"
+                    @click="toggleFocus(row.at)"
+                  >
+                    <span class="history-time col-time num">{{ shortTime(row.at) }}</span>
+                    <span class="col-tag">
+                      <span class="history-tag" :class="{ decision: row.tag === '추천' }">
+                        {{ row.tag }}
                       </span>
-                      {{ item.defendedCount }}건 ({{ formatOneDecimal(item.defendedPercent) }}%)
-                    </template>
-                    <template v-else>—</template>
-                  </td>
-                  <td class="right-text num">
-                    <strong :class="{ over: item.avgResultPeakKw > trend.targetPeakKw }">
-                      {{ formatKw(item.avgResultPeakKw) }}
-                      <template v-if="item.count">kW</template>
+                    </span>
+                    <span class="history-main col-main" :title="row.text">
+                      <span
+                        v-if="row.shape"
+                        :class="{ over: row.over && row.tag === '구간' }"
+                        aria-hidden="true"
+                        >{{ row.shape }}</span
+                      >
+                      {{ row.text }}
+                    </span>
+                    <span class="history-detail col-detail" :title="row.detail">{{
+                      row.detail || '—'
+                    }}</span>
+                    <strong class="history-value col-value num" :class="{ over: row.over }">
+                      {{ row.value }}
                     </strong>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-
-          <section class="card highlights-card">
-            <div class="card-head">
-              <h2 class="card-title">눈에 띄는 구간</h2>
-              <span class="note">누르면 그래프에 그 시각을 표시</span>
+                  </button>
+                </li>
+              </ul>
+              <p v-else class="history-empty">조건에 맞는 기록이 없습니다. 필터를 바꿔 보세요.</p>
             </div>
-            <ul class="highlights">
-              <li v-for="item in trend.highlights" :key="item.label">
-                <button
-                  class="highlight"
-                  :class="{ active: focusAt === item.at }"
-                  :aria-pressed="focusAt === item.at"
-                  @click="toggleFocus(item.at)"
-                >
-                  <span class="highlight-time num">{{ shortTime(item.at) }}</span>
-                  <span class="highlight-label">
-                    <span v-if="item.level === 'CRITICAL'" class="over" aria-hidden="true">■</span>
-                    {{ item.label }}
-                  </span>
-                  <strong class="num" :class="{ over: item.level === 'CRITICAL' }">
-                    {{ highlightValue(item) }} {{ item.unit }}
-                  </strong>
-                </button>
-              </li>
-            </ul>
+            <p v-else class="history-empty">이 기간에는 기록된 이벤트가 없습니다.</p>
           </section>
         </div>
       </div>
@@ -804,11 +1013,12 @@ const hourlyOption = computed(() => {
 </template>
 
 <style scoped>
+/* 화면 높이를 넘지 않게 고정 (이벤트 히스토리가 길어지면 그 카드 안에서만 스크롤) */
 .page {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: 100%;
+  height: 100%;
   padding: 20px;
 }
 .crumb-note {
@@ -912,16 +1122,16 @@ const hourlyOption = computed(() => {
   color: var(--crit);
 }
 
-/* 기간 요약 */
+/* 기간 요약 (추이 분석 · 피크 분석이 같은 모양·같은 크기를 씀. 한쪽을 고치면 다른 쪽도 같이 고침) */
 .summary {
   display: flex;
-  padding: 12px 16px;
+  padding: 16px 20px;
 }
 .summary > div {
   flex: 1;
   min-width: 0;
-  margin-right: 16px;
-  padding-right: 16px;
+  margin-right: 20px;
+  padding-right: 20px;
   border-right: 1px solid var(--line);
 }
 .summary > div:last-child {
@@ -930,27 +1140,37 @@ const hourlyOption = computed(() => {
   border-right: 0;
 }
 .summary dt {
-  font-size: 12px;
-  color: var(--mute);
+  font-size: 14px;
+  color: var(--ink-2);
 }
 .summary dd {
-  font-size: 22px;
+  font-size: 30px;
   font-weight: 700;
   line-height: 1.3;
   white-space: nowrap;
 }
 .summary small {
   margin-left: 4px;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 400;
+  color: var(--ink-2);
+}
+.summary .pct {
+  margin-left: 6px;
+  font-size: 20px;
+  font-weight: 700;
   color: var(--ink-2);
 }
 .summary p {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--mute);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 카드·그래프 제목: 멀리서도 잘 보이게 키움 (두 분석 화면 같은 크기) */
+.card-title {
+  font-size: 19px;
 }
 
 /* 그래프와 오른쪽 열 */
@@ -958,10 +1178,23 @@ const hourlyOption = computed(() => {
   display: flex;
   flex: 1;
   gap: 16px;
+  min-height: 0;
 }
+/* 왼쪽 그래프 카드: 세로 flex로 두어 그래프들이 남은 높이를 나눠 가짐 */
 .charts {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-width: 0;
+}
+.fit-power {
+  flex: 2;
+}
+.fit-soc {
+  flex: 1;
+}
+.fit-temp {
+  flex: 1.3;
 }
 .chart-title {
   display: flex;
@@ -970,7 +1203,7 @@ const hourlyOption = computed(() => {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--line);
-  font-size: 15px;
+  font-size: 19px;
   font-weight: 700;
 }
 .chart-title:first-child {
@@ -979,23 +1212,25 @@ const hourlyOption = computed(() => {
   border-top: 0;
 }
 .chart-title small {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 400;
   color: var(--mute);
 }
 .chart-note {
   margin-left: 8px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--mute);
 }
 
+/* 오른쪽 열(사용 패턴 · 이벤트 히스토리)은 본문 폭의 32%, 나머지는 그래프 */
 .right {
   display: flex;
   flex: none;
   flex-direction: column;
   gap: 16px;
-  width: 480px;
+  width: 32%;
+  min-height: 0;
 }
 .card-head {
   display: flex;
@@ -1013,35 +1248,6 @@ const hourlyOption = computed(() => {
   color: var(--mute);
 }
 
-/* 추천 처리별 결과 표 */
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.table th {
-  padding: 6px 12px 6px 0;
-  border-bottom: 1px solid var(--ink);
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--mute);
-  text-align: left;
-  white-space: nowrap;
-}
-.table td {
-  padding: 9px 12px 9px 0;
-  border-bottom: 1px solid var(--line);
-  white-space: nowrap;
-}
-.table tr:last-child td {
-  border-bottom: 0;
-}
-.table th:last-child,
-.table td:last-child {
-  padding-right: 0;
-}
-.table .right-text {
-  text-align: right;
-}
 .pin-toggle {
   margin-left: auto;
   font-size: 13px;
@@ -1069,7 +1275,7 @@ const hourlyOption = computed(() => {
 }
 .ranks li {
   display: grid;
-  grid-template-columns: 22px 40px minmax(0, 1fr) 76px 60px;
+  grid-template-columns: 22px 64px minmax(0, 1fr) 76px 84px;
   gap: 8px;
   align-items: center;
   font-size: 13px;
@@ -1099,68 +1305,165 @@ const hourlyOption = computed(() => {
   color: var(--ink-2);
 }
 
-.track {
-  display: inline-block;
-  width: 80px;
-  height: 8px;
-  margin-right: 8px;
-  background: var(--line);
-  vertical-align: middle;
-}
-.bar {
-  display: block;
-  height: 100%;
-  background: var(--ok);
-}
-
-/* 눈에 띄는 구간 */
-.highlights-card {
-  flex: 1;
-}
-.highlight {
+/* 이벤트 히스토리: 오른쪽 열의 남은 높이를 채우고, 기록이 많으면 카드 안에서만 스크롤 */
+.history-card {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.history {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* 머리줄과 각 줄이 같은 칸 너비를 씀: 시각 | 구분 | 내용 | 처리 | 결과
+   칸 사이 간격 없이 붙여서, 칸마다 칠한 옅은 바탕이 위아래로 이어진 띠처럼 보이게 함 */
+.history-head,
+.history-row {
+  display: grid;
+  grid-template-columns: 104px 62px minmax(0, 1fr) 128px 128px;
+  align-items: stretch;
+}
+.history-head > span,
+.history-row > span,
+.history-row > strong {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 10px;
+  white-space: nowrap; /* 칸 안에서 줄이 꺾이지 않게 */
+}
+/* 구분 칸은 상자 하나만 들어가므로 좌우 여백을 줄임 */
+.history-head > .col-tag,
+.history-row > .col-tag {
+  padding-right: 4px;
+  padding-left: 6px;
+}
+/* 칸별 옅은 바탕: 시각(푸른 회색) · 처리(따뜻한 회색) · 결과(녹회색), 구분·내용은 흰 바탕 */
+.col-time {
+  background: var(--col-cool);
+}
+.col-detail {
+  background: var(--col-warm);
+}
+.col-value {
+  justify-content: flex-end;
+  background: var(--col-sage);
+}
+/* 머리줄: 스크롤해도 위에 붙어 있음 */
+.history-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
+  border-bottom: 1px solid var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.history-row {
   width: 100%;
-  padding: 8px 8px 8px 4px;
+  padding: 0;
   background: none;
   border: 0;
   border-bottom: 1px solid var(--line);
-  border-left: 4px solid transparent;
   color: var(--ink);
   text-align: left;
 }
-.highlights li:last-child .highlight {
-  border-bottom: 0;
+/* 마우스를 올리거나 고른 줄은 칸 색 위에 옅은 먹색을 한 겹 더 얹음 */
+.history-row:hover > span,
+.history-row:hover > strong {
+  background-image: linear-gradient(rgba(20, 24, 28, 0.05), rgba(20, 24, 28, 0.05));
 }
-.highlight:hover {
-  background: var(--bg);
+.history-row.active > span,
+.history-row.active > strong {
+  background-image: linear-gradient(rgba(20, 24, 28, 0.09), rgba(20, 24, 28, 0.09));
 }
-/* 그래프에 표시 중인 구간 */
-.highlight.active {
-  background: var(--bg);
-  border-left-color: var(--ink);
+/* 그래프에 표시 중인 줄: 맨 왼쪽 칸에 굵은 줄 */
+.history-row.active .history-time {
+  box-shadow: inset 4px 0 0 var(--ink);
 }
-.highlight-time {
-  flex: none;
-  width: 92px;
+.history-time {
   font-weight: 700;
 }
-.highlight-label {
+/* 구분: 추천(먹색 테두리) / 구간(옅은 테두리) */
+.history-tag {
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  font-size: 11px;
+  color: var(--mute);
+}
+.history-tag.decision {
+  border-color: var(--ink-2);
   color: var(--ink-2);
 }
-.highlight strong {
-  margin-left: auto;
+/* 내용·처리: 길면 한 줄에서 말줄임 */
+.history-row > .history-main,
+.history-row > .history-detail {
+  display: block; /* 말줄임(…)이 되도록 블록으로 둠 */
+  overflow: hidden;
+  line-height: 20px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-/* 화면이 좁으면 오른쪽 열을 줄여 그래프 자리를 남김 */
-@media (max-width: 1600px) {
-  .right {
-    width: 400px;
-  }
-  .track {
-    width: 48px;
-  }
+.history-main {
+  color: var(--ink);
+}
+.history-detail {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.history-value {
+  font-size: 13px;
+  text-align: right;
+  white-space: nowrap;
+}
+.right-text {
+  text-align: right;
+}
+/* 머리줄의 필터 선택 상자: 평소엔 칸 이름처럼 보이고(테두리 없음), 고르면 진하게 */
+.head-select {
+  width: 100%; /* 칸 너비를 꽉 써서 고른 값(예: 목표 초과)이 잘리지 않게 */
+  height: 24px;
+  padding: 0 2px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--faint);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.head-select:hover {
+  border-bottom-color: var(--ink-2);
+}
+/* 필터가 걸린 칸: 먹색 바탕에 흰 글자 */
+.head-select.on {
+  padding: 0 4px;
+  background: var(--ink);
+  border-bottom-color: var(--ink);
+  color: var(--card);
+}
+.head-select option {
+  background: var(--card);
+  color: var(--ink);
+}
+.filter-reset {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.filter-reset:hover {
+  background: var(--bg);
+}
+.history-empty {
+  padding: 16px 0;
+  color: var(--mute);
 }
 </style>

@@ -470,6 +470,8 @@
   ],
   "weather": [{ "date": "2026-11-10", "text": "맑음" }],
   "hourly": [{ "hour": 0, "avgGridKw": 1402, "period": "LIGHT" }],
+  "hourBlocks": [{ "fromHour": 0, "toHour": 4, "avgGridKw": 1398, "peak": false }],
+  "daily": [{ "date": "2026-11-10", "avgGridKw": 1320 }],
   "byStatus": [
     { "status": "APPLIED", "count": 15, "defendedCount": 15, "defendedPercent": 100.0, "avgResultPeakKw": 1730 }
   ],
@@ -484,7 +486,9 @@
 | summary | 기간 요약. `maxPeakKw`는 기간 중 최고 15분 한전 구매, `solarPercentOfLoad`는 공장 소비 중 태양광 비율 |
 | points | 묶은 간격의 평균. `essKw`는 **+방전 / −충전**, `recordedAt`은 묶음 시작 시각 |
 | weather | 날마다 날씨 |
-| hourly | 0~23시 각각의 평균 한전 구매와 요금 시간대 (시간대별 사용 패턴 막대용) |
+| hourly | 0~23시 각각의 평균 한전 구매와 요금 시간대 (사용 패턴: "오늘"일 때 1시간 단위 막대) |
+| hourBlocks | 4시간 묶음(0~4, 4~8 … 20~24시)별 평균 한전 구매. `peak`는 묶음 안에 최대부하 시각이 있으면 true (사용 패턴: "최근 7일"일 때) — 새로 추가, 확인 필요 |
+| daily | 날짜별 평균 한전 구매 (사용 패턴: "이번 달"처럼 긴 기간일 때) — 새로 추가, 확인 필요 |
 | byStatus | 방전 추천을 처리(`APPLIED` / `AUTO` / `IGNORED`)별로 묶은 결과. 결과가 없으면 `defendedPercent`, `avgResultPeakKw`는 null |
 | highlights | 눈에 띄는 구간 `{ at, label, value, unit, level }`. 화면은 받은 순서대로 보여 줌 |
 

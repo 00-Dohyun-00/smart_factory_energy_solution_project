@@ -21,6 +21,10 @@
   --src-grid: #5b6472;
   --src-solar: #d19a00;
   --src-ess: #0f8f8a;
+  /* 표 칸 구분용 옅은 바탕 (상태색·공급원 색과 섞이지 않는 회색 계열) */
+  --col-cool: #edf1f5; /* 푸른 회색 */
+  --col-warm: #f4f1eb; /* 따뜻한 회색 */
+  --col-sage: #ecf2ee; /* 녹회색 */
 }
 
 *,
