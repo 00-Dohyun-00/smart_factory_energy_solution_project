@@ -23,7 +23,13 @@ const ZONE_LABELS = {
   Z5: '검사',
   U: '유틸리티',
 }
-const STATE_LABELS = { RUNNING: '운전', HEATING: '승온 중', STOPPED: '정지' }
+// 설비 운전 상태. 피크 상태(● 정상 등)와 헷갈리지 않게 상태색(초록·주황·빨강)은 쓰지 않고
+// 상태마다 도형과 글자를 다르게 함 (PowerTree.vue와 같은 모양)
+const STATE_INFO = {
+  RUNNING: { shape: '●', label: '운전', className: 'running' },
+  HEATING: { shape: '▲', label: '승온 중', className: 'heating' },
+  STOPPED: { shape: '○', label: '정지', className: 'stopped' },
+}
 
 // 고른 구역은 주소에 적어 둠 (예: /monitoring/diagram?zone=Z3)
 // 새로 고치거나 주소를 다른 사람에게 보내도 같은 구역이 열리고, 통합 화면의 설비 순위에서 바로 넘어올 수 있음
@@ -70,7 +76,7 @@ const equipmentRows = computed(() =>
   zoneEquipments.value.map((item) => ({
     ...item,
     percent: zoneKw.value ? (item.loadKw / zoneKw.value) * 100 : 0,
-    stateLabel: STATE_LABELS[item.state] ?? '—',
+    stateInfo: STATE_INFO[item.state] ?? { shape: '', label: '—', className: '' },
   })),
 )
 
@@ -125,7 +131,7 @@ const trendOption = computed(() => ({
     <!-- 서버 연결이 끊겼다는 알림은 공통 틀(MainLayout)이 모든 화면에 띄움 -->
 
     <!-- KPI 5개 (통합 화면과 같은 카드) -->
-    <KpiCards :status="status" />
+    <KpiCards :status="status" :stale="!realtimeStore.connected" />
 
     <div class="row">
       <!-- 계통도 -->
@@ -135,7 +141,7 @@ const trendOption = computed(() => ({
           <span class="note">구역을 누르면 설비가 펼쳐집니다</span>
         </div>
         <div class="tree-body">
-          <PowerTree v-model="selectedZone" :status="status" />
+          <PowerTree v-model="selectedZone" :status="status" :stale="!realtimeStore.connected" />
         </div>
       </section>
 
@@ -170,7 +176,10 @@ const trendOption = computed(() => ({
           <li v-for="item in equipmentRows" :key="item.id">
             <div class="equipment-text">
               <strong>{{ item.name }}</strong>
-              <span class="state"><span aria-hidden="true">●</span> {{ item.stateLabel }}</span>
+              <span class="state" :class="item.stateInfo.className">
+                <span aria-hidden="true">{{ item.stateInfo.shape }}</span>
+                {{ item.stateInfo.label }}
+              </span>
               <span class="equipment-kw"
                 ><span class="num">{{ formatKw(item.loadKw) }}</span> kW</span
               >
@@ -316,9 +325,19 @@ const trendOption = computed(() => ({
   align-items: baseline;
   gap: 8px;
 }
+/* 설비 운전 상태: 상태색 대신 먹색 계열로, 도형과 글자로 구분 */
 .state {
   font-size: 12px;
-  color: var(--ok);
+}
+.state.running {
+  color: var(--ink-2);
+}
+.state.heating {
+  font-weight: 700;
+  color: var(--ink);
+}
+.state.stopped {
+  color: var(--mute);
 }
 .equipment-kw {
   margin-left: auto;

@@ -209,7 +209,7 @@ const trendCards = computed(() => [
     <!-- 서버 연결이 끊겼다는 알림은 공통 틀(MainLayout)이 모든 화면에 띄움 -->
 
     <!-- 1줄: KPI 5개 -->
-    <KpiCards :status="status" />
+    <KpiCards :status="status" :stale="!realtimeStore.connected" />
 
     <!-- 2줄: 15분 피크 + ESS 추천 -->
     <div class="row middle">

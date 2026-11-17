@@ -3,7 +3,7 @@
   위에서 아래로: 공급원 3곳(한전·태양광·ESS) → 주 모선(굵은 가로선) → 구역 6곳 → 고른 구역의 설비
   구역을 누르면 그 구역이 선택되고 아래에 설비가 펼쳐집니다.
 
-  사용 예: <PowerTree v-model="selectedZone" :status="realtimeStore.status" />
+  사용 예: <PowerTree v-model="selectedZone" :status="realtimeStore.status" :stale="!realtimeStore.connected" />
   좌표는 SVG 좌표(전체 1190 × 660)입니다.
 -->
 <script setup>
@@ -15,6 +15,8 @@ const props = defineProps({
   status: { type: Object, default: null },
   // 고른 구역 id (예: 'Z2')
   modelValue: { type: String, default: '' },
+  // 서버 연결이 끊겨 마지막으로 받은 값에 멈춰 있으면 true (kW 숫자를 회색으로)
+  stale: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -29,7 +31,13 @@ const ZONE_NAMES = [
   { id: 'U', name: '유틸리티' },
 ]
 const PCS_LABELS = { DISCHARGING: '방전 중', CHARGING: '충전 중', STANDBY: '대기' }
-const STATE_LABELS = { RUNNING: '운전', HEATING: '승온 중', STOPPED: '정지' }
+// 설비 운전 상태. 피크 상태(● 정상 등)와 헷갈리지 않게 상태색(초록·주황·빨강)은 쓰지 않고
+// 상태마다 도형과 글자를 다르게 함
+const STATE_INFO = {
+  RUNNING: { shape: '●', label: '운전', className: 'running' },
+  HEATING: { shape: '▲', label: '승온 중', className: 'heating' },
+  STOPPED: { shape: '○', label: '정지', className: 'stopped' },
+}
 
 const WIDTH = 1190
 const BUS_Y = 196
@@ -44,7 +52,9 @@ const EQUIPMENT_GAP = 40
 const sources = computed(() => {
   const status = props.status
   // 공장 전체에서 차지하는 비율은 백엔드가 준 값(sourceRatio)을 그대로 씀
-  const share = (percent) => (status ? `공장의 ${formatOneDecimal(percent)}%` : '—')
+  // 값이 없으면 "공장의 —%"가 아니라 "—"만 보여 줌
+  const share = (percent) =>
+    percent === null || percent === undefined ? '—' : `공장의 ${formatOneDecimal(percent)}%`
   // ESS는 충전 중이면 충전 전력을, 그 밖에는 방전 전력을 보여 줌
   const charging = status?.pcsStatus === 'CHARGING'
   return [
@@ -53,14 +63,14 @@ const sources = computed(() => {
       name: '한전 수전',
       centerX: 205,
       kw: status?.gridKw ?? null,
-      sub: share(status?.sourceRatio.gridPercent),
+      sub: share(status?.sourceRatio?.gridPercent),
     },
     {
       key: 'solar',
       name: '태양광 인버터',
       centerX: 595,
       kw: status?.solarKw ?? null,
-      sub: share(status?.sourceRatio.solarPercent),
+      sub: share(status?.sourceRatio?.solarPercent),
     },
     {
       key: 'ess',
@@ -83,7 +93,9 @@ const zones = computed(() =>
     const totalKw = equipments.length
       ? equipments.reduce((sum, item) => sum + item.loadKw, 0)
       : null
-    const percent = totalKw === null ? 0 : (totalKw / props.status.loadKw) * 100
+    // 값이 없으면 0이 아니라 null로 둠 (화면에 "—"로 보이게)
+    const percent =
+      totalKw === null || !props.status.loadKw ? null : (totalKw / props.status.loadKw) * 100
     return { ...zone, centerX: 104 + index * 196, equipments, totalKw, percent }
   }),
 )
@@ -101,7 +113,7 @@ const children = computed(() => {
     ...item,
     centerX: start + EQUIPMENT_WIDTH / 2 + index * (EQUIPMENT_WIDTH + EQUIPMENT_GAP),
     percent: zone.totalKw ? (item.loadKw / zone.totalKw) * 100 : 0,
-    stateLabel: STATE_LABELS[item.state] ?? '—',
+    stateInfo: STATE_INFO[item.state] ?? { shape: '', label: '—', className: '' },
   }))
 })
 
@@ -112,7 +124,7 @@ function unitX(left, text, charWidth) {
 </script>
 
 <template>
-  <svg class="tree" viewBox="0 0 1190 660" role="group" aria-label="전력 계통도">
+  <svg class="tree" :class="{ stale }" viewBox="0 0 1190 660" role="group" aria-label="전력 계통도">
     <!-- 공급원 → 주 모선 -->
     <g v-for="source in sources" :key="source.key" :class="source.key">
       <line
@@ -136,7 +148,7 @@ function unitX(left, text, charWidth) {
     <!-- 주 모선 -->
     <rect class="bus" x="10" :y="BUS_Y - 5" :width="WIDTH - 20" height="10" />
     <text class="name small" x="10" :y="BUS_Y - 14">주 모선</text>
-    <text class="name" :x="WIDTH - 10" :y="BUS_Y - 14" text-anchor="end">
+    <text class="name load-total" :x="WIDTH - 10" :y="BUS_Y - 14" text-anchor="end">
       공장 소비 {{ formatKw(status?.loadKw) }} kW
     </text>
 
@@ -189,11 +201,11 @@ function unitX(left, text, charWidth) {
         class="share-bar"
         :x="zone.centerX - ZONE_WIDTH / 2 + 12"
         :y="ZONE_Y + 84"
-        :width="((ZONE_WIDTH - 24) * zone.percent) / 100"
+        :width="((ZONE_WIDTH - 24) * (zone.percent ?? 0)) / 100"
         height="7"
       />
       <text class="sub" :x="zone.centerX - ZONE_WIDTH / 2 + 12" :y="ZONE_Y + 110">
-        공장의 {{ formatOneDecimal(zone.percent) }}%
+        {{ zone.percent === null ? '—' : `공장의 ${formatOneDecimal(zone.percent)}%` }}
       </text>
       <text class="sub" :x="zone.centerX + ZONE_WIDTH / 2 - 12" :y="ZONE_Y + 110" text-anchor="end">
         설비 {{ zone.equipments.length }}대
@@ -236,11 +248,12 @@ function unitX(left, text, charWidth) {
         </text>
         <text
           class="sub state"
+          :class="item.stateInfo.className"
           :x="item.centerX + EQUIPMENT_WIDTH / 2 - 12"
           :y="EQUIPMENT_Y + 26"
           text-anchor="end"
         >
-          ● {{ item.stateLabel }}
+          {{ item.stateInfo.shape }} {{ item.stateInfo.label }}
         </text>
         <text class="value" :x="item.centerX - EQUIPMENT_WIDTH / 2 + 12" :y="EQUIPMENT_Y + 66">
           {{ formatKw(item.loadKw) }}
@@ -335,8 +348,16 @@ function unitX(left, text, charWidth) {
   fill: var(--mute);
   font-variant-numeric: tabular-nums;
 }
-.sub.state {
-  fill: var(--ok);
+/* 설비 운전 상태: 상태색 대신 먹색 계열로, 도형과 글자로 구분 */
+.sub.state.running {
+  fill: var(--ink-2);
+}
+.sub.state.heating {
+  font-weight: 700;
+  fill: var(--ink);
+}
+.sub.state.stopped {
+  fill: var(--mute);
 }
 .value {
   font-size: 30px;
@@ -346,6 +367,11 @@ function unitX(left, text, charWidth) {
 }
 .value.big {
   font-size: 36px;
+}
+/* 연결이 끊겨 멈춘 값은 회색으로 */
+.tree.stale .value,
+.tree.stale .load-total {
+  fill: var(--lost);
 }
 .unit {
   font-size: 15px;

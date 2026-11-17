@@ -4,16 +4,18 @@
   멀리서도 한눈에 보이도록 숫자 위에 반원 계기판(바늘)을 그립니다.
   모니터링의 통합 화면과 설비 모니터링 화면이 같이 씁니다.
 
-  사용 예: <KpiCards :status="realtimeStore.status" />
+  사용 예: <KpiCards :status="realtimeStore.status" :stale="!realtimeStore.connected" />
 -->
 <script setup>
 import { computed } from 'vue'
 import { useSettingsStore } from '@/stores/useSettingsStore'
-import { formatKw, formatOneDecimal } from '@/utils/format'
+import { formatClock, formatKw, formatOneDecimal } from '@/utils/format'
 
 const props = defineProps({
   // 최신 상태 1건 (아직 못 받았으면 null)
   status: { type: Object, default: null },
+  // 서버 연결이 끊겨 마지막으로 받은 값에 멈춰 있으면 true (값은 지우지 않고 회색으로 보여 줌)
+  stale: { type: Boolean, default: false },
 })
 
 const settingsStore = useSettingsStore() // ESS 최대 출력, 잔량 하한·상한 (값은 공통 틀이 받아 둠)
@@ -103,8 +105,14 @@ const kpis = computed(() => {
       name: '한전 구매전력',
       value: formatKw(s?.gridKw),
       unit: 'kW',
-      sub: s ? `목표 ${formatKw(target)} kW의 ${formatOneDecimal(gridPercent.value)}%` : '',
-      over, // 목표 피크를 넘으면 경고색
+      // 이 카드는 지금 이 순간의 값이라, 순간적으로 목표를 넘어도 피크(15분 평균) 경고는 아님
+      // 그래서 큰 숫자는 그대로 두고, 아랫줄에만 도형과 글자로 "순간값"이라고 알림
+      sub: !s
+        ? ''
+        : over
+          ? '▲ 순간값이 목표 초과 (피크 판정은 15분 평균)'
+          : `목표 ${formatKw(target)} kW의 ${formatOneDecimal(gridPercent.value)}%`,
+      over,
       min: '0',
       max: gridMax ? formatKw(gridMax) : '',
       segments: s
@@ -169,41 +177,58 @@ const kpis = computed(() => {
 </script>
 
 <template>
-  <div class="kpis">
-    <section v-for="kpi in kpis" :key="kpi.key" class="card kpi" :class="kpi.key">
-      <div class="kpi-top">
-        <span class="dot" aria-hidden="true"></span>
-        <h2 class="kpi-name">{{ kpi.name }}</h2>
-      </div>
-      <!-- 반원 계기판: 색 구간 + 바늘 (값을 못 받았으면 바늘 없이 회색 반원만) -->
-      <svg class="gauge" viewBox="0 0 120 72" aria-hidden="true">
-        <path
-          v-for="(item, index) in kpi.segments"
-          :key="index"
-          class="seg"
-          :class="item.className"
-          d="M10 62 A50 50 0 0 1 110 62"
-          pathLength="100"
-          :stroke-dasharray="item.dash"
-        />
-        <template v-if="kpi.needle">
-          <line class="needle" x1="60" y1="62" :x2="kpi.needle.x" :y2="kpi.needle.y" />
-          <circle class="hub" cx="60" cy="62" r="3.5" />
-        </template>
-        <text class="scale" x="4" y="71">{{ kpi.min }}</text>
-        <text class="scale" x="116" y="71" text-anchor="end">{{ kpi.max }}</text>
-      </svg>
-      <p class="kpi-value" :class="{ over: kpi.over }">
-        <span v-if="kpi.prefix" class="kpi-prefix">{{ kpi.prefix }}</span>
-        <span class="num">{{ kpi.value }}</span>
-        <span class="kpi-unit">{{ kpi.unit }}</span>
-      </p>
-      <p class="kpi-sub num" :class="{ over: kpi.over }">{{ kpi.sub }}</p>
-    </section>
+  <div class="kpi-wrap" :class="{ stale }">
+    <!-- 연결이 끊기면 아래 숫자가 언제 값에서 멈춰 있는지 알려 줌 -->
+    <p v-if="stale && status" class="stale-note" role="status">
+      ◆ 연결이 끊겨 <span class="num">{{ formatClock(status.recordedAt) }}</span> 값에서 멈춰
+      있습니다
+    </p>
+    <div class="kpis">
+      <section v-for="kpi in kpis" :key="kpi.key" class="card kpi" :class="kpi.key">
+        <div class="kpi-top">
+          <span class="dot" aria-hidden="true"></span>
+          <h2 class="kpi-name">{{ kpi.name }}</h2>
+        </div>
+        <!-- 반원 계기판: 색 구간 + 바늘 (값을 못 받았으면 바늘 없이 회색 반원만) -->
+        <svg class="gauge" viewBox="0 0 120 72" aria-hidden="true">
+          <path
+            v-for="(item, index) in kpi.segments"
+            :key="index"
+            class="seg"
+            :class="item.className"
+            d="M10 62 A50 50 0 0 1 110 62"
+            pathLength="100"
+            :stroke-dasharray="item.dash"
+          />
+          <template v-if="kpi.needle">
+            <line class="needle" x1="60" y1="62" :x2="kpi.needle.x" :y2="kpi.needle.y" />
+            <circle class="hub" cx="60" cy="62" r="3.5" />
+          </template>
+          <text class="scale" x="4" y="71">{{ kpi.min }}</text>
+          <text class="scale" x="116" y="71" text-anchor="end">{{ kpi.max }}</text>
+        </svg>
+        <p class="kpi-value">
+          <span v-if="kpi.prefix" class="kpi-prefix">{{ kpi.prefix }}</span>
+          <span class="num">{{ kpi.value }}</span>
+          <span class="kpi-unit">{{ kpi.unit }}</span>
+        </p>
+        <p class="kpi-sub num" :class="{ over: kpi.over }">{{ kpi.sub }}</p>
+      </section>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.kpi-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stale-note {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--lost);
+}
 .kpis {
   display: flex;
   gap: 16px;
@@ -315,9 +340,6 @@ const kpis = computed(() => {
   font-weight: 700;
   line-height: 1.2;
 }
-.kpi-value.over {
-  color: var(--crit);
-}
 .kpi-prefix {
   font-size: 17px;
 }
@@ -337,7 +359,19 @@ const kpis = computed(() => {
 }
 .kpi-sub.over {
   font-weight: 700;
-  color: var(--crit);
+  color: var(--warn);
+}
+
+/* 연결이 끊겨 멈춘 값: 숫자와 바늘을 회색으로 */
+.stale .kpi-value,
+.stale .kpi-unit {
+  color: var(--lost);
+}
+.stale .needle {
+  stroke: var(--lost);
+}
+.stale .hub {
+  fill: var(--lost);
 }
 
 @media (prefers-reduced-motion: reduce) {
