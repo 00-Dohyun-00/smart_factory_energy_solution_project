@@ -103,6 +103,34 @@ img {
   font-weight: 700;
 }
 
+/*
+  다시 받기에 실패했을 때 화면 위에 띄우는 띠 (여러 화면 공통)
+  받아 둔 결과는 지우지 않고 그대로 보여 주면서, 새 값을 못 받았다는 것만 알림
+*/
+.error-band {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 1px solid var(--crit);
+  font-size: 13px;
+  color: var(--crit);
+}
+.error-band-button {
+  flex: none;
+  height: 28px;
+  margin-left: auto;
+  padding: 0 12px;
+  background: var(--card);
+  border: 1px solid var(--ink);
+  font-size: 13px;
+  color: var(--ink);
+}
+.error-band-button:hover {
+  background: var(--bg);
+}
+
 /* 숫자는 자릿수가 바뀌어도 흔들리지 않게 같은 너비로 */
 .num {
   font-variant-numeric: tabular-nums;

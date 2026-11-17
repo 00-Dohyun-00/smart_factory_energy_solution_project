@@ -160,6 +160,13 @@ watch(
 
 const report = computed(() => reportStore.report)
 
+// 받아 둔 성적표가 지금 고른 달의 것인지 (기록 없는 달은 month, 있는 달은 periodStart로 판단)
+const isSameMonth = computed(() => {
+  const data = report.value
+  if (!data) return false
+  return (data.month ?? data.periodStart?.slice(0, 7)) === month.value
+})
+
 const periodLabel = computed(() => {
   if (!report.value?.hasData) return ''
   const monthNumber = Number(report.value.periodStart.slice(5, 7))
@@ -391,10 +398,21 @@ const essOption = computed(() => ({
       </div>
     </div>
 
-    <p v-if="reportStore.errorMessage" class="state error" role="alert">
+    <!--
+      같은 달의 성적표를 받아 둔 상태에서 다시 받기만 실패했다면 지우지 않고 위에 실패 띠만 띄움.
+      다른 달로 옮기다 실패했으면 이전 달 숫자가 새 달처럼 보이면 안 되므로 전체 오류로 보여 줌
+    -->
+    <p v-if="reportStore.errorMessage && isSameMonth" class="error-band" role="alert">
+      <span aria-hidden="true">◆</span>
+      새 값을 불러오지 못해 이전에 받은 성적표를 보여 줍니다. ({{ reportStore.errorMessage }})
+      <button class="error-band-button" @click="reportStore.fetchReport(month)">다시 시도</button>
+    </p>
+    <p v-if="reportStore.errorMessage && !isSameMonth" class="state error" role="alert">
       성적표를 불러오지 못했습니다. ({{ reportStore.errorMessage }})
       <button class="retry" @click="reportStore.fetchReport(month)">다시 시도</button>
     </p>
+    <!-- 조회할 달은 서버 시각으로 정하므로, 서버 시각을 받기 전에는 조회하지 않음 -->
+    <p v-else-if="!month" class="state">서버에서 현재 시각을 받으면 자동으로 조회합니다.</p>
     <p v-else-if="reportStore.loading || !report" class="state">불러오는 중입니다.</p>
     <p v-else-if="!report.hasData" class="state">이 달에는 아직 기록이 없습니다.</p>
 

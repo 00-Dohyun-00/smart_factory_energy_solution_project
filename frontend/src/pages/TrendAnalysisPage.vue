@@ -565,9 +565,19 @@ const hourlyOption = computed(() => {
       <p v-if="dateError" class="date-error" role="alert">{{ dateError }}</p>
     </section>
 
-    <p v-if="analysisStore.errorMessage" class="state error" role="alert">
+    <!-- 받아 둔 결과가 있으면 지우지 않고 위에 실패 띠만 띄움 (마지막으로 받은 값 유지) -->
+    <p v-if="analysisStore.errorMessage && trend" class="error-band" role="alert">
+      <span aria-hidden="true">◆</span>
+      새 결과를 불러오지 못해 이전에 받은 결과를 보여 줍니다. ({{ analysisStore.errorMessage }})
+      <button class="error-band-button" @click="load()">다시 시도</button>
+    </p>
+    <p v-if="analysisStore.errorMessage && !trend" class="state error" role="alert">
       분석 결과를 불러오지 못했습니다. ({{ analysisStore.errorMessage }})
       <button class="retry" @click="load()">다시 시도</button>
+    </p>
+    <!-- 조회 기간은 서버 시각으로 정하므로, 서버 시각을 받기 전에는 조회하지 않음 -->
+    <p v-else-if="!trend && !serverDate" class="state">
+      서버에서 현재 시각을 받으면 자동으로 조회합니다.
     </p>
     <p v-else-if="!trend" class="state">불러오는 중입니다.</p>
     <p v-else-if="!points.length" class="state">이 기간에는 기록이 없습니다. 기간을 바꿔 보세요.</p>
