@@ -3,7 +3,7 @@
   추천 판단은 백엔드가 하고, 여기서는 보여 주고 버튼 입력만 받습니다.
 -->
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { formatClock, formatKw } from '@/utils/format'
 
 const props = defineProps({
@@ -43,6 +43,14 @@ const usedValues = computed(() =>
     unit: item.unit,
   })),
 )
+
+// 판단 근거는 항목이 많아(11개) 카드가 길어지면 좁은 화면에서 [적용] 버튼이 첫 화면 아래로 밀림.
+// 그래서 앞의 몇 개(백엔드가 앞에 둔 중요한 값)만 보이고, 나머지는 [모두 보기]로 펼침
+const SHOWN_COUNT = 4
+const showAllUsed = ref(false)
+const visibleUsed = computed(() =>
+  showAllUsed.value ? usedValues.value : usedValues.value.slice(0, SHOWN_COUNT),
+)
 </script>
 
 <template>
@@ -66,9 +74,19 @@ const usedValues = computed(() =>
 
       <!-- 판단 근거 -->
       <div v-if="usedValues.length" class="used">
-        <h3>판단 근거</h3>
+        <div class="used-head">
+          <h3>판단 근거</h3>
+          <button
+            v-if="usedValues.length > SHOWN_COUNT"
+            class="more-used"
+            :aria-expanded="showAllUsed"
+            @click="showAllUsed = !showAllUsed"
+          >
+            {{ showAllUsed ? '접기' : `모두 보기 (${usedValues.length}개)` }}
+          </button>
+        </div>
         <dl>
-          <div v-for="item in usedValues" :key="item.label">
+          <div v-for="item in visibleUsed" :key="item.label">
             <dt>{{ item.label }}</dt>
             <dd class="num">{{ item.text }} {{ item.unit }}</dd>
           </div>
@@ -160,10 +178,23 @@ const usedValues = computed(() =>
   padding: 8px 12px;
   background: var(--bg);
 }
-.used h3 {
+.used-head {
+  display: flex;
+  align-items: baseline;
   margin-bottom: 4px;
+}
+.used h3 {
   font-size: 12px;
   font-weight: 700;
+}
+.more-used {
+  margin-left: auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--ink-2);
+  font-size: 12px;
+  color: var(--ink-2);
 }
 .used dl {
   display: grid;
