@@ -272,7 +272,12 @@ const peakOption = computed(() => {
           silent: true,
           symbol: 'none',
           lineStyle: { color: COLOR.ink, width: 1.5, type: 'solid' },
-          label: { formatter: '목표', position: 'insideStartTop', color: COLOR.ink },
+          label: {
+            formatter: `목표 피크 ${formatKw(target)}`,
+            position: 'insideStartTop',
+            color: COLOR.ink,
+            fontWeight: 'bold',
+          },
           data: [{ yAxis: target }],
         },
       },
@@ -461,7 +466,7 @@ const essOption = computed(() => ({
       <section class="card exceeded">
         <div class="card-head">
           <h2 class="card-title">목표를 넘은 구간 {{ report.exceeded.length }}건</h2>
-          <RouterLink to="/logs" class="link">추천 이력에서 보기</RouterLink>
+          <RouterLink to="/logs" class="link more-link">추천 이력 보기</RouterLink>
         </div>
         <p v-if="!report.exceeded.length" class="empty">목표를 넘은 구간이 없습니다.</p>
         <div v-else class="table-wrap">
@@ -672,16 +677,6 @@ const essOption = computed(() => ({
 .state.error {
   color: var(--crit);
 }
-.retry {
-  padding: 4px 12px;
-  background: var(--card);
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  color: var(--ink-2);
-}
-.retry:hover {
-  background: var(--bg);
-}
 
 /* 핵심 숫자 */
 .kpis {
@@ -724,11 +719,6 @@ const essOption = computed(() => ({
 }
 .link {
   margin-left: auto;
-  font-size: 13px;
-  color: var(--accent);
-}
-.link:hover {
-  text-decoration: underline;
 }
 
 /* 목표를 넘은 구간 */
@@ -753,10 +743,6 @@ const essOption = computed(() => ({
 }
 .table th {
   padding: 4px 8px 6px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 12px;
-  color: var(--mute);
-  text-align: left;
 }
 .table td {
   padding: 7px 8px 7px 0;

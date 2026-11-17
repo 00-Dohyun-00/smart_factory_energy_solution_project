@@ -131,6 +131,70 @@ img {
   background: var(--bg);
 }
 
+/* ---- 여러 화면이 같이 쓰는 조각 (2026-11-17, 화면마다 모양이 달랐던 것을 하나로 모음) ---- */
+
+/* [다시 시도] 버튼: 불러오기에 실패한 자리에 둠 */
+.retry {
+  height: 34px;
+  padding: 0 14px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.retry:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* 기간 빠른 선택처럼 붙어 있는 버튼 묶음. 고른 버튼은 먹색 바탕 (aria-pressed와 같이 씀) */
+.presets {
+  display: flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.presets button {
+  height: 32px;
+  padding: 0 12px;
+  background: var(--card);
+  border: 0;
+  color: var(--ink-2);
+}
+.presets button + button {
+  border-left: 1px solid var(--line-strong);
+}
+.presets button:hover {
+  background: var(--bg);
+}
+.presets button.active {
+  background: var(--ink);
+  font-weight: 700;
+  color: var(--card);
+}
+
+/* 다른 화면으로 가는 글자 링크 (예: "추천 이력 보기") */
+.more-link {
+  font-size: 13px;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.more-link:hover {
+  color: var(--ink);
+}
+
+/* 표 머리글: 작은 회색 글자 + 아래 선. 칸 여백은 화면마다 정함 */
+.table th {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--mute);
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line-strong);
+}
+
 /* 숫자는 자릿수가 바뀌어도 흔들리지 않게 같은 너비로 */
 .num {
   font-variant-numeric: tabular-nums;

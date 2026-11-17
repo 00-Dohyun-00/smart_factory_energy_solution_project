@@ -159,7 +159,7 @@ const trendOption = computed(() => ({
         <Chart v-if="detail" :option="trendOption" :height="150" />
         <p v-else-if="realtimeStore.zoneError" class="empty" role="alert">
           불러오지 못했습니다.
-          <button class="text-button" @click="realtimeStore.fetchZoneDetail(selectedZone)">
+          <button class="retry" @click="realtimeStore.fetchZoneDetail(selectedZone)">
             다시 시도
           </button>
         </p>
@@ -305,14 +305,6 @@ const trendOption = computed(() => ({
   gap: 10px;
   height: 150px;
   color: var(--mute);
-}
-.text-button {
-  padding: 0;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--ink-2);
-  font-size: 13px;
-  color: var(--ink-2);
 }
 .equipments {
   display: flex;

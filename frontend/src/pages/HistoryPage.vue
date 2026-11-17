@@ -164,10 +164,18 @@ function toggle(id) {
       <div class="field">
         <span class="field-label">기간</span>
         <div class="presets" role="group" aria-label="기간 빠른 선택">
-          <button :class="{ active: preset === 'today' }" @click="applyPreset('today')">
+          <button
+            :class="{ active: preset === 'today' }"
+            :aria-pressed="preset === 'today'"
+            @click="applyPreset('today')"
+          >
             오늘
           </button>
-          <button :class="{ active: preset === 'week' }" @click="applyPreset('week')">
+          <button
+            :class="{ active: preset === 'week' }"
+            :aria-pressed="preset === 'week'"
+            @click="applyPreset('week')"
+          >
             최근 7일
           </button>
         </div>
@@ -234,7 +242,7 @@ function toggle(id) {
     <section class="card table-card">
       <p v-if="historyStore.errorMessage" class="notice" role="alert">
         이력을 불러오지 못했습니다. ({{ historyStore.errorMessage }})
-        <button class="reset" @click="load()">다시 시도</button>
+        <button class="retry" @click="load()">다시 시도</button>
       </p>
 
       <p v-if="historyStore.loading" class="empty">불러오는 중입니다.</p>
@@ -419,30 +427,6 @@ function toggle(id) {
 select.input {
   max-width: 132px;
 }
-.presets {
-  display: flex;
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.presets button {
-  height: 32px;
-  padding: 0 12px;
-  background: var(--card);
-  border: 0;
-  color: var(--ink-2);
-}
-.presets button + button {
-  border-left: 1px solid var(--line-strong);
-}
-.presets button:hover {
-  background: var(--bg);
-}
-.presets button.active {
-  background: var(--bg);
-  font-weight: 700;
-  color: var(--ink);
-}
 .reset {
   height: 34px;
   padding: 0 14px;
@@ -497,10 +481,6 @@ select.input {
   top: 0;
   padding: 10px 12px;
   background: var(--bg);
-  border-bottom: 1px solid var(--line-strong);
-  font-weight: 700;
-  color: var(--ink-2);
-  text-align: left;
 }
 .table td {
   padding: 10px 12px;

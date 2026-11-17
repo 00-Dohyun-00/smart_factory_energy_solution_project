@@ -232,11 +232,6 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
 }
 .table th {
   padding: 6px 8px;
-  border-bottom: 1px solid var(--line-strong);
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--mute);
-  text-align: left;
 }
 .table td {
   padding: 8px;

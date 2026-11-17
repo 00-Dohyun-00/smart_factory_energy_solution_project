@@ -194,7 +194,7 @@ const dailyOption = computed(() => {
           symbol: 'none',
           lineStyle: { color: COLOR.ink, width: 1.5, type: 'solid' },
           label: {
-            formatter: `목표 ${formatKw(target)}`,
+            formatter: `목표 피크 ${formatKw(target)}`,
             position: 'insideStartTop',
             color: COLOR.ink,
             fontWeight: 'bold',
@@ -349,13 +349,25 @@ const heatOption = computed(() => {
       <div class="field">
         <span class="field-label">기간</span>
         <div class="presets" role="group" aria-label="기간 빠른 선택">
-          <button :class="{ active: preset === 'month' }" @click="applyPreset('month')">
+          <button
+            :class="{ active: preset === 'month' }"
+            :aria-pressed="preset === 'month'"
+            @click="applyPreset('month')"
+          >
             이번 달
           </button>
-          <button :class="{ active: preset === 'lastMonth' }" @click="applyPreset('lastMonth')">
+          <button
+            :class="{ active: preset === 'lastMonth' }"
+            :aria-pressed="preset === 'lastMonth'"
+            @click="applyPreset('lastMonth')"
+          >
             지난 달
           </button>
-          <button :class="{ active: preset === 'week' }" @click="applyPreset('week')">
+          <button
+            :class="{ active: preset === 'week' }"
+            :aria-pressed="preset === 'week'"
+            @click="applyPreset('week')"
+          >
             최근 7일
           </button>
         </div>
@@ -514,7 +526,7 @@ const heatOption = computed(() => {
           <p v-else-if="!analysisStore.peakWindows.length" class="windows-empty">
             이 기간에는 구간 기록이 없습니다.
           </p>
-          <RouterLink to="/logs" class="more">추천 이력 보기</RouterLink>
+          <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>
         </section>
       </div>
     </template>
@@ -559,30 +571,6 @@ const heatOption = computed(() => {
   border-radius: 4px;
   color: var(--ink);
 }
-.presets {
-  display: flex;
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.presets button {
-  height: 32px;
-  padding: 0 12px;
-  background: var(--card);
-  border: 0;
-  color: var(--ink-2);
-}
-.presets button + button {
-  border-left: 1px solid var(--line-strong);
-}
-.presets button:hover {
-  background: var(--bg);
-}
-.presets button.active {
-  background: var(--ink);
-  font-weight: 700;
-  color: var(--card);
-}
 .loading-note {
   margin-left: auto;
   font-size: 13px;
@@ -604,14 +592,6 @@ const heatOption = computed(() => {
 }
 .state.error {
   color: var(--crit);
-}
-.retry {
-  height: 34px;
-  padding: 0 14px;
-  background: var(--card);
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  color: var(--ink-2);
 }
 .over {
   color: var(--crit);
@@ -684,12 +664,6 @@ const heatOption = computed(() => {
 }
 .table th {
   padding: 6px 12px 6px 0;
-  border-bottom: 1px solid var(--ink);
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--mute);
-  text-align: left;
-  white-space: nowrap;
 }
 .table td {
   padding: 9px 12px 9px 0;
@@ -741,9 +715,6 @@ const heatOption = computed(() => {
   align-self: flex-end;
   margin-top: auto;
   padding-top: 10px;
-  font-size: 13px;
-  color: var(--ink-2);
-  text-decoration: underline;
 }
 
 /* 화면이 좁으면 오른쪽 표를 줄여 히트맵 자리를 남김 */

@@ -63,7 +63,6 @@ const COLOR = {
   ink2: '#3c444c', // --ink-2
   mute: '#646e77', // --mute
   line: '#dde1e5', // --line
-  crit: '#c8372d', // --crit
   grid: '#5b6472', // --src-grid
   solar: '#d19a00', // --src-solar
 }
@@ -113,11 +112,12 @@ function makeTrendOption(lines, withTarget) {
   if (withTarget && target) {
     markLines.push({
       yAxis: target,
-      lineStyle: { color: COLOR.crit, width: 2, type: 'solid' },
+      // 목표 피크선은 모든 그래프에서 같은 모양 (먹색 실선). 빨강은 상태 표시에만 씀
+      lineStyle: { color: COLOR.ink, width: 1.5, type: 'solid' },
       label: {
         formatter: `목표 피크 ${formatKw(target)}`,
         position: 'insideStartTop',
-        color: COLOR.crit,
+        color: COLOR.ink,
         fontWeight: 'bold',
       },
     })
@@ -241,7 +241,7 @@ const trendCards = computed(() => [
           <p v-else-if="realtimeStore.todayLoading" class="empty chart-empty">불러오는 중입니다.</p>
           <p v-else-if="realtimeStore.todayError" class="empty chart-empty" role="alert">
             그래프를 불러오지 못했습니다. ({{ realtimeStore.todayError }})
-            <button class="text-button" @click="realtimeStore.fetchToday()">다시 시도</button>
+            <button class="retry" @click="realtimeStore.fetchToday()">다시 시도</button>
           </p>
           <p v-else class="empty chart-empty">오늘 기록이 아직 없습니다.</p>
         </section>
@@ -262,7 +262,7 @@ const trendCards = computed(() => [
           </li>
         </ul>
         <p v-else class="empty">아직 기록된 이벤트가 없습니다.</p>
-        <RouterLink to="/logs" class="more">추천 이력 보기</RouterLink>
+        <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>
       </section>
     </div>
   </div>
@@ -316,14 +316,6 @@ const trendCards = computed(() => [
   margin-left: auto;
   font-size: 13px;
   color: var(--mute);
-}
-.text-button {
-  padding: 0;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--ink-2);
-  font-size: 13px;
-  color: var(--ink-2);
 }
 .empty {
   display: flex;
@@ -402,9 +394,6 @@ const trendCards = computed(() => [
 .more {
   align-self: flex-end;
   margin-top: auto;
-  border-bottom: 1px solid var(--ink-2);
-  font-size: 13px;
-  color: var(--ink-2);
 }
 
 /* 화면이 좁으면 오른쪽 카드 폭을 줄여 왼쪽 그래프와 게이지 자리를 남김 */

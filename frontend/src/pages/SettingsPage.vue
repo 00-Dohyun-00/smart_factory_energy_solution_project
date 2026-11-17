@@ -271,7 +271,7 @@ const historyRows = computed(() =>
       role="alert"
     >
       기준값을 불러오지 못했습니다. ({{ settingsStore.errorMessage }})
-      <button class="button" @click="settingsStore.fetchSettings()">다시 시도</button>
+      <button class="retry" @click="settingsStore.fetchSettings()">다시 시도</button>
     </p>
     <p v-else-if="settingsStore.loading || !settingsStore.items.length" class="state">
       불러오는 중입니다.
@@ -395,7 +395,7 @@ const historyRows = computed(() =>
         </div>
         <p v-if="settingsStore.historyError && !historyRows.length" class="empty" role="alert">
           변경 기록을 불러오지 못했습니다. ({{ settingsStore.historyError }})
-          <button class="button" @click="loadHistory">다시 시도</button>
+          <button class="retry" @click="loadHistory">다시 시도</button>
         </p>
         <p v-else-if="!historyRows.length" class="empty">
           최근 {{ HISTORY_DAYS }}일 동안의 변경 기록이 없습니다.
@@ -680,11 +680,6 @@ const historyRows = computed(() =>
 }
 .table th {
   padding: 6px 12px 6px 0;
-  border-bottom: 1px solid var(--ink);
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--mute);
-  text-align: left;
 }
 .table td {
   padding: 9px 12px 9px 0;

@@ -276,14 +276,14 @@ function pinTooltip(label) {
 }
 
 // 기준선(가로), 추천 기호, 고른 시각(세로)을 그리는 설정
-// lines 예: [{ value: 1800, text: '목표 피크 1,800', color: COLOR.crit, dashed: false }]
+// lines 예: [{ value: 1800, text: '목표 피크 1,800', color: COLOR.ink, dashed: false }]
 // withPins = true면 그래프 위쪽 띠에 추천 기호를 적음 (전력 그래프만)
 function markLines(lines, withPins = false) {
   const data = lines.map((item) => ({
     yAxis: item.value,
     lineStyle: {
       color: item.color,
-      width: item.dashed ? 1.5 : 2,
+      width: 1.5,
       type: item.dashed ? 'dashed' : 'solid',
     },
     label: {
@@ -347,7 +347,7 @@ const powerOption = computed(() => {
   // 목표 피크선은 한전 구매전력과 비교하는 선이라, 한전 구매를 켰을 때만 그림
   const target = trend.value.targetPeakKw
   const lines = shown.value.includes('grid')
-    ? [{ value: target, text: `목표 피크 ${formatKw(target)}`, color: COLOR.crit }]
+    ? [{ value: target, text: `목표 피크 ${formatKw(target)}`, color: COLOR.ink }]
     : []
   if (series.length) series[0].markLine = markLines(lines, true)
 
@@ -483,11 +483,11 @@ const hourlyOption = computed(() => {
         markLine: {
           silent: true,
           symbol: 'none',
-          lineStyle: { color: COLOR.crit, width: 2, type: 'solid' },
+          lineStyle: { color: COLOR.ink, width: 1.5, type: 'solid' },
           label: {
-            formatter: `목표 ${formatKw(target)}`,
+            formatter: `목표 피크 ${formatKw(target)}`,
             position: 'insideEndTop',
-            color: COLOR.crit,
+            color: COLOR.ink,
             fontWeight: 'bold',
           },
           data: [{ yAxis: target }],
@@ -512,13 +512,25 @@ const hourlyOption = computed(() => {
       <div class="field">
         <span class="field-label">기간</span>
         <div class="presets" role="group" aria-label="기간 빠른 선택">
-          <button :class="{ active: preset === 'today' }" @click="applyPreset('today')">
+          <button
+            :class="{ active: preset === 'today' }"
+            :aria-pressed="preset === 'today'"
+            @click="applyPreset('today')"
+          >
             오늘
           </button>
-          <button :class="{ active: preset === 'week' }" @click="applyPreset('week')">
+          <button
+            :class="{ active: preset === 'week' }"
+            :aria-pressed="preset === 'week'"
+            @click="applyPreset('week')"
+          >
             최근 7일
           </button>
-          <button :class="{ active: preset === 'month' }" @click="applyPreset('month')">
+          <button
+            :class="{ active: preset === 'month' }"
+            :aria-pressed="preset === 'month'"
+            @click="applyPreset('month')"
+          >
             이번 달
           </button>
         </div>
@@ -546,6 +558,7 @@ const hourlyOption = computed(() => {
             v-for="item in INTERVALS"
             :key="item.value"
             :class="{ active: interval === item.value }"
+            :aria-pressed="interval === item.value"
             @click="interval = item.value"
           >
             {{ item.label }}
@@ -841,30 +854,6 @@ const hourlyOption = computed(() => {
   border-radius: 4px;
   color: var(--ink);
 }
-.presets {
-  display: flex;
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.presets button {
-  height: 32px;
-  padding: 0 12px;
-  background: var(--card);
-  border: 0;
-  color: var(--ink-2);
-}
-.presets button + button {
-  border-left: 1px solid var(--line-strong);
-}
-.presets button:hover {
-  background: var(--bg);
-}
-.presets button.active {
-  background: var(--ink);
-  font-weight: 700;
-  color: var(--card);
-}
 .check {
   display: flex;
   align-items: center;
@@ -899,14 +888,6 @@ const hourlyOption = computed(() => {
 }
 .state.error {
   color: var(--crit);
-}
-.retry {
-  height: 34px;
-  padding: 0 14px;
-  background: var(--card);
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  color: var(--ink-2);
 }
 .over {
   color: var(--crit);
@@ -1020,12 +1001,6 @@ const hourlyOption = computed(() => {
 }
 .table th {
   padding: 6px 12px 6px 0;
-  border-bottom: 1px solid var(--ink);
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--mute);
-  text-align: left;
-  white-space: nowrap;
 }
 .table td {
   padding: 9px 12px 9px 0;
