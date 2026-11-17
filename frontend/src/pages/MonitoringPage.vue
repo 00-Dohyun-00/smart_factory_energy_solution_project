@@ -201,7 +201,7 @@ const trendCards = computed(() => [
       </p>
       <!-- 자동 모드일 때 멀리서도 보이게 제목 줄에 크게 표시 (실제 제어가 아니라 시뮬레이션) -->
       <p v-if="settingsStore.values.operationMode === 'AUTO'" class="mode-band">
-        <strong>운영 모드: 자동 (시뮬레이션)</strong>
+        <strong>자동 모드 (시뮬레이션)</strong>
         <span class="mode-sub">추천을 자동으로 적용 중</span>
       </p>
     </div>
