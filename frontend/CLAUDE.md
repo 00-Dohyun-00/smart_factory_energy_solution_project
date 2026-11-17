@@ -226,7 +226,7 @@ src/
 - 주소 규칙은 `/api/{복수형 명사}`다. `api()`에는 `/api`를 뺀 경로를 넘긴다. (예: `api('/site-powers/latest')`)
 - **백엔드가 아직 없는 API**는 해당 `{기능}Api.js` 함수가 임시로 가짜 데이터를 돌려주게 만든다. 함수 이름과 응답 모양은 실제와 같게 하고, `// TODO: 백엔드 연결 후 교체` 주석을 남긴다. Store와 페이지는 고치지 않아도 되게 한다.
 - 주소와 응답 모양의 기준은 **팀 API 명세 v0.2**(구글 시트 "(api 명세서) 2조 에너지솔루션")다. 명세와 화면의 차이·백엔드 요청 목록은 `docs/api-spec-diff.md`에 있다. (예전 `docs/api-spec.md`는 v0.1 주소라 쓰지 않는다)
-- 지금은 백엔드 API가 없어 `api/` 함수가 가짜 데이터(`fakeBackend.js`)를 돌려준다. 함수 이름은 그대로 두고, 백엔드가 열리면 각 파일 맨 위 주석의 "교체 예" 한 줄로 바꾼다. 가짜 응답도 명세 v0.2 모양에 맞춰 두었다(2026-11-17).
+- 대부분의 API는 아직 백엔드에 없어 `api/` 함수가 가짜 데이터(`fakeBackend.js`)를 돌려준다. 함수 이름은 그대로 두고, 백엔드가 열리면 각 파일 맨 위 주석의 "교체 예" 한 줄로 바꾼다. 가짜 응답도 명세 v0.2 모양에 맞춰 두었다(2026-11-17). **실제 백엔드에 연결한 API는 아래 표의 "쓰는 화면" 칸에 "(연결됨)"으로 적는다.**
 
 | 명세 번호 | 메서드 | 주소 (v0.2) | 프론트 함수 | 쓰는 화면 |
 |---|---|---|---|---|
@@ -236,7 +236,7 @@ src/
 | 4 | GET | `/api/events?limit=10` | `getRecentEvents` | 통합 |
 | 5 | GET | `/api/site-powers/today` | `getTodayBatteryStatuses` | 통합 |
 | 7 | GET | `/api/zones/{zoneName}` (예: `Z2`) | `getZoneRecent` | 설비 모니터링 |
-| 8 | GET | `/api/recommendations?from=&to=` | `getBatteryDecisions` | 추천 이력, 추이 분석 |
+| 8 | GET | `/api/recommendations?from=&to=` | `getBatteryDecisions` | 추천 이력, 추이 분석 (**연결됨**, 2026-11-17) |
 | 9 | GET | `/api/reports?month=` | `getReport` | 월간 성적표 |
 | 10 | GET | `/api/analyses/trend?from=&to=&interval=` | `getTrendAnalysis` | 추이 분석 |
 | 11 | GET | `/api/settings` | `getSettings` | 공통 틀, 환경 설정 |
