@@ -1,12 +1,14 @@
 <!-- 운영 이력: 추천 → 적용 여부 → 결과를 시간순 표로 보여 줍니다 -->
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useHistoryStore } from '@/stores/useHistoryStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { formatHourMinute, formatKw, formatMonthDayTime } from '@/utils/format'
 
 const historyStore = useHistoryStore()
 const realtimeStore = useRealtimeStore()
+const route = useRoute()
 
 const REFRESH_INTERVAL_MS = 5000 // 새 추천이 생기면 표에 나타나도록 자동으로 다시 받는 주기
 
@@ -53,6 +55,15 @@ function daysBefore(date, days) {
   return `${result.getFullYear()}-${pad(result.getMonth() + 1)}-${pad(result.getDate())}`
 }
 
+// 주소에 적힌 날짜가 '2026-11-14' 모양이고 실제로 있는 날짜인지 확인
+function isValidDate(text) {
+  if (typeof text !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return false
+  const [year, month, day] = text.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  // '2026-02-30'처럼 없는 날짜는 다음 달로 넘어가므로, 다시 비교해서 걸러냄
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+}
+
 function applyPreset(name) {
   preset.value = name
   if (!serverDate.value) return
@@ -85,7 +96,17 @@ watch([fromDate, toDate], () => {
   load()
 })
 
-// 서버 날짜를 처음 알게 되면 "오늘"로 조회 시작
+// 성적표의 "추천 이력 보기"처럼 주소에 기간이 있으면(/logs?from=2026-11-01&to=2026-11-17) 그 기간으로 시작.
+// 위의 감시(watch)가 기간이 바뀐 것을 보고 바로 조회함. 기간이 올바르지 않으면 무시하고 아래처럼 "오늘"로 시작
+const queryFrom = route.query.from
+const queryTo = route.query.to
+if (isValidDate(queryFrom) && isValidDate(queryTo) && queryFrom <= queryTo) {
+  preset.value = 'custom'
+  fromDate.value = queryFrom
+  toDate.value = queryTo
+}
+
+// 서버 날짜를 처음 알게 되면 "오늘"로 조회 시작 (주소에 기간이 있었으면 이미 날짜가 있어 건너뜀)
 watch(
   serverDate,
   (date) => {

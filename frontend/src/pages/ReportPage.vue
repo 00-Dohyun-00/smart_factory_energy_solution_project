@@ -93,10 +93,17 @@ function downloadCsv() {
     csvLine(['최대 피크', summary.monthPeakKw, 'kW']),
     csvLine(['최대 피크 시각', summary.monthPeakAt, '']),
     csvLine(['평균 피크 저감량', summary.avgReductionKw, 'kW']),
-    csvLine(['전기요금 추정', data.bill.total, '원']),
+    // 진행 중인 달의 합계는 오늘까지 금액이라 이름에 적어 둠. 끝난 달에는 "월말 예상" 줄을 넣지 않음
+    csvLine([
+      isLatestMonth.value ? '전기요금 추정 (오늘까지)' : '전기요금 추정',
+      data.bill.total,
+      '원',
+    ]),
     csvLine(['전력량요금 추정', data.bill.energyCharge, '원']),
     csvLine(['기본요금 추정', data.bill.baseCharge, '원']),
-    csvLine(['월말 예상 요금', data.bill.monthEndEstimate, '원']),
+    ...(isLatestMonth.value
+      ? [csvLine(['월말 예상 요금 추정', data.bill.monthEndEstimate, '원'])]
+      : []),
     csvLine(['ESS 충전량', data.ess.chargeKwh, 'kWh']),
     csvLine(['ESS 방전량', data.ess.dischargeKwh, 'kWh']),
     csvLine(['태양광 발전량', data.solar.generationKwh, 'kWh']),
@@ -175,11 +182,27 @@ const periodLabel = computed(() => {
   return `${monthNumber}월 ${firstDay}일 ~ ${lastDay}일 기준`
 })
 
+// "추천 이력 보기" 링크: 성적표와 같은 기간의 이력을 열도록 주소에 기간을 붙임
+// (예: /logs?from=2026-11-01&to=2026-11-17)
+const historyLink = computed(() => ({
+  path: '/logs',
+  query: { from: report.value.periodStart, to: report.value.periodEnd },
+}))
+
 // ---- 맨 위 핵심 숫자 4개 ----
 const kpis = computed(() => {
   const summary = report.value.summary
   const target = report.value.targetPeakKw
   const bill = report.value.bill
+  const peakOver = summary.monthPeakKw > target
+  // 전기요금은 아래 전기요금 카드의 큰 금액과 같은 기준으로 보여 줌
+  // 진행 중인 달: 월말 예상 + "오늘까지" 금액 / 끝난 달: 그 달 전체 요금
+  const billKpi = isLatestMonth.value
+    ? {
+        value: formatManwon(bill.monthEndEstimate),
+        sub: `월말 예상 · 오늘까지 ${formatManwon(bill.total)}만원`,
+      }
+    : { value: formatManwon(bill.total), sub: '이 달 전체 요금' }
   return [
     {
       label: '피크 방어 성공률',
@@ -191,8 +214,9 @@ const kpis = computed(() => {
       label: '최대 피크',
       value: formatKw(summary.monthPeakKw),
       unit: 'kW',
-      sub: `목표 ${formatKw(target)} kW · ${formatMonthDayTime(summary.monthPeakAt).slice(0, 11)}`,
-      over: summary.monthPeakKw > target, // 목표를 넘었으면 빨강으로 표시
+      // 색만으로 구분하지 않도록 도형 + 글자(■ 목표 초과 / ● 목표 달성)도 함께 적음
+      sub: `${peakOver ? '■ 목표 초과' : '● 목표 달성'} · 목표 ${formatKw(target)} kW · ${formatMonthDayTime(summary.monthPeakAt).slice(0, 11)}`,
+      over: peakOver, // 목표를 넘었으면 빨강으로 표시
     },
     {
       label: '평균 피크 저감량',
@@ -202,9 +226,9 @@ const kpis = computed(() => {
     },
     {
       label: '전기요금 추정',
-      value: formatManwon(bill.total),
+      value: billKpi.value,
       unit: '만원',
-      sub: `월말 예상 ${formatManwon(bill.monthEndEstimate)}만원`,
+      sub: billKpi.sub,
     },
   ]
 })
@@ -391,6 +415,8 @@ const essOption = computed(() => ({
         </button>
       </div>
       <span class="period">{{ periodLabel }}</span>
+      <!-- 금액·탄소는 추정값이라는 것을 제목 줄에서도 바로 보이게 함 (맨 아래 주의 문구와 같은 뜻) -->
+      <span class="estimate">요금 · 저감량 · 탄소는 추정값</span>
       <div class="actions">
         <!-- 브라우저의 인쇄 창을 엶. 인쇄 창에서 "PDF로 저장"을 고르면 파일로 남길 수 있음 -->
         <button class="action" :disabled="!report || !report.hasData" @click="printReport">
@@ -450,7 +476,7 @@ const essOption = computed(() => ({
             단위 kW · 빨강은 목표 초과 · 세로축은 {{ formatKw(peakAxisMin) }}부터
           </span>
         </div>
-        <Chart :option="peakOption" :height="230" />
+        <Chart class="chart" :option="peakOption" :height="230" />
       </section>
 
       <section class="card">
@@ -459,14 +485,14 @@ const essOption = computed(() => ({
           <span class="note">칸 하나 = 그 날 그 시각의 최대 15분 피크</span>
         </div>
         <!-- key: 날짜 수가 바뀌면 그래프 높이도 바뀌므로 새로 만듦 -->
-        <Chart :key="heatHeight" :option="heatOption" :height="heatHeight" />
+        <Chart class="chart" :key="heatHeight" :option="heatOption" :height="heatHeight" />
       </section>
 
       <!-- 목표를 넘은 구간 -->
       <section class="card exceeded">
         <div class="card-head">
           <h2 class="card-title">목표를 넘은 구간 {{ report.exceeded.length }}건</h2>
-          <RouterLink to="/logs" class="link more-link">추천 이력 보기</RouterLink>
+          <RouterLink :to="historyLink" class="link more-link">추천 이력 보기</RouterLink>
         </div>
         <p v-if="!report.exceeded.length" class="empty">목표를 넘은 구간이 없습니다.</p>
         <div v-else class="table-wrap">
@@ -510,7 +536,7 @@ const essOption = computed(() => ({
           </div>
           <div class="ess-body">
             <div class="ess-chart">
-              <Chart :option="essOption" :height="150" />
+              <Chart class="chart" :option="essOption" :height="150" />
             </div>
             <dl class="stats">
               <div>
@@ -571,8 +597,9 @@ const essOption = computed(() => ({
               <dt>한전 구매전력 감소</dt>
               <dd class="num">{{ formatInteger(report.solar.gridReductionKwh) }} kWh</dd>
             </div>
+            <!-- 배출계수는 임시 값이라 팀에서 확인 필요. 인쇄물에 찍히지 않게 화면에는 적지 않음 -->
             <div>
-              <dt>적용 배출계수 (확인 필요)</dt>
+              <dt>적용 배출계수</dt>
               <dd class="num">{{ report.solar.emissionFactor }} kgCO₂/kWh</dd>
             </div>
           </dl>
@@ -638,6 +665,15 @@ const essOption = computed(() => ({
 }
 .period {
   color: var(--mute);
+}
+/* 제목 줄의 "추정값" 안내: 얇은 테두리로 묶어 눈에 띄게 함 */
+.estimate {
+  padding: 1px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-size: 13px;
+  color: var(--ink-2);
+  white-space: nowrap;
 }
 .actions {
   display: flex;
@@ -825,7 +861,11 @@ const essOption = computed(() => ({
   font-weight: 700;
 }
 
-/* 인쇄할 때: 누르는 것들은 숨기고, 안내 문구는 줄을 바꿔 다 보이게 함 */
+/*
+  인쇄할 때: 누르는 것들은 숨기고, 안내 문구는 줄을 바꿔 다 보이게 함.
+  종이에서는 전체가 0.8배로 줄어들어(global.css) 화면 폭 약 900px로 배치되므로,
+  글자를 조금 키우고(본문 15px × 0.8 ≈ 9pt) 간격은 줄임
+*/
 @media print {
   .actions,
   .month button,
@@ -834,11 +874,59 @@ const essOption = computed(() => ({
     display: none;
   }
   .page {
+    gap: 12px;
     min-height: 0;
     padding: 0;
+    font-size: 15px;
   }
   .head {
     flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+  .note,
+  .period,
+  .estimate,
+  .kpi-sub,
+  .caution,
+  .table th,
+  .stats dt,
+  .solar-main dt {
+    font-size: 14px;
+  }
+  .kpis {
+    gap: 10px;
+  }
+  .kpi-value {
+    font-size: 28px;
+  }
+  /* 좁아진 폭에서 표가 잘리지 않게 긴 글(원인)은 줄을 바꿈 */
+  .table-wrap {
+    overflow: visible;
+  }
+  .table {
+    white-space: normal;
+  }
+  .ess-body {
+    gap: 20px;
+  }
+  .stats {
+    gap: 10px 20px;
+  }
+  /*
+    그래프는 화면에서 그려 둔 크기(최대 약 1,160px) 그대로 인쇄되므로 좁아진 종이 폭을 넘칠 수 있음.
+    그림처럼 가로 폭에 맞춰 비율대로 줄여서 찍히게 함 (Chart.vue는 공통 파일이라 여기서만 처리)
+  */
+  .chart {
+    height: auto !important;
+  }
+  .chart :deep(div) {
+    width: 100% !important;
+    height: auto !important;
+  }
+  .chart :deep(canvas) {
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
   }
 }
 </style>
