@@ -1,7 +1,7 @@
 <!--
   현재 15분 피크 구간 카드
-  왼쪽: 예상 평균(큰 숫자), 한 줄 판정, 단계
-  오른쪽: 피크 게이지(정상·주의·경고 띠 위에 예상 평균 표시), 목표·예상·필요 전력·남은 시간, 구간 진행 막대
+  왼쪽: 예상 피크(큰 숫자), 한 줄 판정, 단계
+  오른쪽: 피크 게이지(정상·주의·경고 띠 위에 예상 피크 표시), 목표·예상·추가 방전·남은 시간, 구간 진행 막대
 
   예상값, 목표, 주의선, 단계는 모두 백엔드가 준 값이고 여기서는 보여 주기만 합니다.
 -->
@@ -91,9 +91,9 @@ const elapsedPercent = computed(() =>
     </div>
 
     <div class="body">
-      <!-- 왼쪽: 예상 평균과 판정 -->
+      <!-- 왼쪽: 예상 피크와 판정 -->
       <div class="left">
-        <p class="caption">예상 평균</p>
+        <p class="caption">예상 피크</p>
         <p class="big">
           <span class="num">{{ formatKw(status?.predictedKw) }}</span>
           <span class="unit">kW</span>
@@ -142,13 +142,13 @@ const elapsedPercent = computed(() =>
             </dd>
           </div>
           <div>
-            <dt>예상 평균</dt>
+            <dt>예상 피크</dt>
             <dd class="state">
               <span class="num">{{ formatKw(status?.predictedKw) }}</span> <small>kW</small>
             </dd>
           </div>
           <div>
-            <dt>방어 필요 전력</dt>
+            <dt>추가 방전</dt>
             <dd>
               <span class="num">{{ formatKw(status?.defenseKw) }}</span> <small>kW</small>
             </dd>

@@ -592,7 +592,7 @@ const hourlyOption = computed(() => {
           </dd>
           <p class="num">
             {{ shortTime(summary.maxPeakAt) }},
-            {{ summary.maxPeakKw > trend.targetPeakKw ? '목표 초과' : '목표 이내' }}
+            {{ summary.maxPeakKw > trend.targetPeakKw ? '목표 초과' : '목표 달성' }}
           </p>
         </div>
         <div>
@@ -739,8 +739,8 @@ const hourlyOption = computed(() => {
                 <tr>
                   <th>처리</th>
                   <th class="right-text">건수</th>
-                  <th>목표 이내</th>
-                  <th class="right-text">평균 결과 피크</th>
+                  <th>목표 달성</th>
+                  <th class="right-text">평균 실제 피크</th>
                 </tr>
               </thead>
               <tbody>

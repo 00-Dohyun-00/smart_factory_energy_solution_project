@@ -198,13 +198,13 @@ function toggle(id) {
           <option value="ALL">전체</option>
           <option value="RECOMMENDED">추천 중</option>
           <option value="APPLIED">적용</option>
-          <option value="AUTO">자동 (시뮬레이션)</option>
+          <option value="AUTO">자동</option>
           <option value="IGNORED">넘김</option>
         </select>
       </label>
 
       <label class="field">
-        <span class="field-label">이유</span>
+        <span class="field-label">규칙</span>
         <select v-model="ruleFilter" class="input">
           <option value="ALL">전체</option>
           <option v-for="rule in ruleOptions" :key="rule" :value="rule">{{ rule }}</option>
@@ -213,7 +213,12 @@ function toggle(id) {
 
       <label class="field search">
         <span class="field-label">검색</span>
-        <input v-model="keyword" type="search" class="input" placeholder="이유, 처리자" />
+        <input
+          v-model="keyword"
+          type="search"
+          class="input"
+          placeholder="규칙, 이유 문장, 처리자"
+        />
       </label>
 
       <p v-if="dateError" class="date-error" role="alert">{{ dateError }}</p>
@@ -244,13 +249,13 @@ function toggle(id) {
               <th class="col-toggle"><span class="sr-only">자세히 보기</span></th>
               <!--
                 칼럼 이름은 UI 피드백(2026-11-17)으로 더 바로 읽히는 말로 바꿈.
-                예전 이름: 15분 구간 → 대상 시간, 근거 → 이유, 예상 평균 → 예상 피크,
+                예전 이름: 15분 구간 → 대상 시간, 근거 → 규칙, 예상 평균 → 예상 피크,
                 처리자 · 시각 → 처리자 / 처리 시각(두 칸), 결과 피크 → 실제 피크, 결과 → 목표 달성
               -->
               <th>추천 시각</th>
               <th>대상 시간</th>
               <th>추천</th>
-              <th>이유</th>
+              <th>규칙</th>
               <th class="right">예상 피크</th>
               <th>처리</th>
               <th>처리자</th>
@@ -315,7 +320,10 @@ function toggle(id) {
               <tr v-if="openedId === item.id" class="detail-row">
                 <td></td>
                 <td colspan="10">
+                  <!-- 통합 화면의 ESS 추천 카드와 같은 이름(이유 / 판단 근거)으로 나눠 보여 줌 -->
+                  <h4 class="detail-title">이유</h4>
                   <p class="reason">{{ item.reason }}</p>
+                  <h4 class="detail-title">판단 근거</h4>
                   <dl class="used">
                     <div v-for="used in item.usedValues" :key="used.label" class="used-item">
                       <dt>{{ used.label }}</dt>
@@ -542,7 +550,17 @@ select.input {
   background: var(--bg);
   white-space: normal;
 }
+.detail-title {
+  margin-bottom: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.detail-title + .used {
+  margin-top: 0;
+}
 .reason {
+  margin-bottom: 10px;
   color: var(--ink);
 }
 .used {

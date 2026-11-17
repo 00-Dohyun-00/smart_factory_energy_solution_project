@@ -16,10 +16,10 @@ const settingsStore = useSettingsStore()
 const realtimeStore = useRealtimeStore()
 
 const MODES = [
-  { value: 'MANUAL', label: '운영자 승인', note: '추천을 사람이 보고 적용' },
+  { value: 'MANUAL', label: '운영자 승인 모드', note: '추천을 사람이 보고 적용' },
   { value: 'AUTO', label: '자동 모드 (시뮬레이션)', note: '추천을 바로 반영한 것으로 표시' },
 ]
-const MODE_LABELS = { MANUAL: '운영자 승인', AUTO: '자동 모드 (시뮬레이션)' }
+const MODE_LABELS = { MANUAL: '운영자 승인 모드', AUTO: '자동 모드 (시뮬레이션)' }
 
 // 화면에 놓을 항목들. key는 백엔드 설정 이름과 같아야 함
 // min, max: 화면에서 먼저 걸러 주는 범위 / decimal: 소수 1자리까지 쓰는 값

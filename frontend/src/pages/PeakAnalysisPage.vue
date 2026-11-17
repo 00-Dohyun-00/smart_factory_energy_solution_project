@@ -393,7 +393,7 @@ const heatOption = computed(() => {
           </dd>
           <p class="num">
             {{ shortTime(summary.maxPeakAt) }},
-            {{ summary.maxPeakKw > peak.targetPeakKw ? '목표 초과' : '목표 이내' }}
+            {{ summary.maxPeakKw > peak.targetPeakKw ? '목표 초과' : '목표 달성' }}
           </p>
         </div>
         <div class="card">
@@ -456,7 +456,7 @@ const heatOption = computed(() => {
             <thead>
               <tr>
                 <th class="rank-col">순위</th>
-                <th>15분 구간</th>
+                <th>대상 시간</th>
                 <th class="right-text">피크</th>
                 <th>그때의 추천 처리</th>
               </tr>

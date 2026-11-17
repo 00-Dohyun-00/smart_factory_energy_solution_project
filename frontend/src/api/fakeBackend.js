@@ -560,7 +560,7 @@ function updateDecision(now, info) {
   const untilText = endText.slice(11, 16)
   const powerKw = Math.abs(wantKw)
   const reasons = {
-    PEAK: `이번 15분 구간 예상 평균이 방어선(${lineKw.toLocaleString('ko-KR')} kW)을 넘을 것으로 보여, 남은 ${Math.ceil(remainingMinutes)}분 동안 ${powerKw.toLocaleString('ko-KR')} kW만 방전하면 안으로 들어옵니다.`,
+    PEAK: `이번 15분 구간 예상 피크가 방어선(${lineKw.toLocaleString('ko-KR')} kW)을 넘을 것으로 보여, 남은 ${Math.ceil(remainingMinutes)}분 동안 ${powerKw.toLocaleString('ko-KR')} kW만 방전하면 안으로 들어옵니다.`,
     SAFETY: `방어선을 넘을 것으로 보이지만, 배터리 잔량이 하한(${SOC_LOW_LIMIT}%)에 닿아 방전할 수 없습니다.`,
     PLAN_DISCHARGE: `하루 계획에 따라 ${untilText}까지 방전합니다. 지금은 ${tariff.label}(${price}원/kWh)이라 배터리 전기를 쓰는 편이 싸고, 뒤에 올 피크에 쓸 잔량은 계획에 남겨 두었습니다.`,
     PLAN_CHARGE: `하루 계획에 따라 ${untilText}까지 충전합니다. 지금(${tariff.label}, ${price}원/kWh) 채워 두었다가 뒤에 올 피크와 비싼 시간대에 씁니다.`,
@@ -586,7 +586,7 @@ function updateDecision(now, info) {
       action === 'IDLE' ? null : Math.ceil((new Date(endText) - now.getTime()) / 60000),
     reason: reasons[kind],
     usedValues: [
-      { label: '예상 평균', value: Math.round(predictedOf(0)), unit: 'kW' },
+      { label: '예상 피크', value: Math.round(predictedOf(0)), unit: 'kW' },
       { label: '방어선', value: lineKw, unit: 'kW' },
       { label: '계획 출력', value: Math.round(planKw) || 0, unit: 'kW' }, // || 0: -0이 '-0.0'으로 보이지 않게
       { label: '추가 방전', value: Math.round(needKw), unit: 'kW' },
@@ -632,7 +632,7 @@ function updateDecision(now, info) {
 const sessionDecisions = []
 
 const PEAK_REASON =
-  '브레이징로 승온과 사출기 가동이 겹쳐, 이번 15분 구간의 예상 평균이 목표 피크를 넘을 것으로 보입니다.'
+  '브레이징로 승온과 사출기 가동이 겹쳐, 이번 15분 구간의 예상 피크가 목표 피크를 넘을 것으로 보입니다.'
 
 // 하루치 이력의 뼈대. 날짜마다 일부를 빼고 값을 조금씩 바꿔서 씁니다.
 const HISTORY_TEMPLATES = [
@@ -774,7 +774,7 @@ function buildHistoryOfDay(date, now) {
       predictedKw,
       targetPeakKw: TARGET_PEAK_KW,
       usedValues: [
-        { label: '예상 평균', value: predictedKw, unit: 'kW' },
+        { label: '예상 피크', value: predictedKw, unit: 'kW' },
         { label: '목표 피크', value: TARGET_PEAK_KW, unit: 'kW' },
         { label: '공장 소비', value: loadKw, unit: 'kW' },
         { label: '태양광 발전', value: Math.round(solarKwAt(decided)), unit: 'kW' },
@@ -1745,7 +1745,7 @@ const SETTING_LABELS = {
   pollSeconds: '화면 갱신 주기',
   decisionValidMinutes: '추천 유효 시간',
 }
-const MODE_LABELS = { MANUAL: '운영자 승인', AUTO: '자동 모드 (시뮬레이션)' }
+const MODE_LABELS = { MANUAL: '운영자 승인 모드', AUTO: '자동 모드 (시뮬레이션)' }
 
 const settingSavedAt = {} // 항목별 마지막 저장 시각
 const settingHistory = [] // 변경 기록 (최신 순)

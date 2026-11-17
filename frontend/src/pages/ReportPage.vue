@@ -89,7 +89,7 @@ function downloadCsv() {
     csvLine(['목표 피크', data.targetPeakKw, 'kW']),
     csvLine(['피크 방어 성공률', summary.defenseSuccessPercent, '%']),
     csvLine(['방전 추천 횟수', summary.defenseTotal, '회']),
-    csvLine(['목표 이내 횟수', summary.defenseSuccess, '회']),
+    csvLine(['목표 달성 횟수', summary.defenseSuccess, '회']),
     csvLine(['최대 피크', summary.monthPeakKw, 'kW']),
     csvLine(['최대 피크 시각', summary.monthPeakAt, '']),
     csvLine(['평균 피크 저감량', summary.avgReductionKw, 'kW']),
@@ -113,7 +113,7 @@ function downloadCsv() {
     csvLine([
       '목표를 넘은 구간 시작',
       '끝',
-      '결과 피크 (kW)',
+      '실제 피크 (kW)',
       '초과 (kW)',
       '추천 방전 (kW)',
       '처리',
@@ -185,7 +185,7 @@ const kpis = computed(() => {
       label: '피크 방어 성공률',
       value: formatOneDecimal(summary.defenseSuccessPercent),
       unit: '%',
-      sub: `방전 추천 ${summary.defenseTotal}회 중 ${summary.defenseSuccess}회 목표 이내`,
+      sub: `방전 추천 ${summary.defenseTotal}회 중 ${summary.defenseSuccess}회 목표 달성`,
     },
     {
       label: '최대 피크',
@@ -468,8 +468,8 @@ const essOption = computed(() => ({
           <table class="table">
             <thead>
               <tr>
-                <th>15분 구간</th>
-                <th class="right">결과 피크</th>
+                <th>대상 시간</th>
+                <th class="right">실제 피크</th>
                 <th class="right">초과</th>
                 <th>추천</th>
                 <th>처리</th>
