@@ -19,11 +19,13 @@ const props = defineProps({
   stale: { type: Boolean, default: false },
   // 오른쪽 상세에서 고른 설비 id (안 골랐으면 빈 글자). 고른 설비 상자가 가장 진한 색이 됨
   selectedEquipment: { type: String, default: '' },
+  // 설비별 전력 임계치 (설비 id → kW). 이 값을 넘은 설비 상자를 빨갛게 그림
+  thresholds: { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits(['update:modelValue'])
 
-// 구역 이름. id는 설비 id의 앞부분과 같아야 함 (예: 'Z2-FURN' → 'Z2')
+// 구역 이름. id는 설비의 zoneId와 같아야 함 (예: 브레이징로 BRZ-01 → zoneId 'Z2')
 const ZONE_NAMES = [
   { id: 'Z1', name: '열교환기 가공' },
   { id: 'Z2', name: '브레이징' },
@@ -109,9 +111,7 @@ const sources = computed(() => {
 // 구역 6곳: 그 구역 설비들의 전력을 더하고, 공장 전체에서 차지하는 비율을 구함 (표시용 합계·비율)
 const zones = computed(() =>
   ZONE_NAMES.map((zone, index) => {
-    const equipments = (props.status?.equipments ?? []).filter((item) =>
-      item.id.startsWith(`${zone.id}-`),
-    )
+    const equipments = (props.status?.equipments ?? []).filter((item) => item.zoneId === zone.id)
     const totalKw = equipments.length
       ? equipments.reduce((sum, item) => sum + item.loadKw, 0)
       : null
@@ -120,7 +120,19 @@ const zones = computed(() =>
       totalKw === null || !props.status.loadKw ? null : (totalKw / props.status.loadKw) * 100
     // colorVar: 이 구역 색 (CSS 변수 이름, 예: --zone-z1)
     const colorVar = `--zone-${zone.id.toLowerCase()}`
-    return { ...zone, centerX: 104 + index * 196, equipments, totalKw, percent, colorVar }
+    // 임계치를 넘은 설비 수 (구역 상자에도 빨간 테두리로 알려 줌)
+    const overCount = equipments.filter(
+      (item) => props.thresholds[item.id] != null && item.loadKw > props.thresholds[item.id],
+    ).length
+    return {
+      ...zone,
+      centerX: 104 + index * 196,
+      equipments,
+      totalKw,
+      percent,
+      colorVar,
+      overCount,
+    }
   }),
 )
 
@@ -139,6 +151,8 @@ const children = computed(() => {
     centerX: start + EQUIPMENT_WIDTH / 2 + index * (EQUIPMENT_WIDTH + EQUIPMENT_GAP),
     percent: zone.totalKw ? (item.loadKw / zone.totalKw) * 100 : 0,
     opacity: opacities[item.id],
+    threshold: props.thresholds[item.id] ?? null,
+    over: props.thresholds[item.id] != null && item.loadKw > props.thresholds[item.id],
     stateInfo: STATE_INFO[item.state] ?? { shape: '', label: '—', className: '' },
   }))
 })
@@ -228,8 +242,8 @@ function unitX(left, text, charWidth) {
       v-for="zone in zones"
       :key="zone.id"
       class="zone"
+      :class="{ selected: zone.id === modelValue, over: zone.overCount > 0 }"
       :style="{ '--zone': `var(${zone.colorVar})` }"
-      :class="{ selected: zone.id === modelValue }"
       role="button"
       tabindex="0"
       :aria-pressed="zone.id === modelValue"
@@ -312,6 +326,7 @@ function unitX(left, text, charWidth) {
         v-for="item in children"
         :key="item.id"
         class="equipment"
+        :class="{ over: item.over }"
         :style="{ '--equipment-opacity': item.opacity }"
       >
         <line
@@ -374,6 +389,16 @@ function unitX(left, text, charWidth) {
         />
         <text class="sub" :x="item.centerX - EQUIPMENT_WIDTH / 2 + 12" :y="EQUIPMENT_Y + 108">
           구역의 {{ formatOneDecimal(item.percent) }}%
+        </text>
+        <!-- 임계치 (빨간 글자): 환경 설정 > 설비 임계치 값 -->
+        <text
+          v-if="item.threshold !== null"
+          class="sub threshold"
+          :x="item.centerX + EQUIPMENT_WIDTH / 2 - 12"
+          :y="EQUIPMENT_Y + 108"
+          text-anchor="end"
+        >
+          {{ item.over ? '▲ 초과 · ' : '' }}임계 {{ formatKw(item.threshold) }}
         </text>
       </g>
     </g>
@@ -459,6 +484,28 @@ function unitX(left, text, charWidth) {
 .zone .node-top,
 .zone .share-bar {
   fill: var(--zone);
+}
+/* 임계치: 빨간 글자. 넘으면 설비 상자를 빨갛게 (구역 상자는 빨간 테두리) */
+.sub.threshold {
+  fill: var(--crit);
+  font-weight: 700;
+}
+.equipment.over .node {
+  fill: color-mix(in srgb, var(--crit) calc(10% * var(--tint-k)), var(--card));
+  stroke: var(--crit);
+  stroke-width: 3;
+}
+.equipment.over .node-top,
+.equipment.over .share-bar {
+  fill: var(--crit);
+  fill-opacity: 1;
+}
+.equipment.over .value {
+  fill: var(--crit);
+}
+.zone.over .node {
+  stroke: var(--crit);
+  stroke-width: 2.5;
 }
 /* 설비 상자: 고른 구역 색, 설비마다 진하기만 다름 */
 .equipment .node {

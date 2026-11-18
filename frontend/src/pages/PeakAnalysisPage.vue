@@ -7,7 +7,7 @@
 -->
 <script setup>
 import { computed, ref, watch } from 'vue'
-import Chart from '@/components/Chart.vue'
+import FitChart from '@/components/FitChart.vue'
 import { useThemeStore } from '@/stores/useThemeStore'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
@@ -226,8 +226,8 @@ const dailyOption = computed(() => {
 
 // ---- 피크가 몰리는 시간대 (날짜 × 시각 히트맵) ----
 // 날짜가 많아도 칸이 너무 납작해지지 않게 날짜 수에 맞춰 높이를 잡음
-// 날짜 한 줄 높이와 최소 높이 (80% 크기에 맞춘 값)
-const heatHeight = computed(() => Math.max(192, peak.value.dailyPeaks.length * 10.4 + 48))
+// 표 높이를 넘는 피크 구간은 표 내부에서 스크롤해 모두 확인함
+const shownWindows = computed(() => analysisStore.peakWindows)
 
 const heatOption = computed(() => {
   const target = targetKw.value
@@ -470,15 +470,15 @@ const heatOption = computed(() => {
         </div>
       </dl>
 
-      <!-- 일별 최대 피크와 저감량 -->
-      <section class="card">
+      <!-- 일별 최대 피크와 저감량 (남은 높이의 2/5) -->
+      <section class="card daily">
         <div class="card-head">
           <h2 class="card-title">일별 최대 피크와 저감량</h2>
           <span class="note">
             단위 kW · 빨강은 목표 초과 · 세로축은 {{ formatKw(peakAxisMin) }}부터
           </span>
         </div>
-        <Chart :option="dailyOption" :height="184" />
+        <FitChart :option="dailyOption" :min-height="90" />
       </section>
 
       <div class="bottom">
@@ -488,14 +488,9 @@ const heatOption = computed(() => {
             <h2 class="card-title">피크가 몰리는 시간대</h2>
             <span class="note"> 진할수록 높음 · 굵은 테두리 = 표에서 누른 구간 </span>
           </div>
-          <!-- key: 날짜 수가 바뀌면 그래프 높이도 바뀌므로 새로 만듦 -->
+          <!-- 남은 높이를 채움 (날짜가 많으면 한 줄 높이가 줄어듦) -->
           <!-- 목표 값이 없으면 색 단계(목표 대비 비율)를 나눌 수 없어서 그리지 않음 -->
-          <Chart
-            v-if="targetKw !== null"
-            :key="heatHeight"
-            :option="heatOption"
-            :height="heatHeight"
-          />
+          <FitChart v-if="targetKw !== null" :option="heatOption" :min-height="70" />
           <p v-else class="windows-empty">목표 피크 값이 없어 색 단계를 나눌 수 없습니다.</p>
         </section>
 
@@ -505,52 +500,57 @@ const heatOption = computed(() => {
             <h2 class="card-title">피크가 높았던 구간</h2>
             <span class="note">누르면 히트맵에 표시</span>
           </div>
-          <table class="table">
-            <thead>
-              <tr>
-                <th class="rank-col">순위</th>
-                <th>대상 시간</th>
-                <th class="right-text">피크</th>
-                <th>그때의 추천 처리</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="(item, index) in analysisStore.peakWindows"
-                :key="item.windowStart"
-                class="window-row"
-                :class="{ active: selectedStart === item.windowStart }"
-                @click="toggleWindow(item.windowStart)"
-              >
-                <td class="rank-col num">{{ index + 1 }}</td>
-                <td class="num">
-                  <!-- 키보드로도 고를 수 있게 버튼으로 둠 (줄 어디를 눌러도 같은 동작) -->
-                  <button
-                    class="window-button"
-                    :aria-pressed="selectedStart === item.windowStart"
-                    @click.stop="toggleWindow(item.windowStart)"
-                  >
-                    {{ shortTime(item.windowStart) }}~{{ formatHourMinute(item.windowEnd) }}
-                  </button>
-                </td>
-                <td class="right-text num">
-                  <strong :class="{ over: isOverTarget(item.peakKw) }">
-                    {{ formatKw(item.peakKw) }} kW
-                  </strong>
-                </td>
-                <td>
-                  <span v-if="item.status" aria-hidden="true">{{
-                    STATUS_SHAPES[item.status]
-                  }}</span>
-                  {{ windowNote(item) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <!-- 표 높이를 넘는 줄은 표 안에서 스크롤해 확인함 -->
+          <div class="table-box">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th class="rank-col">순위</th>
+                  <th>대상 시간</th>
+                  <th class="right-text">피크</th>
+                  <th>그때의 추천 처리</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="(item, index) in shownWindows"
+                  :key="item.windowStart"
+                  class="window-row"
+                  :class="{ active: selectedStart === item.windowStart }"
+                  @click="toggleWindow(item.windowStart)"
+                >
+                  <td class="rank-col num">{{ index + 1 }}</td>
+                  <td class="num">
+                    <!-- 키보드로도 고를 수 있게 버튼으로 둠 (줄 어디를 눌러도 같은 동작) -->
+                    <button
+                      class="window-button"
+                      :aria-pressed="selectedStart === item.windowStart"
+                      @click.stop="toggleWindow(item.windowStart)"
+                    >
+                      {{ shortTime(item.windowStart) }}~{{ formatHourMinute(item.windowEnd) }}
+                    </button>
+                  </td>
+                  <td class="right-text num">
+                    <strong :class="{ over: isOverTarget(item.peakKw) }">
+                      {{ formatKw(item.peakKw) }} kW
+                    </strong>
+                  </td>
+                  <td>
+                    <span v-if="item.status" aria-hidden="true">{{
+                      STATUS_SHAPES[item.status]
+                    }}</span>
+                    {{ windowNote(item) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <p v-if="!analysisStore.peakWindows.length" class="windows-empty">
             이 기간에는 구간 기록이 없습니다.
           </p>
-          <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>
+          <div class="top-foot">
+            <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>
+          </div>
         </section>
       </div>
     </div>
@@ -562,8 +562,9 @@ const heatOption = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: 100%;
+  height: 100%; /* 화면 높이에 고정: 아래 카드들이 남은 높이에 맞춰 줄어들어 스크롤이 생기지 않음 */
   padding: 20px;
+  overflow: hidden;
 }
 .crumb-note {
   margin-left: auto;
@@ -626,6 +627,7 @@ const heatOption = computed(() => {
   display: flex;
   flex: 1;
   flex-direction: column;
+  min-height: 0;
   gap: 13px;
   font-size: 11px; /* 기본 14px의 80% */
 }
@@ -691,30 +693,63 @@ const heatOption = computed(() => {
 }
 
 /* 아래 줄: 히트맵 + 구간 순위 */
+/* 요약 숫자 아래 남은 높이를 비율로 나눔: 일별 그래프 2 : 아래 줄(히트맵 · 구간 표) 3
+   (화면 높이가 달라도 같은 비율로 채워 스크롤이 생기지 않음, 노트북 1536×705 기준으로 맞춤) */
+.daily {
+  display: flex;
+  flex: 2;
+  flex-direction: column;
+  min-height: 0;
+}
 .bottom {
   display: flex;
-  flex: 1;
+  flex: 3;
   gap: 13px;
+  min-height: 0;
 }
 .heat {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 .top {
   display: flex;
   flex: none;
   flex-direction: column;
   width: 520px;
+  min-height: 0;
+}
+/* 표 상자: 남는 높이를 차지하고, 모든 구간을 내부에서 스크롤함 */
+.table-box {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.top-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hidden-note {
+  font-size: 10px;
+  color: var(--mute);
 }
 .table {
   width: 100%;
   border-collapse: collapse;
 }
 .table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
   padding: 5px 12px 5px 0;
 }
 .table td {
-  padding: 7px 12px 7px 0;
+  padding: 5px 12px 5px 0;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
@@ -760,8 +795,7 @@ const heatOption = computed(() => {
 }
 /* 카드 맨 아래 오른쪽의 링크 */
 .more {
-  align-self: flex-end;
-  margin-top: auto;
+  margin-left: auto;
   padding-top: 8px;
 }
 

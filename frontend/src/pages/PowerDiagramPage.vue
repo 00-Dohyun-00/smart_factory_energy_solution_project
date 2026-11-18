@@ -10,9 +10,11 @@ import FitChart from '@/components/FitChart.vue'
 import PowerTree from '@/components/PowerTree.vue'
 import { useThemeStore } from '@/stores/useThemeStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
+import { useSettingsStore } from '@/stores/useSettingsStore'
 import { formatHourMinute, formatInteger, formatKw, formatOneDecimal } from '@/utils/format'
 
 const realtimeStore = useRealtimeStore()
+const settingsStore = useSettingsStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -69,9 +71,20 @@ const detail = computed(() =>
   realtimeStore.zoneDetail?.zoneId === selectedZone.value ? realtimeStore.zoneDetail : null,
 )
 
+// 설비별 전력 임계치 (설비 id → kW)
+// 환경 설정에서 프론트가 받은 값만 사용함. 설정값이 없으면 임계치를 표시하지 않음.
+const thresholds = computed(() => {
+  const result = {}
+  for (const item of status.value?.equipments ?? []) {
+    const saved = settingsStore.values[`equipment.${item.id}.max_kw`]
+    result[item.id] = typeof saved === 'number' ? saved : null
+  }
+  return result
+})
+
 // 고른 구역의 설비와 합계, 비율 (표시용 합계·비율)
 const zoneEquipments = computed(() =>
-  (status.value?.equipments ?? []).filter((item) => item.id.startsWith(`${selectedZone.value}-`)),
+  (status.value?.equipments ?? []).filter((item) => item.zoneId === selectedZone.value),
 )
 const zoneKw = computed(() =>
   zoneEquipments.value.length
@@ -106,6 +119,8 @@ const equipmentRows = computed(() => {
   return zoneEquipments.value.map((item) => ({
     ...item,
     opacity: opacities[item.id],
+    threshold: thresholds.value[item.id],
+    over: thresholds.value[item.id] != null && item.loadKw > thresholds.value[item.id],
     percent: zoneKw.value ? (item.loadKw / zoneKw.value) * 100 : 0,
     stateInfo: STATE_INFO[item.state] ?? { shape: '', label: '—', className: '' },
   }))
@@ -233,7 +248,7 @@ const zoneShareOption = computed(() => {
     return {
       name: ZONE_LABELS[zoneId],
       value: equipments
-        .filter((item) => item.id.startsWith(`${zoneId}-`))
+        .filter((item) => item.zoneId === zoneId)
         .reduce((sum, item) => sum + item.loadKw, 0), // 표시용 합계
       selected: isSelected,
       // 구역마다 자기 색. 고른 구역은 진하게 + 테두리, 나머지는 옅게
@@ -303,6 +318,7 @@ const equipmentShareOption = computed(() => {
             :status="status"
             :stale="!realtimeStore.connected"
             :selected-equipment="selectedEquipment"
+            :thresholds="thresholds"
           />
         </div>
       </section>
@@ -360,7 +376,7 @@ const equipmentShareOption = computed(() => {
             <li v-for="item in equipmentRows" :key="item.id">
               <button
                 class="equipment-button"
-                :class="{ selected: item.id === selectedEquipment }"
+                :class="{ selected: item.id === selectedEquipment, over: item.over }"
                 :aria-pressed="item.id === selectedEquipment"
                 @click="toggleEquipment(item.id)"
               >
@@ -388,6 +404,10 @@ const equipmentShareOption = computed(() => {
                     :aria-label="`구역의 ${formatOneDecimal(item.percent)}%`"
                     >{{ formatOneDecimal(item.percent) }}%</span
                   >
+                  <!-- 임계치 (빨간 글자). 넘으면 버튼 전체가 빨갛게 -->
+                  <span v-if="item.threshold !== null" class="threshold num">
+                    {{ item.over ? '▲ ' : '' }}임계 {{ formatKw(item.threshold) }}
+                  </span>
                 </div>
               </button>
             </li>
@@ -646,6 +666,22 @@ const equipmentShareOption = computed(() => {
 .equipment-button.selected {
   background: color-mix(in srgb, var(--zone) calc(20% * var(--tint-k)), var(--card));
   border-color: var(--ink);
+}
+.threshold {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--crit);
+  white-space: nowrap;
+}
+/* 임계치를 넘은 설비: 빨간 바탕 · 테두리 */
+.equipment-button.over,
+.equipment-button.over:hover {
+  background: color-mix(in srgb, var(--crit) calc(10% * var(--tint-k)), var(--card));
+  border-color: var(--crit);
+}
+.equipment-button.over .equipment-kw {
+  color: var(--crit);
 }
 .equipment-share {
   flex: none;

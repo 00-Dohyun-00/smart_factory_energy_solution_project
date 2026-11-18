@@ -64,7 +64,31 @@ const GROUPS = [
     ],
   },
 ]
-const ALL_FIELDS = GROUPS.flatMap((group) => group.fields.map((field) => ({ ...field, group })))
+// ---- 설비 임계치 ----
+// 실시간 상태에 포함된 설비마다 환경설정 값을 한 칸씩 보여 줌.
+// 임계치는 settingsStore가 받은 설정값만 사용하고, 정격 전력은 기본값으로 사용하지 않음.
+const equipmentGroup = computed(() => {
+  const fields = (realtimeStore.status?.equipments ?? [])
+    .map((item) => ({
+      key: `equipment.${item.id}.max_kw`,
+      label: item.name,
+      unit: 'kW',
+      min: 1,
+      max: 100000,
+    }))
+  return {
+    key: 'equipment',
+    title: '설비 임계치',
+    note: '설비 전력이 이 값을 넘으면 설비 모니터링에서 빨갛게 표시',
+    wide: true, // 칸이 많아서 한 줄을 다 쓰고 3열로 놓음
+    fields,
+  }
+})
+// 화면에 놓는 묶음 전체 (피크 · ESS · 운영 + 설비 임계치)
+const allGroups = computed(() => [...GROUPS, equipmentGroup.value])
+const ALL_FIELDS = computed(() =>
+  allGroups.value.flatMap((group) => group.fields.map((field) => ({ ...field, group }))),
+)
 // 고칠 수 있는 항목만 (보기만 항목은 저장·되돌리기·검사 대상이 아님)
 const editableFields = (group) => group.fields.filter((field) => !field.readOnly)
 
@@ -96,7 +120,9 @@ function loadHistory() {
   settingsStore.fetchHistory(daysBefore(serverDate.value, HISTORY_DAYS - 1), serverDate.value)
 }
 
-onMounted(() => settingsStore.fetchSettings())
+onMounted(() => {
+  settingsStore.fetchSettings()
+})
 
 // 서버 날짜를 알게 되면 변경 기록을 받음 (처음 한 번)
 watch(
@@ -111,11 +137,10 @@ watch(
 watch(
   () => settingsStore.items.length,
   (count) => {
-    if (count && !Object.keys(draft.value).length) GROUPS.forEach(resetGroup)
+    if (count && !Object.keys(draft.value).length) allGroups.value.forEach(resetGroup)
   },
   { immediate: true },
 )
-
 const isChanged = (field) => !field.readOnly && draft.value[field.key] !== saved.value[field.key]
 const changedFields = (group) => group.fields.filter(isChanged)
 
@@ -123,7 +148,7 @@ const changedFields = (group) => group.fields.filter(isChanged)
 // 바꾼 값은 이 화면 안에만 있어서, 묻지 않으면 다른 메뉴를 누르는 순간 말없이 사라짐
 const unsavedCount = computed(() => {
   if (!Object.keys(draft.value).length) return 0 // 아직 값을 받기 전
-  return GROUPS.reduce((sum, group) => sum + changedFields(group).length, 0)
+  return allGroups.value.reduce((sum, group) => sum + changedFields(group).length, 0)
 })
 
 // 앱 안에서 다른 화면으로 갈 때 (왼쪽 메뉴, 링크)
@@ -239,7 +264,7 @@ function historyValueText(field, value) {
 // 변경 기록의 한 줄을 화면용으로. 항목 이름은 서버가 준 label을 씀
 const historyRows = computed(() =>
   settingsStore.history.map((item) => {
-    const field = ALL_FIELDS.find((one) => one.key === item.key)
+    const field = ALL_FIELDS.value.find((one) => one.key === item.key)
     return {
       id: item.id,
       changedAt: dateTimeText(item.changedAt),
@@ -279,7 +304,13 @@ const historyRows = computed(() =>
 
     <template v-else>
       <div class="groups">
-        <section v-for="group in GROUPS" :key="group.key" class="card group">
+        <section
+          v-for="group in allGroups"
+          v-show="group.fields.length"
+          :key="group.key"
+          class="card group"
+          :class="{ wide: group.wide }"
+        >
           <div class="card-head">
             <h2 class="card-title">{{ group.title }}</h2>
             <span class="note">{{ group.note }}</span>
@@ -484,6 +515,26 @@ const historyRows = computed(() =>
 .group {
   display: flex;
   flex-direction: column;
+}
+/* 설비 임계치: 한 줄을 다 쓰고, 칸은 3열로 */
+.group.wide {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 24px;
+}
+.group.wide > .card-head,
+.group.wide > .group-foot,
+.group.wide > .group-notice {
+  grid-column: 1 / -1;
+}
+.group-notice {
+  margin: 8px 0 4px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border-left: 4px solid var(--warn);
+  font-size: 13px;
+  color: var(--ink-2);
 }
 .group .card-head {
   margin-bottom: 4px;

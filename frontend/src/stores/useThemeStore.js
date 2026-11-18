@@ -27,6 +27,7 @@ const COLOR_VARS = {
   ess: '--src-ess',
   band: '--band',
   labelBg: '--label-bg',
+  legendText: '--legend-text',
   heat1: '--heat-1',
   heat2: '--heat-2',
   heat3: '--heat-3',

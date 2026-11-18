@@ -216,8 +216,10 @@ const kpis = computed(() => {
       name: '배터리 잔량 (SOC)',
       value: formatOneDecimal(s?.socPercent),
       unit: '%',
-      sub: s ? `배터리실 ${formatOneDecimal(s.batteryTempC)}℃` : '',
-      thermometer: true, // 아랫줄 앞에 온도계 아이콘
+      sub: s ? `${formatOneDecimal(s.batteryTempC)}℃` : '',
+      // 아랫줄: "배터리실" → 온도계 아이콘 → 온도 순서로 보여 줌
+      subLabel: '배터리실',
+      thermometer: true,
       min: '0',
       max: '100',
       // 바깥 가는 테: 하한 아래 경고 · 하한~상한 정상 · 상한 위 주의 (설정값)
@@ -295,6 +297,7 @@ const kpis = computed(() => {
           </span>
         </p>
         <p v-else class="kpi-sub num" :class="{ over: kpi.over }">
+          <template v-if="kpi.subLabel && kpi.sub">{{ kpi.subLabel }}</template>
           <!-- 온도계 아이콘 (SVG 직접 그림) -->
           <svg
             v-if="kpi.thermometer && kpi.sub"
@@ -557,7 +560,7 @@ const kpis = computed(() => {
 .thermo {
   width: 10px;
   height: 15px;
-  margin-right: 2px;
+  margin: 0 2px 0 4px;
   vertical-align: -3px;
   fill: none;
   stroke: currentColor;
