@@ -122,12 +122,11 @@ public class SettingService {
         if (range == null) {
             throw new IllegalArgumentException(setting.getLabel() + "은(는) 화면에서 바꿀 수 없는 값입니다.");
         }
-        double number;
-        try {
-            number = Double.parseDouble(value);
-        } catch (NumberFormatException e) {
+        // 12, 97.5, -3 같은 보통 숫자 모양만 허용 (NaN, Infinity, 5f, 1e3 같은 값은 막음)
+        if (!value.matches("-?\\d+(\\.\\d+)?")) {
             throw new IllegalArgumentException(setting.getLabel() + " 값은 숫자여야 합니다.");
         }
+        double number = Double.parseDouble(value);
         if (number < range[0] || number > range[1]) {
             throw new IllegalArgumentException(
                     setting.getLabel() + " 값은 " + format(range[0]) + " ~ " + format(range[1]) + " 사이여야 합니다.");
