@@ -8,6 +8,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import Chart from '@/components/Chart.vue'
+import { useThemeStore } from '@/stores/useThemeStore'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import {
@@ -133,17 +134,24 @@ const exceededPercent = computed(() =>
 )
 
 // ---- 그래프 공통 ----
-// ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
-const COLOR = {
-  ink: '#14181c', // --ink
-  mute: '#646e77', // --mute
-  line: '#dde1e5', // --line
-  lineStrong: '#b9c0c7', // --line-strong
-  crit: '#c8372d', // --crit
-  grid: '#5b6472', // --src-grid
-}
+// 그래프(ECharts)는 CSS 변수를 못 읽으므로, 테마 스토어가 global.css에서 읽어 둔 지금 테마 색을 씀
+// (라이트·다크를 바꾸면 이 색이 바뀌고 그래프도 다시 그려짐)
+const themeStore = useThemeStore()
+const COLOR = themeStore.colors
+// 그래프 툴팁도 지금 테마 색으로
+const tooltipColors = () => ({
+  backgroundColor: COLOR.card,
+  borderColor: COLOR.line,
+  textStyle: { color: COLOR.ink },
+})
 // 히트맵 색 단계: 낮음(옅음) → 높음(진함). --src-grid 색을 흰색에 섞은 값
-const HEAT_COLORS = ['#ebecee', '#cdd0d4', '#adb1b8', '#848b96', '#5b6472']
+const HEAT_COLORS = computed(() => [
+  COLOR.heat1,
+  COLOR.heat2,
+  COLOR.heat3,
+  COLOR.heat4,
+  COLOR.heat5,
+])
 
 const axisStyle = {
   axisLabel: { color: COLOR.mute },
@@ -163,9 +171,11 @@ const dailyOption = computed(() => {
   const days = peak.value.dailyPeaks
   return {
     animation: false,
-    grid: { left: 52, right: 16, top: 34, bottom: 24 },
+    textStyle: { fontSize: 10 }, // 그래프 글자도 80% 크기로 (기본 12px)
+    grid: { left: 44, right: 16, top: 28, bottom: 20 },
     legend: { top: 0, right: 0, textStyle: { color: COLOR.mute } },
     tooltip: {
+      ...tooltipColors(),
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       valueFormatter: (value) => `${formatKw(value)} kW`,
@@ -216,7 +226,8 @@ const dailyOption = computed(() => {
 
 // ---- 피크가 몰리는 시간대 (날짜 × 시각 히트맵) ----
 // 날짜가 많아도 칸이 너무 납작해지지 않게 날짜 수에 맞춰 높이를 잡음
-const heatHeight = computed(() => Math.max(240, peak.value.dailyPeaks.length * 13 + 60))
+// 날짜 한 줄 높이와 최소 높이 (80% 크기에 맞춘 값)
+const heatHeight = computed(() => Math.max(192, peak.value.dailyPeaks.length * 10.4 + 48))
 
 const heatOption = computed(() => {
   const target = targetKw.value
@@ -276,7 +287,7 @@ const heatOption = computed(() => {
             verticalAlign: 'bottom',
             fill: COLOR.ink,
             font: 'bold 12px sans-serif',
-            backgroundColor: '#fff', // --card
+            backgroundColor: COLOR.card,
             borderColor: item.textAtTop ? COLOR.ink : 'transparent',
             borderWidth: 1,
             padding: [2, 5],
@@ -288,8 +299,10 @@ const heatOption = computed(() => {
 
   return {
     animation: false,
-    grid: { left: 52, right: 12, top: 30, bottom: 22 },
+    textStyle: { fontSize: 10 }, // 그래프 글자도 80% 크기로 (기본 12px)
+    grid: { left: 44, right: 12, top: 24, bottom: 18 },
     tooltip: {
+      ...tooltipColors(),
       formatter: (params) =>
         `${dayLabels[params.value[1]]} ${params.value[0]}시 · ${formatKw(params.value[2])} kW`,
     },
@@ -313,11 +326,11 @@ const heatOption = computed(() => {
       itemGap: 4,
       textStyle: { color: COLOR.mute },
       pieces: [
-        { lte: target * 0.72, color: HEAT_COLORS[0], label: '낮음' },
-        { gt: target * 0.72, lte: target * 0.8, color: HEAT_COLORS[1], label: ' ' },
-        { gt: target * 0.8, lte: target * 0.88, color: HEAT_COLORS[2], label: ' ' },
-        { gt: target * 0.88, lte: target * 0.95, color: HEAT_COLORS[3], label: ' ' },
-        { gt: target * 0.95, lte: target, color: HEAT_COLORS[4], label: '높음' },
+        { lte: target * 0.72, color: HEAT_COLORS.value[0], label: '낮음' },
+        { gt: target * 0.72, lte: target * 0.8, color: HEAT_COLORS.value[1], label: ' ' },
+        { gt: target * 0.8, lte: target * 0.88, color: HEAT_COLORS.value[2], label: ' ' },
+        { gt: target * 0.88, lte: target * 0.95, color: HEAT_COLORS.value[3], label: ' ' },
+        { gt: target * 0.95, lte: target, color: HEAT_COLORS.value[4], label: '높음' },
         { gt: target, color: COLOR.crit, label: '목표 초과' },
       ],
     },
@@ -325,7 +338,7 @@ const heatOption = computed(() => {
       {
         type: 'heatmap',
         data: peak.value.heatmap.map((item) => [item.hour, dates.indexOf(item.date), item.peakKw]),
-        itemStyle: { borderColor: '#fff', borderWidth: 1 },
+        itemStyle: { borderColor: COLOR.card, borderWidth: 1 },
         emphasis: { itemStyle: { borderColor: COLOR.ink, borderWidth: 1 } },
       },
       {
@@ -417,7 +430,8 @@ const heatOption = computed(() => {
     <p v-else-if="!peak" class="state">불러오는 중입니다.</p>
     <p v-else-if="!peak.hasData" class="state">이 기간에는 기록이 없습니다. 기간을 바꿔 보세요.</p>
 
-    <template v-else>
+    <!-- 기간 · 제목 줄을 뺀 나머지는 높이와 글자를 80% 크기로 (2026-11-18) -->
+    <div v-else class="compact">
       <!-- 요약 숫자 4개 -->
       <dl class="summary">
         <div class="card">
@@ -443,9 +457,10 @@ const heatOption = computed(() => {
           <dd>
             <span class="num">{{ formatKw(summary.avgReductionKw) }}</span> <small>kW</small>
           </dd>
+          <!-- 쉼표 뒤에서 줄을 바꿈 -->
           <p class="num">
-            방전하지 않았을 때의 예상 대비, 가장 크게 줄인 날
-            {{ formatKw(summary.maxReductionKw) }} kW
+            <span class="line">방전하지 않았을 때의 예상 대비,</span>
+            <span class="line">가장 크게 줄인 날 {{ formatKw(summary.maxReductionKw) }} kW</span>
           </p>
         </div>
         <div class="card">
@@ -463,7 +478,7 @@ const heatOption = computed(() => {
             단위 kW · 빨강은 목표 초과 · 세로축은 {{ formatKw(peakAxisMin) }}부터
           </span>
         </div>
-        <Chart :option="dailyOption" :height="230" />
+        <Chart :option="dailyOption" :height="184" />
       </section>
 
       <div class="bottom">
@@ -538,7 +553,7 @@ const heatOption = computed(() => {
           <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>
         </section>
       </div>
-    </template>
+    </div>
   </div>
 </template>
 
@@ -606,48 +621,72 @@ const heatOption = computed(() => {
   color: var(--crit);
 }
 
+/* 기간 · 제목 줄 아래 내용: 높이(간격·여백)와 글자를 80%로 */
+.compact {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 13px;
+  font-size: 11px; /* 기본 14px의 80% */
+}
+.compact .card {
+  padding: 11px 16px;
+}
+.compact .card-title {
+  font-size: 13px; /* 16px의 80% */
+}
+.compact .table th {
+  font-size: 10px;
+}
+.compact .more-link {
+  font-size: 10.5px;
+}
+
 /* 요약 숫자 4개 */
 .summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  gap: 13px;
 }
 .summary dt {
-  font-size: 13px;
+  font-size: 10.5px;
   color: var(--ink-2);
 }
 .summary dd {
-  font-size: 28px;
+  font-size: 22.5px;
   font-weight: 700;
   line-height: 1.3;
   white-space: nowrap;
 }
 .summary small {
   margin-left: 2px;
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 400;
   color: var(--ink-2);
 }
 .summary .pct {
   margin-left: 6px;
-  font-size: 18px;
+  font-size: 14.5px;
   font-weight: 700;
   color: var(--ink-2);
 }
 .summary p {
-  font-size: 12px;
+  font-size: 10px;
   color: var(--mute);
+}
+.summary .line {
+  display: block;
 }
 
 .card-head {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 10.5px;
   color: var(--mute);
 }
 
@@ -655,7 +694,7 @@ const heatOption = computed(() => {
 .bottom {
   display: flex;
   flex: 1;
-  gap: 16px;
+  gap: 13px;
 }
 .heat {
   flex: 1;
@@ -672,10 +711,10 @@ const heatOption = computed(() => {
   border-collapse: collapse;
 }
 .table th {
-  padding: 6px 12px 6px 0;
+  padding: 5px 12px 5px 0;
 }
 .table td {
-  padding: 9px 12px 9px 0;
+  padding: 7px 12px 7px 0;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
@@ -723,7 +762,7 @@ const heatOption = computed(() => {
 .more {
   align-self: flex-end;
   margin-top: auto;
-  padding-top: 10px;
+  padding-top: 8px;
 }
 
 /* 화면이 좁으면 오른쪽 표를 줄여 히트맵 자리를 남김 */

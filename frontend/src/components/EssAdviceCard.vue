@@ -23,6 +23,12 @@ const ACTION_LABELS = { CHARGE: '충전', DISCHARGE: '방전', IDLE: '대기' }
 
 const actionLabel = computed(() => ACTION_LABELS[props.decision?.action] ?? '—')
 
+// 이유 문장을 마침표(.)·쉼표(,) 뒤에서 나눈 줄들
+// 뒤에 공백이 올 때만 나눔 → "1,800 kW"나 "0.5"처럼 숫자 안의 쉼표·점에서는 나누지 않음
+const reasonLines = computed(() =>
+  (props.decision?.reason ?? '').split(/(?<=[.,])\s+/).filter((line) => line),
+)
+
 // 대기 추천은 적용할 동작이 없으므로 버튼을 보여 주지 않음
 const needsAnswer = computed(
   () => props.decision?.status === 'RECOMMENDED' && props.decision?.action !== 'IDLE',
@@ -57,7 +63,19 @@ const visibleUsed = computed(() =>
   <section class="card advice">
     <div class="head">
       <h2 class="card-title">ESS 추천</h2>
-      <span class="mode">{{ auto ? '자동 모드 (시뮬레이션)' : '운영자 승인 모드' }}</span>
+      <!-- 모드 신호등: 지금 모드의 등만 켜짐 (승인 모드 = 주황 등, 자동 모드 = 초록 등). 글자도 함께 굵게 -->
+      <div
+        class="mode-signal"
+        role="status"
+        :aria-label="auto ? '지금 모드: 자동 모드 (시뮬레이션)' : '지금 모드: 운영자 승인 모드'"
+      >
+        <span class="lamp-item manual" :class="{ on: !auto }" aria-hidden="true">
+          <span class="lamp"></span>운영자 승인
+        </span>
+        <span class="lamp-item auto" :class="{ on: auto }" aria-hidden="true">
+          <span class="lamp"></span>자동<small v-if="auto"> (시뮬레이션)</small>
+        </span>
+      </div>
     </div>
 
     <p v-if="!decision" class="empty">아직 받은 추천이 없습니다.</p>
@@ -70,7 +88,10 @@ const visibleUsed = computed(() =>
           <span class="unit">kW</span>
         </template>
       </p>
-      <p class="why">{{ decision.reason }}</p>
+      <!-- 이유 문장은 마침표(.)와 쉼표(,) 뒤에서 줄을 바꿔 읽기 쉽게 함 -->
+      <p class="why">
+        <span v-for="(line, index) in reasonLines" :key="index" class="why-line">{{ line }}</span>
+      </p>
 
       <!-- 판단 근거 -->
       <div v-if="usedValues.length" class="used">
@@ -138,10 +159,51 @@ const visibleUsed = computed(() =>
   display: flex;
   align-items: baseline;
 }
-.mode {
+/* 모드 신호등 */
+.mode-signal {
+  display: flex;
+  gap: 2px;
   margin-left: auto;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+}
+.lamp-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 7px;
+  border-radius: 999px;
   font-size: 13px;
-  color: var(--mute);
+  color: var(--faint);
+  white-space: nowrap;
+}
+.lamp-item small {
+  font-size: 11px;
+  font-weight: 400;
+}
+/* 꺼진 등: 회색 */
+.lamp {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+/* 켜진 등: 색 + 빛 번짐, 글자는 굵고 진하게 */
+.lamp-item.on {
+  background: var(--card);
+  font-weight: 700;
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.lamp-item.manual.on .lamp {
+  background: var(--warn);
+  box-shadow: 0 0 6px 1px var(--warn);
+}
+.lamp-item.auto.on .lamp {
+  background: var(--ok);
+  box-shadow: 0 0 6px 1px var(--ok);
 }
 .empty {
   color: var(--mute);
@@ -171,6 +233,9 @@ const visibleUsed = computed(() =>
 .why {
   font-size: 13px;
   color: var(--ink-2);
+}
+.why-line {
+  display: block;
 }
 
 /* 판단 근거: 항목이 11개라 촘촘하게 잡아 옆의 15분 구간 카드보다 너무 길어지지 않게 함 */

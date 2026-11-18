@@ -17,6 +17,8 @@ const props = defineProps({
   modelValue: { type: String, default: '' },
   // 서버 연결이 끊겨 마지막으로 받은 값에 멈춰 있으면 true (kW 숫자를 회색으로)
   stale: { type: Boolean, default: false },
+  // 오른쪽 상세에서 고른 설비 id (안 골랐으면 빈 글자). 고른 설비 상자가 가장 진한 색이 됨
+  selectedEquipment: { type: String, default: '' },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -47,6 +49,24 @@ const ZONE_HEIGHT = 124
 const EQUIPMENT_Y = 520
 const EQUIPMENT_WIDTH = 210
 const EQUIPMENT_GAP = 40
+// 한 구역 안 설비들의 색 진하기 (구역 색에 곱하는 불투명도). 오른쪽 상세(PowerDiagramPage.vue)도 같은 값을 씀
+const EQUIPMENT_OPACITY = [1, 0.6, 0.35]
+
+// 설비별 색 진하기 정하기: 고른 설비가 있으면 그 설비가 가장 진한 색(1번째 진하기)을 갖고,
+// 나머지 설비는 원래 순서대로 그다음 진하기를 받음. 고른 설비가 없으면 목록 순서대로
+function opacityOrder(list, selectedId) {
+  const ordered = selectedId
+    ? [
+        ...list.filter((item) => item.id === selectedId),
+        ...list.filter((item) => item.id !== selectedId),
+      ]
+    : list
+  const result = {}
+  ordered.forEach((item, rank) => {
+    result[item.id] = EQUIPMENT_OPACITY[rank % EQUIPMENT_OPACITY.length]
+  })
+  return result
+}
 
 // 위쪽 공급원 3곳
 const sources = computed(() => {
@@ -80,6 +100,8 @@ const sources = computed(() => {
       sub: status
         ? `${PCS_LABELS[status.pcsStatus] ?? '—'}, 잔량 ${formatOneDecimal(status.socPercent)}%`
         : '—',
+      soc: status?.socPercent ?? 0, // 배터리 그림의 채움 정도 (0~100)
+      discharging: status?.pcsStatus === 'DISCHARGING',
     },
   ]
 })
@@ -96,7 +118,9 @@ const zones = computed(() =>
     // 값이 없으면 0이 아니라 null로 둠 (화면에 "—"로 보이게)
     const percent =
       totalKw === null || !props.status.loadKw ? null : (totalKw / props.status.loadKw) * 100
-    return { ...zone, centerX: 104 + index * 196, equipments, totalKw, percent }
+    // colorVar: 이 구역 색 (CSS 변수 이름, 예: --zone-z1)
+    const colorVar = `--zone-${zone.id.toLowerCase()}`
+    return { ...zone, centerX: 104 + index * 196, equipments, totalKw, percent, colorVar }
   }),
 )
 
@@ -109,10 +133,12 @@ const children = computed(() => {
   const count = zone.equipments.length
   const total = count * EQUIPMENT_WIDTH + (count - 1) * EQUIPMENT_GAP
   const start = Math.min(Math.max(zone.centerX - total / 2, 10), WIDTH - total - 10)
+  const opacities = opacityOrder(zone.equipments, props.selectedEquipment)
   return zone.equipments.map((item, index) => ({
     ...item,
     centerX: start + EQUIPMENT_WIDTH / 2 + index * (EQUIPMENT_WIDTH + EQUIPMENT_GAP),
     percent: zone.totalKw ? (item.loadKw / zone.totalKw) * 100 : 0,
+    opacity: opacities[item.id],
     stateInfo: STATE_INFO[item.state] ?? { shape: '', label: '—', className: '' },
   }))
 })
@@ -140,9 +166,54 @@ function unitX(left, text, charWidth) {
       <rect class="node" :x="source.centerX - 135" y="0" width="270" height="102" />
       <rect class="node-top" :x="source.centerX - 135" y="0" width="270" height="6" />
       <text class="name" :x="source.centerX - 119" y="32">{{ source.name }}</text>
-      <text class="sub" :x="source.centerX + 119" y="32" text-anchor="end">{{ source.sub }}</text>
+      <text
+        class="sub"
+        :class="{ discharging: source.discharging }"
+        :x="source.centerX + 119"
+        y="32"
+        text-anchor="end"
+      >
+        {{ source.sub }}
+      </text>
       <text class="value big" :x="source.centerX - 119" y="80">{{ formatKw(source.kw) }}</text>
       <text class="unit" :x="unitX(source.centerX - 119, formatKw(source.kw), 21)" y="80">kW</text>
+
+      <!-- 공급원 아이콘 (오른쪽 아래, 44 × 44 칸에 직접 그림): 한전 = 전봇대, 태양광 = 패널, ESS = 배터리 -->
+      <g class="icon" :transform="`translate(${source.centerX + 72}, 48)`" aria-hidden="true">
+        <template v-if="source.key === 'grid'">
+          <line x1="22" y1="2" x2="22" y2="44" />
+          <line x1="6" y1="10" x2="38" y2="10" />
+          <line x1="11" y1="19" x2="33" y2="19" />
+          <circle class="fill" cx="8" cy="7" r="2.2" />
+          <circle class="fill" cx="22" cy="7" r="2.2" />
+          <circle class="fill" cx="36" cy="7" r="2.2" />
+          <line x1="14" y1="44" x2="30" y2="44" />
+        </template>
+        <template v-else-if="source.key === 'solar'">
+          <polygon points="7,6 41,6 37,30 3,30" />
+          <line x1="18.3" y1="6" x2="14.3" y2="30" />
+          <line x1="29.7" y1="6" x2="25.7" y2="30" />
+          <line x1="5" y1="18" x2="39" y2="18" />
+          <line x1="22" y1="30" x2="22" y2="42" />
+          <line x1="14" y1="42" x2="30" y2="42" />
+        </template>
+        <!-- ESS: 세로 배터리. 안쪽 막대가 잔량(SOC)만큼 아래에서부터 차오름. 방전 중이면 왼쪽에 번개 표시 -->
+        <template v-else>
+          <rect x="18" y="6" width="20" height="38" rx="3" />
+          <rect class="fill" x="24" y="2" width="8" height="4" />
+          <rect
+            class="fill"
+            x="21.5"
+            :y="9.5 + 31 * (1 - Math.min(100, Math.max(0, source.soc)) / 100)"
+            width="13"
+            :height="31 * (Math.min(100, Math.max(0, source.soc)) / 100)"
+          />
+          <g v-if="source.discharging" class="bolt">
+            <title>방전 중</title>
+            <path d="M9 10 L2 26 H8 L5 40 L15 22 H9 L12 10 Z" />
+          </g>
+        </template>
+      </g>
     </g>
 
     <!-- 주 모선 -->
@@ -157,6 +228,7 @@ function unitX(left, text, charWidth) {
       v-for="zone in zones"
       :key="zone.id"
       class="zone"
+      :style="{ '--zone': `var(${zone.colorVar})` }"
       :class="{ selected: zone.id === modelValue }"
       role="button"
       tabindex="0"
@@ -175,6 +247,14 @@ function unitX(left, text, charWidth) {
         :y="ZONE_Y"
         :width="ZONE_WIDTH"
         :height="ZONE_HEIGHT"
+      />
+      <!-- 맨 위 구역 색 띠 -->
+      <rect
+        class="node-top"
+        :x="zone.centerX - ZONE_WIDTH / 2"
+        :y="ZONE_Y"
+        :width="ZONE_WIDTH"
+        height="4"
       />
       <text class="name" :x="zone.centerX - ZONE_WIDTH / 2 + 12" :y="ZONE_Y + 26">
         {{ zone.name }}
@@ -213,7 +293,7 @@ function unitX(left, text, charWidth) {
     </g>
 
     <!-- 고른 구역 → 설비 -->
-    <g v-if="selected && children.length">
+    <g v-if="selected && children.length" :style="{ '--zone': `var(${selected.colorVar})` }">
       <line
         class="wire"
         :x1="selected.centerX"
@@ -228,7 +308,12 @@ function unitX(left, text, charWidth) {
         :x2="Math.max(selected.centerX, children[children.length - 1].centerX)"
         :y2="ZONE_Y + ZONE_HEIGHT + 48"
       />
-      <g v-for="item in children" :key="item.id">
+      <g
+        v-for="item in children"
+        :key="item.id"
+        class="equipment"
+        :style="{ '--equipment-opacity': item.opacity }"
+      >
         <line
           class="wire"
           :x1="item.centerX"
@@ -242,6 +327,14 @@ function unitX(left, text, charWidth) {
           :y="EQUIPMENT_Y"
           :width="EQUIPMENT_WIDTH"
           height="120"
+        />
+        <!-- 맨 위 설비 색 띠 (구역 색을 설비마다 다른 진하기로) -->
+        <rect
+          class="node-top"
+          :x="item.centerX - EQUIPMENT_WIDTH / 2"
+          :y="EQUIPMENT_Y"
+          :width="EQUIPMENT_WIDTH"
+          height="4"
         />
         <text class="name" :x="item.centerX - EQUIPMENT_WIDTH / 2 + 12" :y="EQUIPMENT_Y + 26">
           {{ item.name }}
@@ -328,8 +421,53 @@ function unitX(left, text, charWidth) {
 }
 
 .node {
-  fill: var(--card);
+  fill: var(--node-fill); /* 카드 바탕과 살짝 다른 색 (2026-11-18) */
   stroke: var(--line-strong);
+  stroke-width: 1.5;
+}
+/* 공급원 상자는 그 공급원 색을 아주 옅게 섞음 */
+.grid .node,
+.solar .node,
+.ess .node {
+  fill: color-mix(in srgb, var(--source) calc(7% * var(--tint-k)), var(--card));
+}
+/* 공급원 아이콘 */
+.icon {
+  fill: none;
+  stroke: var(--source);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon .fill {
+  fill: var(--source);
+  stroke: none;
+}
+/* 방전 중 표시: 번개 + 위쪽 글자를 주황으로 */
+.bolt path {
+  fill: var(--warn);
+  stroke: none;
+}
+.sub.discharging {
+  font-weight: 700;
+  fill: var(--warn);
+}
+/* 구역 상자: 구역 색을 아주 옅게 섞고, 맨 위 띠와 비율 막대는 구역 색 */
+.zone .node {
+  fill: color-mix(in srgb, var(--zone) calc(9% * var(--tint-k)), var(--card));
+}
+.zone .node-top,
+.zone .share-bar {
+  fill: var(--zone);
+}
+/* 설비 상자: 고른 구역 색, 설비마다 진하기만 다름 */
+.equipment .node {
+  fill: color-mix(in srgb, var(--zone) calc(7% * var(--tint-k)), var(--card));
+}
+.equipment .node-top,
+.equipment .share-bar {
+  fill: var(--zone);
+  fill-opacity: var(--equipment-opacity);
 }
 .node-top {
   fill: var(--source);
@@ -396,8 +534,13 @@ function unitX(left, text, charWidth) {
   stroke: var(--ink);
   stroke-width: 2;
 }
+/* 고른 구역 상자는 색을 더 진하게 깔므로, 작은 글자도 한 단계 진한 글자색으로 (다크 모드 대비) */
+.zone.selected .sub,
+.zone.selected .unit {
+  fill: var(--ink-2);
+}
 .zone.selected .node {
-  fill: var(--bg);
+  fill: color-mix(in srgb, var(--zone) calc(16% * var(--tint-k)), var(--card));
   stroke: var(--ink);
   stroke-width: 3;
 }
