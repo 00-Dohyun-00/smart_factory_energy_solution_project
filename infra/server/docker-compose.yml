@@ -22,6 +22,26 @@ services:
       retries: 3
       start_period: 40s
 
+  frontend:
+    build:
+      context: ../../frontend
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      # 컨테이너 안에서는 backend 컨테이너를 서비스 이름으로 찾습니다.
+      VITE_API_PROXY_TARGET: http://backend:8080
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5173', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
   ai:
     build:
       context: ../../ai

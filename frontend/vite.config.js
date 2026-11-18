@@ -16,9 +16,10 @@ export default defineConfig({
     chunkSizeWarningLimit: 1500,
   },
   server: {
-    // /api 로 시작하는 요청은 백엔드(8080)로 전달
+    // /api 로 시작하는 요청은 백엔드로 전달. 평소 로컬 개발은 localhost:8080,
+    // Docker 안에서 띄울 때는 VITE_API_PROXY_TARGET으로 컨테이너 이름(backend:8080)을 넘겨받음
     proxy: {
-      '/api': 'http://localhost:8080',
+      '/api': process.env.VITE_API_PROXY_TARGET || 'http://localhost:8080',
     },
   },
 })

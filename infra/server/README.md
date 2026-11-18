@@ -1,8 +1,12 @@
-# 서버 PC용 Docker Compose (backend + ai + backup-db)
+# 서버 PC용 Docker Compose (frontend + backend + ai + backup-db)
 
-서버 PC 1대에서 띄우는 구성입니다. Spring(backend), AI 서버(ai, FastAPI), 로컬 백업 DB(backup-db)를
-같이 띄웁니다.
-(Vue, Nginx, 서버 2대 이중화는 아직 설계 단계입니다 — `docs/decisions.md` 참고)
+서버 PC 1대에서 명령어 하나로 다 같이 띄우는 구성입니다: Vue(frontend), Spring(backend),
+AI 서버(ai, FastAPI), 로컬 백업 DB(backup-db).
+(Nginx, 서버 2대 이중화는 아직 설계 단계입니다 — `docs/decisions.md` 참고)
+
+`frontend`는 Nginx 없이 Vite 개발 서버를 그대로 씁니다(지금 단계는 배포용 빌드 없이 단순하게).
+`http://localhost:5173`으로 접속하면 되고, `/api`로 가는 요청은 컨테이너 안에서 자동으로
+`backend` 컨테이너로 넘어갑니다.
 
 `ai`는 지금 기본 뼈대만 있습니다(`ai/app/main.py`) — `POST /predict` 요청/응답 모양만 잡아뒀고,
 실제 예측 모델은 아직 없습니다(항상 `action: "IDLE"` 반환). Spring이 이 서버를 실제로 호출하는
@@ -25,16 +29,17 @@ docker compose -f infra/server/docker-compose.yml up -d --build
 ## 확인
 
 ```bash
-docker compose -f infra/server/docker-compose.yml ps        # 셋 다 healthy 떠야 정상
+docker compose -f infra/server/docker-compose.yml ps        # 넷 다 healthy 떠야 정상
 curl http://localhost:8080/actuator/health/liveness          # {"status":"UP"}
 curl http://localhost:8080/api/system/db-status
 curl http://localhost:8000/health                             # ai 서버
+curl http://localhost:5173/api/zones                          # frontend를 거쳐서도 backend 응답이 와야 함
 docker exec -it backup-db psql -U postgres -d wattever -c "\dt"
 ```
 
 ## 자동 재시작
 
-둘 다 `restart: unless-stopped` + `healthcheck`가 있어서, 컨테이너 안에서 프로세스가 죽거나
+넷 다 `restart: unless-stopped` + `healthcheck`가 있어서, 컨테이너 안에서 프로세스가 죽거나
 응답이 없으면 Docker가 알아서 재시작합니다.
 
 - `backend`의 healthcheck는 `/actuator/health/liveness`를 봅니다. 이건 **DB 상태와 무관하게
