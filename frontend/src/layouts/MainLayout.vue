@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
+import { useThemeStore } from '@/stores/useThemeStore'
 import WeatherIcon from '@/components/WeatherIcon.vue'
 import { formatClock } from '@/utils/format'
 
@@ -11,6 +12,7 @@ const realtimeStore = useRealtimeStore()
 const route = useRoute()
 
 const settingsStore = useSettingsStore()
+const themeStore = useThemeStore() // 라이트 / 다크 테마 (아래쪽 버튼으로 바꿈)
 
 // 폴링 주기(초). 환경 설정의 "화면 갱신 주기"를 쓰고, 아직 못 받았으면 5초
 const pollSeconds = computed(() => settingsStore.values['operation.poll_seconds'] ?? 5)
@@ -282,6 +284,17 @@ const peakMark = computed(() => {
           >
             <WeatherIcon :text="realtimeStore.status.weather.text" :size="22" />
           </span>
+          <!-- 접었을 때도 라이트/다크를 바꿀 수 있게 -->
+          <button
+            class="rail-theme"
+            :aria-label="
+              themeStore.theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기'
+            "
+            :title="themeStore.theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기'"
+            @click="themeStore.toggle()"
+          >
+            {{ themeStore.theme === 'dark' ? '☀' : '◐' }}
+          </button>
         </div>
 
         <nav v-if="!collapsed" class="menu" aria-label="주 메뉴">
@@ -319,7 +332,21 @@ const peakMark = computed(() => {
         </nav>
 
         <div v-if="!collapsed" class="foot">
-          <RouterLink to="/settings" class="settings-link">환경 설정</RouterLink>
+          <!-- 환경 설정 링크와 라이트/다크 전환 버튼을 한 줄에 -->
+          <div class="foot-top">
+            <RouterLink to="/settings" class="settings-link">환경 설정</RouterLink>
+            <button
+              class="theme-button"
+              :aria-label="
+                themeStore.theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기'
+              "
+              :title="themeStore.theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기'"
+              @click="themeStore.toggle()"
+            >
+              <span aria-hidden="true">{{ themeStore.theme === 'dark' ? '☀' : '◐' }}</span>
+              {{ themeStore.theme === 'dark' ? '라이트' : '다크' }}
+            </button>
+          </div>
           <!-- 시각은 브라우저 시계가 아니라 서버가 보낸 값(recordedAt)을 씀 -->
           <p class="clock num">{{ formatClock(realtimeStore.status?.recordedAt) }}</p>
           <!-- 시계가 실제보다 빨리 가는 이유를 알려 줌 (시뮬레이션이 배속으로 돌 때만) -->
@@ -390,8 +417,10 @@ const peakMark = computed(() => {
   transform-origin: 0 0;
 }
 
-/* 왼쪽 메뉴 */
+/* 왼쪽 메뉴
+   zoom 1.2: 메뉴 전체(폭, 글자, 간격)를 같은 비율로 20% 키움 (2026-11-18). 본문은 남은 폭을 씀 */
 .side {
+  zoom: 1.2;
   display: flex;
   flex-direction: column;
   flex: none;
@@ -439,15 +468,15 @@ const peakMark = computed(() => {
 }
 .rail .mark {
   margin-left: 0;
-  font-size: 14px;
+  font-size: 16px;
 }
 .rail-connection {
-  font-size: 12px;
+  font-size: 14px;
 }
 .rail-auto {
   padding: 1px 4px;
   border: 1.5px solid var(--ink);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
 }
 /* 메뉴 맨 위의 자동 모드 표시 */
@@ -458,11 +487,11 @@ const peakMark = computed(() => {
   margin: 0 12px 10px;
   padding: 7px 10px;
   border: 1.5px solid var(--ink);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
 }
 .auto-sub {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 400;
   color: var(--mute);
 }
@@ -490,7 +519,7 @@ const peakMark = computed(() => {
   padding: 11px 16px 11px 20px;
   background: none;
   border: 0;
-  font-size: 15px;
+  font-size: 17px;
   color: var(--ink-2);
   text-align: left;
 }
@@ -503,7 +532,7 @@ const peakMark = computed(() => {
 }
 .arrow {
   width: 12px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--mute);
 }
 .sub-link {
@@ -525,7 +554,7 @@ const peakMark = computed(() => {
 }
 .mark {
   margin-left: auto;
-  font-size: 12px;
+  font-size: 14px;
 }
 .mark.crit {
   color: var(--crit);
@@ -539,11 +568,16 @@ const peakMark = computed(() => {
   border-top: 1px solid var(--line);
 }
 /* 메뉴 맨 아래의 환경 설정 링크 */
+.foot-top {
+  display: flex;
+  align-items: center;
+  margin: -4px -20px 10px;
+}
 .settings-link {
   display: block;
-  margin: -4px -20px 10px;
+  flex: 1;
   padding: 9px 20px;
-  font-size: 15px;
+  font-size: 17px;
   color: var(--ink-2);
 }
 .settings-link:hover {
@@ -562,7 +596,7 @@ const peakMark = computed(() => {
   line-height: 1.3;
 }
 .speed {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--mute);
 }
 .weather {
@@ -573,18 +607,44 @@ const peakMark = computed(() => {
   color: var(--ink-2);
 }
 .weather-temp {
-  font-size: 17px;
+  font-size: 19px;
   font-weight: 700;
   color: var(--ink);
 }
 .weather-text {
-  font-size: 13px;
+  font-size: 15px;
 }
 .rail-weather {
   color: var(--ink-2);
 }
+/* 라이트/다크 전환 버튼 */
+.theme-button {
+  flex: none;
+  height: 30px;
+  margin-right: 16px;
+  padding: 0 10px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.theme-button:hover,
+.rail-theme:hover {
+  background: var(--bg);
+}
+.rail-theme {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 16px;
+  color: var(--ink-2);
+}
 .connection {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
 }
 .connection.on {

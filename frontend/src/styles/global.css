@@ -25,6 +25,61 @@
   --col-cool: #edf1f5; /* 푸른 회색 */
   --col-warm: #f4f1eb; /* 따뜻한 회색 */
   --col-sage: #ecf2ee; /* 녹회색 */
+  /* 옅게 까는 색 (그래프의 요금 비싼 시간 띠, 마우스 올림·고름 표시, 계기판 구간, 글자 밑 바탕) */
+  --band: rgba(20, 24, 28, 0.07);
+  --hover: rgba(20, 24, 28, 0.05);
+  --pressed: rgba(20, 24, 28, 0.09);
+  --tint-ok: rgba(47, 125, 79, 0.35);
+  --tint-warn: rgba(156, 95, 8, 0.55);
+  --tint-crit: rgba(200, 55, 45, 0.4);
+  --label-bg: rgba(255, 255, 255, 0.85);
+  /* 히트맵 색 단계: 낮음(옅음) → 높음(진함) */
+  --heat-1: #ebecee;
+  --heat-2: #cdd0d4;
+  --heat-3: #adb1b8;
+  --heat-4: #848b96;
+  --heat-5: #5b6472;
+}
+
+/* 다크 모드 (사이드바의 버튼으로 바꿈, 밤에 눈부시지 않게)
+   - 배경은 순검정이 아닌 짙은 보라색, 글자는 순백이 아닌 보랏빛 밝은 회색으로 대비 피로를 줄임 (2026-11-18 보라로 변경)
+   - 상태색·공급원 색은 어두운 바탕에서도 구분되게 밝기만 올림
+   - 인쇄할 때는 항상 밝은 색으로 나오도록 화면(screen)에서만 적용 */
+@media screen {
+  :root[data-theme='dark'] {
+    color-scheme: dark; /* 입력칸·선택 상자·스크롤바도 어둡게 */
+    --bg: #16121f; /* 짙은 보라 */
+    --card: #201a2d;
+    --line: #342b45;
+    --line-strong: #4f4463;
+    --ink: #e9e5f0;
+    --ink-2: #c8c1d6;
+    --mute: #9c94ae;
+    --faint: #726a85;
+    --ok: #52b37c;
+    --warn: #dba24a;
+    --crit: #f06b60;
+    --lost: #847c96;
+    --accent: #e9e5f0;
+    --src-grid: #93a0ae;
+    --src-solar: #e3b23f;
+    --src-ess: #33b8b0;
+    --col-cool: #251f35;
+    --col-warm: #2b2131;
+    --col-sage: #1f2330;
+    --band: rgba(255, 255, 255, 0.06);
+    --hover: rgba(255, 255, 255, 0.05);
+    --pressed: rgba(255, 255, 255, 0.1);
+    --tint-ok: rgba(82, 179, 124, 0.35);
+    --tint-warn: rgba(219, 162, 74, 0.45);
+    --tint-crit: rgba(240, 107, 96, 0.4);
+    --label-bg: rgba(32, 26, 45, 0.85);
+    --heat-1: #2a2338;
+    --heat-2: #3e3452;
+    --heat-3: #5b4f74;
+    --heat-4: #81759c;
+    --heat-5: #aca1c6;
+  }
 }
 
 *,
@@ -46,7 +101,7 @@ body {
     'Segoe UI',
     'Malgun Gothic',
     sans-serif;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.5;
   color: var(--ink);
   background: var(--bg);
@@ -89,7 +144,7 @@ img {
 }
 
 .card-title {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
 }
 
@@ -118,7 +173,7 @@ img {
   padding: 8px 12px;
   background: var(--card);
   border: 1px solid var(--crit);
-  font-size: 13px;
+  font-size: 15px;
   color: var(--crit);
 }
 .error-band-button {
@@ -128,7 +183,7 @@ img {
   padding: 0 12px;
   background: var(--card);
   border: 1px solid var(--ink);
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink);
 }
 .error-band-button:hover {
@@ -146,7 +201,7 @@ img {
   padding: 0 6px;
   border: 1px solid var(--line-strong);
   border-radius: 3px;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 18px;
   color: var(--mute);
   white-space: nowrap;
