@@ -35,7 +35,7 @@ const PCS_LABELS = { DISCHARGING: '방전 중', CHARGING: '충전 중', STANDBY:
 // 상태마다 도형과 글자를 다르게 함
 const STATE_INFO = {
   RUNNING: { shape: '●', label: '운전', className: 'running' },
-  HEATING: { shape: '▲', label: '승온 중', className: 'heating' },
+  HEATING: { shape: '▲', label: '가열 중', className: 'heating' },
   STOPPED: { shape: '○', label: '정지', className: 'stopped' },
 }
 

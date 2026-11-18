@@ -107,7 +107,7 @@ function toLocalDateTime(date) {
   return `${day}T${time}`
 }
 
-// 브레이징로가 승온할 때 늘어나는 전력 (약 4분 주기로 반복되게 만든 값)
+// 브레이징로가 가열할 때 늘어나는 전력 (약 4분 주기로 반복되게 만든 값)
 // 15분 평균을 내면 거의 0이 되어, 순간값만 출렁이고 구간 평균은 크게 바꾸지 않음
 function furnaceSwingAt(seconds) {
   return 330 * Math.sin(seconds / 40)
@@ -638,7 +638,7 @@ function updateDecision(now, info) {
 const sessionDecisions = []
 
 const PEAK_REASON =
-  '브레이징로 승온과 사출기 가동이 겹쳐, 이번 15분 구간의 예상 피크가 목표 피크를 넘을 것으로 보입니다.'
+  '브레이징로 가열과 사출기 가동이 겹쳐, 이번 15분 구간의 예상 피크가 목표 피크를 넘을 것으로 보입니다.'
 
 // 하루치 이력의 뼈대. 날짜마다 일부를 빼고 값을 조금씩 바꿔서 씁니다.
 const HISTORY_TEMPLATES = [
@@ -843,7 +843,7 @@ function equipmentsAt(time) {
     name: item.name,
     loadKw: round1(baseKw * item.share + (extraKw[item.id] ?? 0)),
     origin: item.id === 'Z4-MOTOR1' ? 'MEASURED' : 'SIMULATED',
-    // 설비 상태. 브레이징로는 전력이 크게 오를 때 "승온 중"으로 표시 (필드는 확인 필요)
+    // 설비 상태. 브레이징로는 전력이 크게 오를 때 "가열 중"으로 표시 (필드는 확인 필요)
     state: item.id === 'Z2-FURN' && furnaceSwingAt(seconds) > 100 ? 'HEATING' : 'RUNNING',
   }))
 }

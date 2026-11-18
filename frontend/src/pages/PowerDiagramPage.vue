@@ -1,12 +1,11 @@
 <!--
   모니터링 > 설비 모니터링
-  KPI 5개 → 가운데 전력 계통도 + 오른쪽에 고른 구역의 상세
+  전력 계통도 + 오른쪽에 고른 구역의 상세 (KPI 5개는 2026-11-18에 뺌)
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Chart from '@/components/Chart.vue'
-import KpiCards from '@/components/KpiCards.vue'
 import PowerTree from '@/components/PowerTree.vue'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { formatHourMinute, formatInteger, formatKw, formatOneDecimal } from '@/utils/format'
@@ -27,7 +26,7 @@ const ZONE_LABELS = {
 // 상태마다 도형과 글자를 다르게 함 (PowerTree.vue와 같은 모양)
 const STATE_INFO = {
   RUNNING: { shape: '●', label: '운전', className: 'running' },
-  HEATING: { shape: '▲', label: '승온 중', className: 'heating' },
+  HEATING: { shape: '▲', label: '가열 중', className: 'heating' },
   STOPPED: { shape: '○', label: '정지', className: 'stopped' },
 }
 
@@ -130,8 +129,10 @@ const trendOption = computed(() => ({
 
     <!-- 서버 연결이 끊겼다는 알림은 공통 틀(MainLayout)이 모든 화면에 띄움 -->
 
-    <!-- KPI 5개 (통합 화면과 같은 카드) -->
-    <KpiCards :status="status" :stale="!realtimeStore.connected" />
+    <!--
+      KPI 5개(통합 화면과 같은 카드)는 2026-11-18 UI 피드백으로 뺐음.
+      이 화면은 설비가 주인공이어야 해서, 그 자리에는 설비 전체 통계를 넣을 예정 (구성은 팀 검토 중)
+    -->
 
     <div class="row">
       <!-- 계통도 -->
