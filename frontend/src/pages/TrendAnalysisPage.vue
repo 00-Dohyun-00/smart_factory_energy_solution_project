@@ -8,6 +8,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import Chart from '@/components/Chart.vue'
+import { useThemeStore } from '@/stores/useThemeStore'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
 import { useHistoryStore } from '@/stores/useHistoryStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
@@ -57,6 +58,8 @@ const interval = ref('HOUR')
 const shown = ref(ITEMS.map((item) => item.key)) // 켜져 있는 항목들
 const focusAt = ref('') // "눈에 띄는 구간"에서 고른 시각 (그래프에 세로선으로 표시)
 const hourlyView = ref('time') // 시간대별 사용 패턴 보기: time(시간 순 막대) | rank(많이 쓴 순위)
+// 시간대별 사용 패턴의 막대 간격: AUTO(기간에 맞춰 자동) | HOUR(1시간) | HOUR4(4시간) | DAY(1일)
+const patternStep = ref('AUTO')
 const showPins = ref(true) // 전력 그래프 위에 추천 기호를 보일지
 
 // "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
@@ -98,6 +101,13 @@ watch([fromDate, toDate, interval], () => {
   load()
 })
 
+// 기간이 바뀌면 시간대별 사용 패턴 데이터(1시간 간격)도 다시 받음
+// (1분마다 자동으로 다시 받지는 않음: 그래프를 좌우로 옮겨 보던 위치가 처음으로 돌아가지 않게)
+watch([fromDate, toDate], () => {
+  if (!fromDate.value || !toDate.value || dateError.value) return
+  analysisStore.fetchPattern(fromDate.value, toDate.value)
+})
+
 // 서버 날짜를 처음 알게 되면 "최근 7일"로 조회 시작
 watch(
   serverDate,
@@ -137,18 +147,16 @@ function toggleFocus(at) {
 }
 
 // ---- 그래프 공통 ----
-// ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
-const COLOR = {
-  ink: '#14181c', // --ink
-  ink2: '#3c444c', // --ink-2
-  mute: '#646e77', // --mute
-  faint: '#98a1a9', // --faint
-  line: '#dde1e5', // --line
-  crit: '#c8372d', // --crit
-  grid: '#5b6472', // --src-grid
-  solar: '#d19a00', // --src-solar
-  ess: '#0f8f8a', // --src-ess
-}
+// 그래프(ECharts)는 CSS 변수를 못 읽으므로, 테마 스토어가 global.css에서 읽어 둔 지금 테마 색을 씀
+// (라이트·다크를 바꾸면 이 색이 바뀌고 그래프도 다시 그려짐)
+const themeStore = useThemeStore()
+const COLOR = themeStore.colors
+// 그래프 툴팁도 지금 테마 색으로
+const tooltipColors = () => ({
+  backgroundColor: COLOR.card,
+  borderColor: COLOR.line,
+  textStyle: { color: COLOR.ink },
+})
 
 const isDaily = computed(() => trend.value?.interval === 'DAY') // 하루에 점 하나
 const isSingleDay = computed(() => trend.value?.from === trend.value?.to) // 하루만 조회
@@ -357,6 +365,7 @@ const powerOption = computed(() => {
     grid: { left: 52, right: 20, top: 44, bottom: 24 },
     legend,
     tooltip: {
+      ...tooltipColors(),
       trigger: 'axis',
       // 값 목록 아래에 그 칸에 나온 추천을 함께 보여 줌
       formatter: (params) => {
@@ -393,7 +402,11 @@ const socOption = computed(() => {
   return {
     animation: false,
     grid: { left: 52, right: 20, top: 12, bottom: 22 },
-    tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} %` },
+    tooltip: {
+      ...tooltipColors(),
+      trigger: 'axis',
+      valueFormatter: (value) => `${formatOneDecimal(value)} %`,
+    },
     xAxis: timeAxis(false),
     yAxis: { ...valueAxis, min: 0, max: 100, interval: 50 },
     series: [series],
@@ -412,7 +425,11 @@ const tempOption = computed(() => {
     grid: { left: 52, right: 20, top: 24, bottom: 40 },
     // 그래프가 낮아 오른쪽 위의 "온도 제한" 글자와 겹치므로 범례는 왼쪽 위에 둠
     legend: { ...legend, right: 'auto', left: 52 },
-    tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} ℃` },
+    tooltip: {
+      ...tooltipColors(),
+      trigger: 'axis',
+      valueFormatter: (value) => `${formatOneDecimal(value)} ℃`,
+    },
     xAxis: timeAxis(true),
     // 높이가 낮아 눈금은 20℃ 간격으로만
     yAxis: { ...valueAxis, min: 0, max: 40, interval: 20 },
@@ -436,64 +453,152 @@ const hourlyRanks = computed(() => {
   }))
 })
 
-const hourlyOption = computed(() => {
-  const hourly = trend.value.hourly
-  const names = hourly.map((item) => `${item.hour}시`)
+// ---- 시간대별 사용 패턴: 기간 동안의 막대 (1시간 · 4시간 · 1일 묶음) ----
+const PATTERN_STEPS = [
+  { value: 'AUTO', label: '자동' },
+  { value: 'HOUR', label: '1시간' },
+  { value: 'HOUR4', label: '4시간' },
+  { value: 'DAY', label: '1일' },
+]
+// 한 화면에 보여 줄 막대 수. 이보다 많으면 아래 스크롤 막대로 좌우로 옮겨 봄
+const PATTERN_WINDOW = { HOUR: 24, HOUR4: 42, DAY: 31 }
 
-  // 최대부하 시간대(이어진 시각들)를 회색 띠로 표시. 시간대 구분은 백엔드가 준 값
-  const areas = []
-  let start = null
-  hourly.forEach((item, index) => {
-    const isPeak = item.period === 'PEAK'
-    if (isPeak && start === null) start = index
-    const isLast = index === hourly.length - 1
-    if (start !== null && (!isPeak || isLast)) {
-      const end = isPeak ? index : index - 1
-      areas.push([
-        { xAxis: names[start], itemStyle: { color: 'rgba(20, 24, 28, 0.07)' } },
-        { xAxis: names[end] },
-      ])
-      start = null
+// 고른 기간이 며칠인지 (시작일과 종료일 포함)
+const periodDays = computed(() => {
+  if (!fromDate.value || !toDate.value) return 0
+  const start = new Date(`${fromDate.value}T00:00:00`)
+  const end = new Date(`${toDate.value}T00:00:00`)
+  return Math.round((end - start) / 86400000) + 1
+})
+// "자동"일 때의 간격: 하루면 1시간, 7일 이하면 4시간, 그보다 길면(한 달 등) 1일
+const autoStep = computed(() => {
+  if (periodDays.value <= 1) return 'HOUR'
+  if (periodDays.value <= 7) return 'HOUR4'
+  return 'DAY'
+})
+const activeStep = computed(() =>
+  patternStep.value === 'AUTO' ? autoStep.value : patternStep.value,
+)
+const stepLabel = (value) => PATTERN_STEPS.find((item) => item.value === value)?.label ?? ''
+
+// 1시간 간격 값을 고른 간격으로 묶어 평균 냄 (그래프에 그리기 위한 표시용 평균)
+const patternBars = computed(() => {
+  const list = analysisStore.pattern?.points ?? []
+  const groups = []
+  for (const item of list) {
+    const date = item.recordedAt.slice(0, 10) // '2026-11-18'
+    const hour = Number(item.recordedAt.slice(11, 13))
+    let key = item.recordedAt.slice(0, 13) // 1시간: 날짜 + 시
+    if (activeStep.value === 'HOUR4') key = `${date} ${Math.floor(hour / 4)}`
+    if (activeStep.value === 'DAY') key = date
+    const last = groups[groups.length - 1]
+    if (last && last.key === key) {
+      last.values.push(item.gridKw)
+    } else {
+      groups.push({
+        key,
+        date,
+        hour: activeStep.value === 'HOUR4' ? Math.floor(hour / 4) * 4 : hour,
+        values: [item.gridKw],
+      })
+    }
+  }
+  const oneDay = periodDays.value <= 1
+  return groups.map((group) => {
+    const md = group.date.slice(5) // '11-18'
+    let label = md
+    if (activeStep.value === 'HOUR') label = oneDay ? `${group.hour}시` : `${md} ${group.hour}시`
+    if (activeStep.value === 'HOUR4') label = `${md} ${group.hour}~${group.hour + 4}시`
+    return {
+      label,
+      hour: group.hour,
+      avgGridKw: group.values.reduce((sum, value) => sum + value, 0) / group.values.length,
     }
   })
+})
 
-  const target = trend.value.targetPeakKw
+const patternOption = computed(() => {
+  const bars = patternBars.value
+  const names = bars.map((item) => item.label)
+  const target = analysisStore.pattern?.targetPeakKw
+
+  // 1시간 간격일 때만 최대부하 시각의 막대 뒤에 회색 띠 (4시간 · 1일은 여러 요금 시간대가 섞여 표시하지 않음)
+  const peakHours = new Set(
+    (trend.value?.hourly ?? []).filter((item) => item.period === 'PEAK').map((item) => item.hour),
+  )
+  const areas =
+    activeStep.value === 'HOUR'
+      ? bars
+          .filter((item) => peakHours.has(item.hour))
+          .map((item) => [
+            { xAxis: item.label, itemStyle: { color: COLOR.band } },
+            { xAxis: item.label },
+          ])
+      : []
+
+  // 처음에는 가장 최근 막대들을 보여 줌 (한 화면 막대 수만큼)
+  const windowSize = PATTERN_WINDOW[activeStep.value]
+  const startValue = Math.max(0, bars.length - windowSize)
+  const endValue = Math.max(0, bars.length - 1)
+  // 좌우 스크롤: 그래프 위에서 드래그 · 휠, 아래 막대로 옮김.
+  // filterMode 'none' → 옮겨도 세로축 범위가 바뀌지 않음 (세로축은 왼쪽에 항상 그대로 보임)
+  const zoomBase = { xAxisIndex: 0, filterMode: 'none', startValue, endValue }
+
   return {
     animation: false,
-    grid: { left: 48, right: 12, top: 22, bottom: 24 },
+    grid: { left: 48, right: 12, top: 22, bottom: 48 },
     tooltip: {
+      ...tooltipColors(),
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       valueFormatter: (value) => `${formatKw(value)} kW`,
     },
+    dataZoom: [
+      { ...zoomBase, type: 'inside', zoomOnMouseWheel: false, moveOnMouseWheel: true },
+      {
+        ...zoomBase,
+        type: 'slider',
+        height: 14,
+        bottom: 6,
+        showDetail: false,
+        brushSelect: false,
+        zoomLock: true, // 막대 폭은 그대로, 위치만 옮김
+        borderColor: COLOR.line,
+        fillerColor: COLOR.band,
+        handleStyle: { color: COLOR.card, borderColor: COLOR.mute },
+        dataBackground: { lineStyle: { color: COLOR.faint }, areaStyle: { color: COLOR.band } },
+      },
+    ],
     xAxis: {
       type: 'category',
       data: names,
       axisLine: { lineStyle: { color: COLOR.line } },
       axisTick: { show: false },
-      axisLabel: { color: COLOR.mute, interval: (index) => index % 6 === 0 },
+      axisLabel: { color: COLOR.mute, hideOverlap: true },
     },
-    yAxis: valueAxis,
+    yAxis: { ...valueAxis, min: 0 },
     series: [
       {
-        name: '평균 한전 구매',
+        name: `평균 한전 구매 (${stepLabel(activeStep.value)})`,
         type: 'bar',
         barCategoryGap: '25%',
-        data: hourly.map((item) => item.avgGridKw),
+        data: bars.map((item) => Math.round(item.avgGridKw)),
         itemStyle: { color: COLOR.grid },
         markArea: { silent: true, data: areas },
-        markLine: {
-          silent: true,
-          symbol: 'none',
-          lineStyle: { color: COLOR.ink, width: 1.5, type: 'solid' },
-          label: {
-            formatter: `목표 피크 ${formatKw(target)}`,
-            position: 'insideEndTop',
-            color: COLOR.ink,
-            fontWeight: 'bold',
-          },
-          data: [{ yAxis: target }],
-        },
+        markLine: target
+          ? {
+              silent: true,
+              symbol: 'none',
+              lineStyle: { color: COLOR.ink, width: 1.5, type: 'solid' },
+              label: {
+                formatter: `목표 피크 ${formatKw(target)}`,
+                position: 'insideEndTop',
+                color: COLOR.ink,
+                fontWeight: 'bold',
+              },
+              data: [{ yAxis: target }],
+            }
+          : undefined,
       },
     ],
   }
@@ -727,9 +832,36 @@ const hourlyOption = computed(() => {
             </div>
             <!-- Chart.vue는 크기가 0이면 오류가 나므로 v-show 대신 v-if로 바꿔 끼움 -->
             <template v-if="hourlyView === 'time'">
-              <Chart :option="hourlyOption" :height="190" />
+              <!-- 막대 간격 고르기: 자동이면 기간에 맞춰 (하루 1시간 · 7일 4시간 · 한 달 1일) -->
+              <div class="step-row">
+                <span class="step-label">간격</span>
+                <div class="presets step-switch" role="group" aria-label="막대 간격">
+                  <button
+                    v-for="item in PATTERN_STEPS"
+                    :key="item.value"
+                    :class="{ active: patternStep === item.value }"
+                    :aria-pressed="patternStep === item.value"
+                    @click="patternStep = item.value"
+                  >
+                    {{ item.label }}
+                  </button>
+                </div>
+                <span v-if="patternStep === 'AUTO'" class="step-auto">
+                  지금 {{ stepLabel(autoStep) }}
+                </span>
+              </div>
+              <Chart v-if="patternBars.length" :option="patternOption" :height="210" />
+              <p v-else-if="analysisStore.patternLoading" class="state">불러오는 중입니다.</p>
+              <p v-else-if="analysisStore.patternError" class="state" role="alert">
+                불러오지 못했습니다. ({{ analysisStore.patternError }})
+                <button class="retry" @click="analysisStore.fetchPattern(fromDate, toDate)">
+                  다시 시도
+                </button>
+              </p>
+              <p v-else class="state">이 기간의 기록이 없습니다.</p>
               <p class="foot-note">
-                시각별 평균 한전 구매 (kW). 회색 띠는 요금이 비싼 최대부하 시간대입니다.
+                기간 동안의 평균 한전 구매 (kW). 그래프를 끌거나 아래 막대로 좌우로 옮겨 봅니다.
+                <template v-if="activeStep === 'HOUR'">회색 띠는 최대부하 시간대입니다.</template>
               </p>
             </template>
             <template v-else>
@@ -1049,6 +1181,26 @@ const hourlyOption = computed(() => {
   height: 28px;
   padding: 0 10px;
   font-size: 13px;
+}
+/* 시간대별 사용 패턴: 막대 간격 고르기 */
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.step-label {
+  font-size: 13px;
+  color: var(--mute);
+}
+.step-switch button {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.step-auto {
+  font-size: 12px;
+  color: var(--mute);
 }
 /* 순위 보기 */
 .ranks {
