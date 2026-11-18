@@ -158,7 +158,11 @@ public class ReportService {
         }
 
         double totalKwh = kwhByType.values().stream().mapToDouble(Double::doubleValue).sum();
-        long energyCharge = Math.round(chargeByType.values().stream().mapToDouble(Double::doubleValue).sum());
+        // 합계는 시간대별로 반올림한 금액을 더해서 만듦 (항목 합과 합계가 1원 어긋나지 않게)
+        long energyCharge = 0;
+        for (double charge : chargeByType.values()) {
+            energyCharge += Math.round(charge);
+        }
         long baseCharge = baseCharge(monthPeakKw, basePrice);
         long overTarget = 0;
         if (monthPeakKw != null && targetPeakKw != null && basePrice != null) {
@@ -170,14 +174,23 @@ public class ReportService {
         double recordedDays = powers.size() / 1440.0; // 1분 기록 1440개 = 하루
         long monthEndEstimate = Math.round(energyCharge / recordedDays * yearMonth.lengthOfMonth()) + baseCharge;
 
+        // 시간대별 비중. 마지막 칸은 100에서 앞 칸들을 뺀 값 (합이 100.1%처럼 어긋나지 않게)
         List<ReportTariffUsage> byTariff = new ArrayList<>();
-        for (TariffPeriodType type : TariffPeriodType.values()) {
+        TariffPeriodType[] types = TariffPeriodType.values();
+        double percentSoFar = 0;
+        for (int i = 0; i < types.length; i++) {
+            TariffPeriodType type = types[i];
             double kwh = kwhByType.get(type);
+            double percent = 0.0;
+            if (totalKwh > 0) {
+                percent = i < types.length - 1 ? round1(kwh * 100 / totalKwh) : round1(100 - percentSoFar);
+            }
+            percentSoFar += percent;
             byTariff.add(new ReportTariffUsage(
                     periodCode(type),
                     periodLabel(type),
                     round1(kwh),
-                    totalKwh == 0 ? 0.0 : round1(kwh * 100 / totalKwh),
+                    percent,
                     Math.round(chargeByType.get(type))
             ));
         }
