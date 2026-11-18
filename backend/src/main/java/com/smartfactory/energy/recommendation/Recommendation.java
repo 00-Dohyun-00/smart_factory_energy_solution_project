@@ -92,4 +92,11 @@ public class Recommendation {
         this.handledBy = handledBy;
         this.handledAt = handledAt;
     }
+
+    // 추천 처리 (운영자가 적용 / 넘기기 했을 때)
+    public void handle(RecommendationStatus status, String handledBy, LocalDateTime handledAt) {
+        this.status = status;
+        this.handledBy = handledBy;
+        this.handledAt = handledAt;
+    }
 }
