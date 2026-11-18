@@ -24,11 +24,11 @@ const realtimeStore = useRealtimeStore()
 
 // 처리 상태는 색만으로 구분하지 않도록 도형을 함께 표시 (운영 로그 화면과 같은 표시)
 const STATUS_SHAPES = { APPLIED: '●', AUTO: '◇', IGNORED: '✕' }
-const TOP_COUNT = 8 // "피크가 높았던 구간"에 보여 줄 개수
 
-// 그 구간의 추천 처리를 한 줄 문구로 (명세 16번은 action·status 코드만 주므로 화면에서 글자로 바꿈)
+// 그 구간의 추천 처리를 한 줄 문구로 (status 코드를 화면에서 글자로 바꿈)
+// 백엔드 note는 추천 이유 문장이라 표 칸에 넣기엔 길어서 쓰지 않음
 function windowNote(item) {
-  if (!item.action) return '방전 추천 없음'
+  if (!item.status) return '방전 추천 없음'
   if (item.status === 'IGNORED') return '추천을 넘김'
   if (item.status === 'AUTO') return '자동 방전 (시뮬레이션)'
   if (item.status === 'APPLIED') return '방전 적용'
@@ -75,9 +75,8 @@ function applyPreset(name) {
 
 function load(showLoading = true) {
   if (!fromDate.value || !toDate.value || dateError.value) return
+  // "피크가 높았던 구간" 표도 이 응답(topWindows)에 함께 들어 있음
   analysisStore.fetchPeak(fromDate.value, toDate.value, showLoading)
-  // "피크가 높았던 구간" 표는 명세 16번(demand-intervals)으로 따로 받음
-  analysisStore.fetchPeakWindows(fromDate.value, toDate.value, TOP_COUNT)
 }
 
 // "피크가 높았던 구간" 표에서 누른 구간의 시작 시각 (히트맵에 그 칸을 표시)
@@ -113,6 +112,14 @@ watch(
 // ---- 받은 결과 ----
 const peak = computed(() => analysisStore.peak)
 const summary = computed(() => peak.value?.summary ?? null)
+// 목표 피크. 설정 값을 못 찾으면 백엔드가 null로 줌 → 목표선·목표 판정·히트맵 색 단계를 그리지 않음
+const targetKw = computed(() => peak.value?.targetPeakKw ?? null)
+const isOverTarget = (kw) => targetKw.value !== null && kw > targetKw.value
+// 최대 피크 아래 줄의 판정. 목표 값이 없으면 판정 없이 시각만 보여 줌
+const maxPeakVerdict = computed(() => {
+  if (targetKw.value === null || !summary.value) return ''
+  return isOverTarget(summary.value.maxPeakKw) ? ', 목표 초과' : ', 목표 달성'
+})
 
 // '2026-11-02T09:30:00' → '11-02 09:30'
 const shortTime = (dateTime) => formatMonthDayTime(dateTime).slice(0, 11)
@@ -160,7 +167,7 @@ const peakAxisMin = computed(() => {
 })
 
 const dailyOption = computed(() => {
-  const target = peak.value.targetPeakKw
+  const target = targetKw.value
   const days = peak.value.dailyPeaks
   return {
     animation: false,
@@ -196,7 +203,7 @@ const dailyOption = computed(() => {
         itemStyle: { color: COLOR.grid },
         data: days.map((item) => ({
           value: item.peakKw,
-          itemStyle: { color: item.peakKw > target ? COLOR.crit : COLOR.grid },
+          itemStyle: { color: isOverTarget(item.peakKw) ? COLOR.crit : COLOR.grid },
         })),
         markLine: {
           silent: true,
@@ -208,7 +215,8 @@ const dailyOption = computed(() => {
             color: COLOR.ink,
             fontWeight: 'bold',
           },
-          data: [{ yAxis: target }],
+          // 목표 값이 없으면 선을 그리지 않음 (null을 넣으면 ECharts 오류)
+          data: target === null ? [] : [{ yAxis: target }],
         },
       },
     ],
@@ -220,7 +228,7 @@ const dailyOption = computed(() => {
 const heatHeight = computed(() => Math.max(240, peak.value.dailyPeaks.length * 13 + 60))
 
 const heatOption = computed(() => {
-  const target = peak.value.targetPeakKw
+  const target = targetKw.value
   const dates = peak.value.dailyPeaks.map((item) => item.date)
   const dayLabels = dates.map(dayLabel)
 
@@ -424,13 +432,10 @@ const heatOption = computed(() => {
       <dl class="summary">
         <div class="card">
           <dt>기간 중 최대 피크</dt>
-          <dd :class="{ over: summary.maxPeakKw > peak.targetPeakKw }">
+          <dd :class="{ over: isOverTarget(summary.maxPeakKw) }">
             <span class="num">{{ formatKw(summary.maxPeakKw) }}</span> <small>kW</small>
           </dd>
-          <p class="num">
-            {{ shortTime(summary.maxPeakAt) }},
-            {{ summary.maxPeakKw > peak.targetPeakKw ? '목표 초과' : '목표 달성' }}
-          </p>
+          <p class="num">{{ shortTime(summary.maxPeakAt) }}{{ maxPeakVerdict }}</p>
         </div>
         <div class="card">
           <dt>목표를 넘은 구간</dt>
@@ -479,7 +484,14 @@ const heatOption = computed(() => {
             <span class="note"> 진할수록 높음 · 굵은 테두리 = 표에서 누른 구간 </span>
           </div>
           <!-- key: 날짜 수가 바뀌면 그래프 높이도 바뀌므로 새로 만듦 -->
-          <Chart :key="heatHeight" :option="heatOption" :height="heatHeight" />
+          <!-- 목표 값이 없으면 색 단계(목표 대비 비율)를 나눌 수 없어서 그리지 않음 -->
+          <Chart
+            v-if="targetKw !== null"
+            :key="heatHeight"
+            :option="heatOption"
+            :height="heatHeight"
+          />
+          <p v-else class="windows-empty">목표 피크 값이 없어 색 단계를 나눌 수 없습니다.</p>
         </section>
 
         <!-- 피크가 높았던 구간 -->
@@ -517,7 +529,7 @@ const heatOption = computed(() => {
                   </button>
                 </td>
                 <td class="right-text num">
-                  <strong :class="{ over: item.peakKw > peak.targetPeakKw }">
+                  <strong :class="{ over: isOverTarget(item.peakKw) }">
                     {{ formatKw(item.peakKw) }} kW
                   </strong>
                 </td>
@@ -530,10 +542,7 @@ const heatOption = computed(() => {
               </tr>
             </tbody>
           </table>
-          <p v-if="analysisStore.peakWindowsError" class="windows-error" role="alert">
-            구간 순위를 불러오지 못했습니다. ({{ analysisStore.peakWindowsError }})
-          </p>
-          <p v-else-if="!analysisStore.peakWindows.length" class="windows-empty">
+          <p v-if="!analysisStore.peakWindows.length" class="windows-empty">
             이 기간에는 구간 기록이 없습니다.
           </p>
           <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>

@@ -238,15 +238,17 @@ src/
 | 5 | GET | `/api/site-powers/today` | `getTodayBatteryStatuses` | 통합 |
 | 7 | GET | `/api/zones/{zoneName}` (예: `Z2`) | `getZoneRecent` | 설비 모니터링 |
 | 8 | GET | `/api/recommendations?from=&to=` | `getBatteryDecisions` | 추천 이력, 추이 분석 (**연결됨**, 2026-11-17) |
-| 9 | GET | `/api/reports?month=` | `getReport` | 월간 성적표 |
-| 10 | GET | `/api/analyses/trend?from=&to=&interval=` | `getTrendAnalysis` | 추이 분석 |
-| 11 | GET | `/api/settings` | `getSettings` | 공통 틀, 환경 설정 |
-| 12 | PUT | `/api/settings` 본문 `[{ key, value }]` | `updateSettings` | 환경 설정 |
-| 13 | GET | `/api/setting-histories?from=&to=` | `getSettingHistories` | 환경 설정 |
-| 16 | GET | `/api/demand-intervals?from=&to=&limit=8` | `getDemandIntervals` | 피크 분석 |
-| (추가 요청) | GET | `/api/analyses/peak?from=&to=` | `getPeakAnalysis` | 피크 분석 |
+| 9 | GET | `/api/reports?month=` | `getReport` | 월간 성적표 (**연결됨**, 2026-11-18) |
+| 10 | GET | `/api/analyses/trend?from=&to=&interval=` | `getTrendAnalysis` | 추이 분석 (**연결됨**, 2026-11-18) |
+| 11 | GET | `/api/settings` | `getSettings` | 공통 틀, 환경 설정 (**연결됨**, 2026-11-18) |
+| 12 | PUT | `/api/settings` 본문 `[{ key, value }]` | `updateSettings` | 환경 설정 (**연결됨**, 2026-11-18) |
+| 13 | GET | `/api/setting-histories?from=&to=` | `getSettingHistories` | 환경 설정 (**연결됨**, 2026-11-18) |
+| (추가) | GET | `/api/analyses/peak?from=&to=` | `getPeakAnalysis` | 피크 분석 (**연결됨**, 2026-11-18) |
 
 - 명세 6번(`/api/site-powers/recent`)은 쓰는 화면이 없어 함수를 지웠다.
+- 명세 16번(`/api/demand-intervals`)은 백엔드가 피크 분석 응답의 `topWindows`로 함께 주기로 만들어서 함수를 지웠다(2026-11-18). `useAnalysisStore.peakWindows`는 `topWindows`를 꺼내 둔 것이다.
+- 백엔드가 설정 값을 못 찾으면 분석·성적표의 `targetPeakKw` 등이 `null`로 온다. 이때 화면은 목표선·"목표 초과/달성"·히트맵 색 단계를 그리지 않는다(값을 지어내지 않음). 성적표는 `hasData`가 true여도 `dailyPeaks`·`heatmap`이 `null`일 수 있어 빈 목록으로 보고 "기록 없음"을 보여 준다.
+- 설정은 공용 DB 값이라 화면에서 저장하면 팀원 모두에게 바로 바뀐다. 백엔드가 저장을 허용하는 키는 화면에서 고칠 수 있는 항목과 같다(`peak.target_kw`·`peak.warn_ratio`·`ess.soc_low`·`ess.soc_high`·`ess.room_temp_limit`·`operation.auto_mode`·`operation.poll_seconds`·`operation.decision_valid_minutes`). 배터리 용량과 최대 출력은 백엔드에서도 보기 전용이다. 실시간 화면은 아직 가짜 데이터라 저장한 목표 피크가 통합 화면의 단계·게이지에는 반영되지 않는다.
 - 설정 값은 명세대로 **문자열**로 오고 간다. `useSettingsStore`가 `values`에서 숫자·`true`/`false`로 바꿔 주고, 저장할 때 다시 문자열로 보낸다. 키 이름은 명세 그대로 쓴다(예: `settingsStore.values['ess.max_power_kw']`).
 - 가짜 데이터에 임시로 넣어 쓰는 값(백엔드와 확정 필요): 최대 피크 `todayPeakKw`·`monthPeakKw`, 요금 시간대 `tariff{ period, label, until, nextLabel, periods[] }`, ESS `pcsStatus`·`sohPercent`.
 

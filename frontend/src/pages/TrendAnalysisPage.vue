@@ -130,9 +130,21 @@ const trend = computed(() => analysisStore.trend)
 const points = computed(() => trend.value?.points ?? [])
 const summary = computed(() => trend.value?.summary ?? null)
 
+// 목표 피크. 설정 값을 못 찾으면 백엔드가 null로 줌 → 그때는 목표선과 "목표 초과/달성"을 그리지 않음
+const targetKw = computed(() => trend.value?.targetPeakKw ?? null)
+
+// 목표 피크를 넘었는지 (목표 값이 없으면 넘었다고 하지 않음)
+const isOverTarget = (kw) => targetKw.value !== null && kw > targetKw.value
+
+// 최대 피크 아래 줄의 판정. 목표 값이 없으면 판정 없이 시각만 보여 줌
+const maxPeakVerdict = computed(() => {
+  if (targetKw.value === null || !summary.value) return ''
+  return isOverTarget(summary.value.maxPeakKw) ? ', 목표 초과' : ', 목표 달성'
+})
+
 // 한전 평균 구매전력이 목표 피크의 몇 %인지 (표시용 비율)
 const avgGridPercent = computed(() =>
-  summary.value ? (summary.value.avgGridKw / trend.value.targetPeakKw) * 100 : null,
+  summary.value && targetKw.value ? (summary.value.avgGridKw / targetKw.value) * 100 : null,
 )
 
 // '2026-11-11T09:30:00' → '11-11 09:30'
@@ -287,20 +299,23 @@ function pinTooltip(label) {
 // lines 예: [{ value: 1800, text: '목표 피크 1,800', color: COLOR.ink, dashed: false }]
 // withPins = true면 그래프 위쪽 띠에 추천 기호를 적음 (전력 그래프만)
 function markLines(lines, withPins = false) {
-  const data = lines.map((item) => ({
-    yAxis: item.value,
-    lineStyle: {
-      color: item.color,
-      width: 1.5,
-      type: item.dashed ? 'dashed' : 'solid',
-    },
-    label: {
-      formatter: item.text,
-      position: 'insideEndTop',
-      color: item.color,
-      fontWeight: 'bold',
-    },
-  }))
+  // 기준값이 null이면(백엔드가 설정 값을 못 찾은 경우) 그 선은 빼고 그림. 넣으면 ECharts 오류가 남
+  const data = lines
+    .filter((item) => item.value !== null && item.value !== undefined)
+    .map((item) => ({
+      yAxis: item.value,
+      lineStyle: {
+        color: item.color,
+        width: 1.5,
+        type: item.dashed ? 'dashed' : 'solid',
+      },
+      label: {
+        formatter: item.text,
+        position: 'insideEndTop',
+        color: item.color,
+        fontWeight: 'bold',
+      },
+    }))
   // 추천은 세로선을 긋지 않고(선이 많으면 그래프가 지저분해짐) 그래프 위쪽 띠에 기호만 적음.
   // 선 색을 투명하게 두고 선 끝의 글자(기호)만 보이게 하는 방식. 자세한 내용은 툴팁으로 봄
   // (opacity: 0을 쓰면 글자까지 같이 사라져서 색을 투명하게 함)
@@ -707,13 +722,10 @@ const patternOption = computed(() => {
       <dl class="card summary">
         <div>
           <dt>기간 중 최대 피크</dt>
-          <dd :class="{ over: summary.maxPeakKw > trend.targetPeakKw }">
+          <dd :class="{ over: isOverTarget(summary.maxPeakKw) }">
             <span class="num">{{ formatKw(summary.maxPeakKw) }}</span> <small>kW</small>
           </dd>
-          <p class="num">
-            {{ shortTime(summary.maxPeakAt) }},
-            {{ summary.maxPeakKw > trend.targetPeakKw ? '목표 초과' : '목표 달성' }}
-          </p>
+          <p class="num">{{ shortTime(summary.maxPeakAt) }}{{ maxPeakVerdict }}</p>
         </div>
         <div>
           <dt>평균 한전 구매전력</dt>
@@ -756,7 +768,8 @@ const patternOption = computed(() => {
             <span class="num">{{ formatOneDecimal(summary.roomTempMaxC) }}</span> <small>℃</small>
           </dd>
           <p class="num">
-            {{ shortTime(summary.roomTempMaxAt) }}, 제한 {{ trend.roomTempLimitC }}℃
+            {{ shortTime(summary.roomTempMaxAt) }}, 제한
+            {{ formatOneDecimal(trend.roomTempLimitC) }}℃
           </p>
         </div>
       </dl>
@@ -913,7 +926,7 @@ const patternOption = computed(() => {
                     <template v-else>—</template>
                   </td>
                   <td class="right-text num">
-                    <strong :class="{ over: item.avgResultPeakKw > trend.targetPeakKw }">
+                    <strong :class="{ over: isOverTarget(item.avgResultPeakKw) }">
                       {{ formatKw(item.avgResultPeakKw) }}
                       <template v-if="item.count">kW</template>
                     </strong>

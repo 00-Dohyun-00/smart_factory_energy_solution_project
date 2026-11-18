@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import { getDemandIntervals, getPeakAnalysis, getTrendAnalysis } from '@/api/analysisApi'
+import { getPeakAnalysis, getTrendAnalysis } from '@/api/analysisApi'
 
 // 분석 화면이 쓰는 데이터
 export const useAnalysisStore = defineStore('analysis', () => {
@@ -65,6 +65,9 @@ export const useAnalysisStore = defineStore('analysis', () => {
 
   // ---- 피크 분석 ----
   const peak = ref(null) // 피크 분석 결과 (아직 못 받았으면 null)
+  // 피크가 높았던 구간 순위. 피크 분석 응답의 topWindows를 그대로 꺼내 둔 것
+  // [{ windowStart, windowEnd, peakKw, status, note }] (추천이 없었던 구간은 status가 null)
+  const peakWindows = ref([])
   const peakLoading = ref(false)
   const peakError = ref('')
   let latestPeakRequest = 0 // 가장 최근 요청의 응답만 반영하기 위한 번호 (위 latestTrendRequest 와 같은 이유)
@@ -79,6 +82,8 @@ export const useAnalysisStore = defineStore('analysis', () => {
       const result = await getPeakAnalysis(from, to)
       if (requestId !== latestPeakRequest) return
       peak.value = result
+      // 기록이 없는 기간이면 백엔드가 topWindows를 null로 줌 → 빈 목록으로 바꿔 "기록 없음"으로 보이게 함
+      peakWindows.value = result.topWindows ?? []
       peakError.value = ''
     } catch (error) {
       if (requestId !== latestPeakRequest) return
@@ -91,33 +96,12 @@ export const useAnalysisStore = defineStore('analysis', () => {
     }
   }
 
-  // ---- 피크가 높았던 구간 순위 (명세 16번: demand-intervals) ----
-  const peakWindows = ref([]) // [{ windowStart, windowEnd, peakKw, noEssPeakKw, reducedKw, action, status }]
-  const peakWindowsError = ref('')
-  let latestPeakWindowsRequest = 0 // 가장 최근 요청의 응답만 반영하기 위한 번호
-
-  async function fetchPeakWindows(from, to, limit) {
-    const requestId = ++latestPeakWindowsRequest
-    try {
-      const result = await getDemandIntervals(from, to, limit)
-      if (requestId !== latestPeakWindowsRequest) return
-      peakWindows.value = result
-      peakWindowsError.value = ''
-    } catch (error) {
-      if (requestId !== latestPeakWindowsRequest) return
-      // 실패해도 이미 받아 둔 순위는 지우지 않음
-      peakWindowsError.value = error.message
-    }
-  }
-
   return {
     pattern,
     patternLoading,
     patternError,
     fetchPattern,
     peakWindows,
-    peakWindowsError,
-    fetchPeakWindows,
     trend,
     loading,
     errorMessage,
