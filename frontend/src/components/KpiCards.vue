@@ -88,7 +88,7 @@ const kpis = computed(() => {
       value: formatKw(s?.loadKw),
       unit: 'kW',
       sub: s
-        ? `한전 ${Math.round(s.sourceRatio.gridPercent)}% · 태양광 ${Math.round(s.sourceRatio.solarPercent)}% · ESS ${Math.round(s.sourceRatio.essPercent)}%`
+        ? `한전 ${Math.round(s.sourceRatio.gridPercent)}% / 태양광 ${Math.round(s.sourceRatio.solarPercent)}% / ESS ${Math.round(s.sourceRatio.essPercent)}%`
         : '',
       min: '0',
       max: loadMax ? formatKw(loadMax) : '',
@@ -146,7 +146,7 @@ const kpis = computed(() => {
       prefix: s ? (PCS_SHORT[s.pcsStatus] ?? '') : '',
       value: formatKw(essKw),
       unit: 'kW',
-      sub: '왼쪽 충전 · 오른쪽 방전',
+      sub: '왼쪽 충전 / 오른쪽 방전',
       min: maxPowerKw ? `충전 ${formatKw(maxPowerKw)}` : '충전',
       max: maxPowerKw ? `방전 ${formatKw(maxPowerKw)}` : '방전',
       segments: [
