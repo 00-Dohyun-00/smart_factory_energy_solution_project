@@ -349,39 +349,39 @@ function addWindowPoint(ms, gridKw) {
 }
 
 // ---- 요금 시간대 (계절별) ----
-// 시간대 구분: 한전 계절별·시간대별 요금제의 구분 (Jang 외, Sustainability 2022, 표 5)
-// 단가: 같은 논문 표 2의 고압A 선택II 값을 반올림한 임시 값. 2021년 일반용 기준이라 현재 산업용 단가는 확인 필요
+// 한전 「2026년도 8월 1일 시행 전기요금표(종합)」 p.2, 산업용전력(을) 고압A 선택Ⅱ (2026.4.16 시행 개편안)
+//   - 시간대: 경부하는 모든 계절 22~08시. 봄·여름·가을 최대부하 15~21시, 겨울 최대부하 09~12시·16~19시
+//   - 토요일: 최대부하 시간대 사용량을 중간부하로 계량 (periodsOf)
+//   - 봄·가을 토·일요일 11~14시: 전력량요금 50% 할인 (priceAt)
+//   - 공휴일 규칙(최대수요전력·사용량을 경부하로 계량)은 공휴일 목록이 필요해 아직 넣지 않음
 // 환경 설정 화면의 단가 3칸은 "지금 계절"의 단가입니다. (applySettings 참고)
 const TARIFF_LABELS = { LIGHT: '경부하', MID: '중간부하', PEAK: '최대부하' }
 const SEASON_LABELS = { SUMMER: '여름', SPRING_FALL: '봄·가을', WINTER: '겨울' }
 const SUMMER_PERIODS = [
-  { from: '00:00', to: '09:00', period: 'LIGHT' },
-  { from: '09:00', to: '10:00', period: 'MID' },
-  { from: '10:00', to: '12:00', period: 'PEAK' },
-  { from: '12:00', to: '13:00', period: 'MID' },
-  { from: '13:00', to: '17:00', period: 'PEAK' },
-  { from: '17:00', to: '23:00', period: 'MID' },
-  { from: '23:00', to: '24:00', period: 'LIGHT' },
+  { from: '00:00', to: '08:00', period: 'LIGHT' },
+  { from: '08:00', to: '15:00', period: 'MID' },
+  { from: '15:00', to: '21:00', period: 'PEAK' },
+  { from: '21:00', to: '22:00', period: 'MID' },
+  { from: '22:00', to: '24:00', period: 'LIGHT' },
 ]
 const PERIODS_BY_SEASON = {
   SUMMER: SUMMER_PERIODS,
   SPRING_FALL: SUMMER_PERIODS, // 봄·가을은 여름과 시간대 구분이 같고 단가만 다름
   WINTER: [
-    { from: '00:00', to: '09:00', period: 'LIGHT' },
-    { from: '09:00', to: '10:00', period: 'MID' },
-    { from: '10:00', to: '12:00', period: 'PEAK' },
-    { from: '12:00', to: '17:00', period: 'MID' },
-    { from: '17:00', to: '20:00', period: 'PEAK' },
-    { from: '20:00', to: '22:00', period: 'MID' },
-    { from: '22:00', to: '23:00', period: 'PEAK' },
-    { from: '23:00', to: '24:00', period: 'LIGHT' },
+    { from: '00:00', to: '08:00', period: 'LIGHT' },
+    { from: '08:00', to: '09:00', period: 'MID' },
+    { from: '09:00', to: '12:00', period: 'PEAK' },
+    { from: '12:00', to: '16:00', period: 'MID' },
+    { from: '16:00', to: '19:00', period: 'PEAK' },
+    { from: '19:00', to: '22:00', period: 'MID' },
+    { from: '22:00', to: '24:00', period: 'LIGHT' },
   ],
 }
-// 전력량요금 단가 (원/kWh)
+// 전력량요금 단가 (원/kWh), 산업용전력(을) 고압A 선택Ⅱ
 const PRICES_BY_SEASON = {
-  SUMMER: { LIGHT: 52, MID: 104, PEAK: 126 },
-  SPRING_FALL: { LIGHT: 52, MID: 60, PEAK: 71 },
-  WINTER: { LIGHT: 61, MID: 92, PEAK: 106 },
+  SUMMER: { LIGHT: 116.0, MID: 163.8, PEAK: 229.0 },
+  SPRING_FALL: { LIGHT: 116.0, MID: 133.4, PEAK: 150.9 },
+  WINTER: { LIGHT: 123.0, MID: 164.0, PEAK: 204.6 },
 }
 
 // 여름 6~8월, 봄·가을 3~5월과 9~10월, 겨울 11~2월
@@ -392,8 +392,20 @@ function seasonOf(date) {
   return 'WINTER'
 }
 
+// 그날의 시간대 구분. 토요일은 최대부하 시간대를 중간부하로 계량함
 function periodsOf(date) {
-  return PERIODS_BY_SEASON[seasonOf(date)]
+  const periods = PERIODS_BY_SEASON[seasonOf(date)]
+  if (date.getDay() !== 6) return periods
+  return periods.map((item) => (item.period === 'PEAK' ? { ...item, period: 'MID' } : item))
+}
+
+// 그 시각의 전력량요금 단가 (원/kWh). 봄·가을 토·일요일 11~14시는 50% 할인
+function priceAt(date, period) {
+  const price = PRICES_BY_SEASON[seasonOf(date)][period]
+  const weekend = date.getDay() === 0 || date.getDay() === 6
+  const hour = date.getHours()
+  if (seasonOf(date) === 'SPRING_FALL' && weekend && hour >= 11 && hour < 14) return price * 0.5
+  return price
 }
 
 // 그 시각의 요금 시간대 ('LIGHT' | 'MID' | 'PEAK')
@@ -562,7 +574,7 @@ function updateDecision(now, info) {
 
   // 새 추천
   const tariff = tariffAt(now)
-  const price = PRICES_BY_SEASON[seasonOf(now)][tariff.period]
+  const price = priceAt(now, tariff.period)
   const untilText = endText.slice(11, 16)
   const powerKw = Math.abs(wantKw)
   const reasons = {
@@ -1085,7 +1097,7 @@ function dayInputs(dateKey) {
       solarKw,
       netKw: loadKw - solarKw, // ESS가 없을 때의 한전 구매전력
       period,
-      price: PRICES_BY_SEASON[seasonOf(middle)][period],
+      price: priceAt(middle, period),
     })
   }
   return inputs
