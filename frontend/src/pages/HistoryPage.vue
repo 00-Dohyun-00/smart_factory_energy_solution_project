@@ -559,7 +559,7 @@ select.input {
 }
 .detail-title {
   margin-bottom: 2px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--ink-2);
 }
@@ -577,7 +577,7 @@ select.input {
   margin-top: 10px;
 }
 .used-item dt {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--mute);
 }
 .used-item dd {

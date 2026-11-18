@@ -39,7 +39,7 @@ const route = useRoute()
   min-height: 240px;
 }
 .message {
-  font-size: 16px;
+  font-size: 18px;
   color: var(--ink-2);
 }
 .path {

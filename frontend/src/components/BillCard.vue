@@ -154,7 +154,7 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
 }
 .note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 
@@ -170,7 +170,7 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
   border-right: 1px solid var(--line);
 }
 .caption {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 .amount {
@@ -180,12 +180,12 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
 }
 .amount small {
   margin-left: 4px;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 400;
   color: var(--ink-2);
 }
 .main-amount .sub {
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .compare {
@@ -198,7 +198,7 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
   grid-template-columns: 110px minmax(0, 1fr) 80px 110px;
   align-items: center;
   gap: 12px;
-  font-size: 13px;
+  font-size: 15px;
 }
 .compare-label {
   color: var(--ink-2);
@@ -217,7 +217,7 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
   background: var(--ink);
 }
 .compare-value {
-  font-size: 15px;
+  font-size: 17px;
   text-align: right;
 }
 .compare-diff {
@@ -228,12 +228,12 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 15px;
 }
 .table th {
   padding: 6px 8px;
   border-bottom: 1px solid var(--line-strong);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 400;
   color: var(--mute);
   text-align: left;
@@ -256,7 +256,7 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
 .table .total td {
   border-top: 1px solid var(--ink);
   border-bottom: 0;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
 }
 .sub {
@@ -264,7 +264,7 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
 }
 
 .foot {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--mute);
 }
 </style>

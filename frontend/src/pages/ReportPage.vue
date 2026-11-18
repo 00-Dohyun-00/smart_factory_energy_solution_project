@@ -1,8 +1,9 @@
 <!-- 성적표: 한 달 동안 ESS 추천 운영이 실제로 어땠는지 보여 줍니다 -->
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import BillCard from '@/components/BillCard.vue'
 import Chart from '@/components/Chart.vue'
+import { useThemeStore } from '@/stores/useThemeStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { useReportStore } from '@/stores/useReportStore'
 import {
@@ -19,18 +20,16 @@ const realtimeStore = useRealtimeStore()
 
 const STATUS_LABELS = { RECOMMENDED: '추천 중', APPLIED: '적용', IGNORED: '넘김', AUTO: '자동' }
 
-// ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 색 값을 그대로 적습니다.
-const COLOR = {
-  ink: '#14181c', // --ink
-  mute: '#646e77', // --mute
-  line: '#dde1e5', // --line
-  lineStrong: '#b9c0c7', // --line-strong
-  crit: '#c8372d', // --crit
-  grid: '#5b6472', // --src-grid
-  ess: '#0f8f8a', // --src-ess
-}
-// 히트맵 색 단계: 낮음(옅음) → 높음(진함). --src-grid 색을 흰색에 섞은 값
-const HEAT_COLORS = ['#ebecee', '#cdd0d4', '#adb1b8', '#848b96', '#5b6472']
+// 그래프(ECharts)는 CSS 변수를 못 읽으므로, 테마 스토어가 global.css에서 읽어 둔 지금 테마 색을 씀
+// (라이트·다크를 바꾸면 이 색이 바뀌고 그래프도 다시 그려짐)
+const themeStore = useThemeStore()
+const COLOR = themeStore.colors
+// 그래프 툴팁도 지금 테마 색으로
+const tooltipColors = () => ({
+  backgroundColor: COLOR.card,
+  borderColor: COLOR.line,
+  textStyle: { color: COLOR.ink },
+})
 
 // ---- 조회할 달 ----
 const month = ref('') // 예: '2026-11'
@@ -58,8 +57,15 @@ function moveMonth(step) {
 }
 
 // 인쇄 창 열기 (인쇄할 때의 모양은 아래 @media print와 MainLayout.vue에서 정함)
-function printReport() {
+// 다크 모드여도 종이에는 밝은 색으로 나오게, 인쇄하는 동안만 라이트 색으로 그래프를 다시 그림
+async function printReport() {
+  const isDark = themeStore.theme === 'dark'
+  if (isDark) {
+    themeStore.apply('light')
+    await nextTick() // 그래프가 라이트 색으로 다시 그려질 때까지 기다림
+  }
   window.print()
+  if (isDark) themeStore.apply()
 }
 
 // ---- CSV 저장 (엑셀에서 열 수 있는 표 파일) ----
@@ -231,9 +237,11 @@ const peakOption = computed(() => {
   const target = report.value.targetPeakKw
   return {
     animation: false,
+    textStyle: { fontSize: 14, color: COLOR.ink2 }, // 그래프 글자 기본 크기·색 (기본 12px은 작아서 키움)
     grid: { left: 52, right: 16, top: 34, bottom: 24 },
     legend: { top: 0, right: 0, textStyle: { color: COLOR.mute } },
     tooltip: {
+      ...tooltipColors(),
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       valueFormatter: (value) => `${formatKw(value)} kW`,
@@ -291,8 +299,10 @@ const heatOption = computed(() => {
 
   return {
     animation: false,
+    textStyle: { fontSize: 14, color: COLOR.ink2 }, // 그래프 글자 기본 크기·색 (기본 12px은 작아서 키움)
     grid: { left: 44, right: 12, top: 30, bottom: 22 },
     tooltip: {
+      ...tooltipColors(),
       formatter: (params) =>
         `${dayLabels[params.value[1]]} ${params.value[0]}시 · ${formatKw(params.value[2])} kW`,
     },
@@ -315,11 +325,11 @@ const heatOption = computed(() => {
       itemGap: 4,
       textStyle: { color: COLOR.mute },
       pieces: [
-        { lte: target * 0.72, color: HEAT_COLORS[0], label: '낮음' },
-        { gt: target * 0.72, lte: target * 0.8, color: HEAT_COLORS[1], label: ' ' },
-        { gt: target * 0.8, lte: target * 0.88, color: HEAT_COLORS[2], label: ' ' },
-        { gt: target * 0.88, lte: target * 0.95, color: HEAT_COLORS[3], label: ' ' },
-        { gt: target * 0.95, lte: target, color: HEAT_COLORS[4], label: '높음' },
+        { lte: target * 0.72, color: COLOR.heat1, label: '낮음' },
+        { gt: target * 0.72, lte: target * 0.8, color: COLOR.heat2, label: ' ' },
+        { gt: target * 0.8, lte: target * 0.88, color: COLOR.heat3, label: ' ' },
+        { gt: target * 0.88, lte: target * 0.95, color: COLOR.heat4, label: ' ' },
+        { gt: target * 0.95, lte: target, color: COLOR.heat5, label: '높음' },
         { gt: target, color: COLOR.crit, label: '목표 초과' },
       ],
     },
@@ -331,7 +341,7 @@ const heatOption = computed(() => {
           dates.indexOf(item.date),
           item.peakKw,
         ]),
-        itemStyle: { borderColor: '#fff', borderWidth: 1 },
+        itemStyle: { borderColor: COLOR.card, borderWidth: 1 },
         emphasis: { itemStyle: { borderColor: COLOR.ink, borderWidth: 1 } },
       },
     ],
@@ -341,8 +351,10 @@ const heatOption = computed(() => {
 // ---- ESS 일별 방전량 ----
 const essOption = computed(() => ({
   animation: false,
+  textStyle: { fontSize: 14, color: COLOR.ink2 }, // 그래프 글자 기본 크기·색 (기본 12px은 작아서 키움)
   grid: { left: 52, right: 12, top: 12, bottom: 24 },
   tooltip: {
+    ...tooltipColors(),
     trigger: 'axis',
     axisPointer: { type: 'shadow' },
     valueFormatter: (value) => `${formatInteger(value)} kWh`,
@@ -615,7 +627,7 @@ const essOption = computed(() => ({
   height: 34px;
   background: none;
   border: 0;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--ink-2);
 }
 .month button:hover:not(:disabled) {
@@ -627,7 +639,7 @@ const essOption = computed(() => ({
 }
 .month-label {
   min-width: 108px;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   text-align: center;
 }
@@ -656,7 +668,7 @@ const essOption = computed(() => ({
 }
 /* 화면 맨 아래의 주의 문구 */
 .caution {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 
@@ -702,12 +714,12 @@ const essOption = computed(() => ({
 }
 .kpi-unit {
   margin-left: 6px;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 400;
   color: var(--ink-2);
 }
 .kpi-sub {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 
@@ -719,12 +731,12 @@ const essOption = computed(() => ({
 }
 .note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 .link {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--accent);
 }
 .link:hover {
@@ -754,7 +766,7 @@ const essOption = computed(() => ({
 .table th {
   padding: 4px 8px 6px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--mute);
   text-align: left;
 }
@@ -798,11 +810,11 @@ const essOption = computed(() => ({
 }
 .stats dt,
 .solar-main dt {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--mute);
 }
 .stats dd {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
 }
 

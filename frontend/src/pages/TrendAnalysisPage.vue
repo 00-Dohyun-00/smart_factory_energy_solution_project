@@ -9,6 +9,7 @@
 import { computed, ref, watch } from 'vue'
 import Chart from '@/components/Chart.vue'
 import FitChart from '@/components/FitChart.vue'
+import { useThemeStore } from '@/stores/useThemeStore'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
 import { useHistoryStore } from '@/stores/useHistoryStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
@@ -210,18 +211,16 @@ function resetHistoryFilter() {
 }
 
 // ---- 그래프 공통 ----
-// ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
-const COLOR = {
-  ink: '#14181c', // --ink
-  ink2: '#3c444c', // --ink-2
-  mute: '#646e77', // --mute
-  faint: '#98a1a9', // --faint
-  line: '#dde1e5', // --line
-  crit: '#c8372d', // --crit
-  grid: '#5b6472', // --src-grid
-  solar: '#d19a00', // --src-solar
-  ess: '#0f8f8a', // --src-ess
-}
+// 그래프(ECharts)는 CSS 변수를 못 읽으므로, 테마 스토어가 global.css에서 읽어 둔 지금 테마 색을 씀
+// (라이트·다크를 바꾸면 이 색이 바뀌고 그래프도 다시 그려짐)
+const themeStore = useThemeStore()
+const COLOR = themeStore.colors
+// 그래프 툴팁도 지금 테마 색으로
+const tooltipColors = () => ({
+  backgroundColor: COLOR.card,
+  borderColor: COLOR.line,
+  textStyle: { color: COLOR.ink },
+})
 
 const isDaily = computed(() => trend.value?.interval === 'DAY') // 하루에 점 하나
 const isSingleDay = computed(() => trend.value?.from === trend.value?.to) // 하루만 조회
@@ -258,7 +257,7 @@ const FONT = {
   pin: 13, // 추천 기호
 }
 // 기준선 글자 밑에 까는 옅은 흰 바탕: 그래프 선 위에 글자가 겹쳐도 읽히게 함
-const MARK_LABEL_BOX = { backgroundColor: 'rgba(255, 255, 255, 0.85)', padding: [1, 4] }
+const markLabelBox = () => ({ backgroundColor: COLOR.labelBg, padding: [1, 4] })
 
 // 세 그래프가 같이 쓰는 가로축. withWeather = true면 날짜 아래에 날씨도 적음
 function timeAxis(withWeather) {
@@ -385,7 +384,7 @@ function markLines(lines, withPins = false) {
       color: item.color,
       fontWeight: 'bold',
       fontSize: FONT.mark,
-      ...MARK_LABEL_BOX,
+      ...markLabelBox(),
     },
   }))
   // 추천은 세로선을 긋지 않고(선이 많으면 그래프가 지저분해짐) 그래프 위쪽 띠에 기호만 적음.
@@ -459,10 +458,12 @@ const powerOption = computed(() => {
 
   return {
     animation: false,
+    textStyle: { color: COLOR.ink2 }, // 그래프 글자 기본 색 (지금 테마)
     // 위쪽에 범례와 추천 핀 기호가 들어가므로 여백을 넉넉히 둠
     grid: { left: 64, right: 24, top: 58, bottom: 32 },
     legend,
     tooltip: {
+      ...tooltipColors(),
       trigger: 'axis',
       // 값 목록 아래에 그 칸에 나온 추천을 함께 보여 줌
       formatter: (params) => {
@@ -498,8 +499,13 @@ const socOption = computed(() => {
   ])
   return {
     animation: false,
+    textStyle: { color: COLOR.ink2 }, // 그래프 글자 기본 색 (지금 테마)
     grid: { left: 64, right: 24, top: 20, bottom: 32 },
-    tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} %` },
+    tooltip: {
+      ...tooltipColors(),
+      trigger: 'axis',
+      valueFormatter: (value) => `${formatOneDecimal(value)} %`,
+    },
     xAxis: timeAxis(false),
     yAxis: { ...valueAxis, min: 0, max: 100, interval: 50 },
     series: [series],
@@ -514,10 +520,15 @@ const tempOption = computed(() => {
   room.markLine = markLines([{ value: limit, text: `온도 제한 ${limit}℃`, color: COLOR.crit }])
   return {
     animation: false,
+    textStyle: { color: COLOR.ink2 }, // 그래프 글자 기본 색 (지금 테마)
     // 가로축에 날짜와 날씨를 두 줄로 적으므로 아래 여백을 넉넉히 둠
     grid: { left: 64, right: 24, top: 40, bottom: 54 },
     legend,
-    tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} ℃` },
+    tooltip: {
+      ...tooltipColors(),
+      trigger: 'axis',
+      valueFormatter: (value) => `${formatOneDecimal(value)} ℃`,
+    },
     xAxis: timeAxis(true),
     yAxis: { ...valueAxis, min: 0, max: 40, interval: 10 },
     series: [outside, room],
@@ -602,10 +613,7 @@ const hourlyOption = computed(() => {
     const isLast = index === items.length - 1
     if (start !== null && (!isPeak || isLast)) {
       const end = isPeak ? index : index - 1
-      areas.push([
-        { xAxis: names[start], itemStyle: { color: 'rgba(20, 24, 28, 0.07)' } },
-        { xAxis: names[end] },
-      ])
+      areas.push([{ xAxis: names[start], itemStyle: { color: COLOR.band } }, { xAxis: names[end] }])
       start = null
     }
   })
@@ -616,8 +624,10 @@ const hourlyOption = computed(() => {
   if (patternUnit.value === 'DAY') labelStep = Math.ceil(items.length / 6)
   return {
     animation: false,
+    textStyle: { color: COLOR.ink2 }, // 그래프 글자 기본 색 (지금 테마)
     grid: { left: 60, right: 16, top: 28, bottom: 32 },
     tooltip: {
+      ...tooltipColors(),
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       valueFormatter: (value) => `${formatKw(value)} kW`,
@@ -655,7 +665,7 @@ const hourlyOption = computed(() => {
             color: COLOR.crit,
             fontWeight: 'bold',
             fontSize: FONT.mark,
-            ...MARK_LABEL_BOX,
+            ...markLabelBox(),
           },
           data: [{ yAxis: target }],
         },
@@ -1023,7 +1033,7 @@ const hourlyOption = computed(() => {
 }
 .crumb-note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 
@@ -1079,7 +1089,7 @@ const hourlyOption = computed(() => {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink-2);
   cursor: pointer;
 }
@@ -1090,7 +1100,7 @@ const hourlyOption = computed(() => {
 }
 .loading-note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 .date-error {
@@ -1140,7 +1150,7 @@ const hourlyOption = computed(() => {
   border-right: 0;
 }
 .summary dt {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--ink-2);
 }
 .summary dd {
@@ -1151,7 +1161,7 @@ const hourlyOption = computed(() => {
 }
 .summary small {
   margin-left: 4px;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 400;
   color: var(--ink-2);
 }
@@ -1163,7 +1173,7 @@ const hourlyOption = computed(() => {
 }
 .summary p {
   overflow: hidden;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1212,13 +1222,13 @@ const hourlyOption = computed(() => {
   border-top: 0;
 }
 .chart-title small {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 400;
   color: var(--mute);
 }
 .chart-note {
   margin-left: 8px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 400;
   color: var(--mute);
 }
@@ -1240,21 +1250,21 @@ const hourlyOption = computed(() => {
 }
 .note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 .foot-note {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--mute);
 }
 
 .pin-toggle {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 400;
 }
 .pin-error {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--crit);
 }
 
@@ -1265,7 +1275,7 @@ const hourlyOption = computed(() => {
 .view-switch button {
   height: 28px;
   padding: 0 10px;
-  font-size: 13px;
+  font-size: 15px;
 }
 /* 순위 보기 */
 .ranks {
@@ -1278,7 +1288,7 @@ const hourlyOption = computed(() => {
   grid-template-columns: 22px 64px minmax(0, 1fr) 76px 84px;
   gap: 8px;
   align-items: center;
-  font-size: 13px;
+  font-size: 15px;
 }
 .rank {
   color: var(--mute);
@@ -1297,7 +1307,7 @@ const hourlyOption = computed(() => {
   text-align: right;
 }
 .rank-period {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--mute);
 }
 .rank-period.peak {
@@ -1358,7 +1368,7 @@ const hourlyOption = computed(() => {
   z-index: 1;
   background: var(--card);
   border-bottom: 1px solid var(--ink);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--ink-2);
 }
@@ -1374,11 +1384,11 @@ const hourlyOption = computed(() => {
 /* 마우스를 올리거나 고른 줄은 칸 색 위에 옅은 먹색을 한 겹 더 얹음 */
 .history-row:hover > span,
 .history-row:hover > strong {
-  background-image: linear-gradient(rgba(20, 24, 28, 0.05), rgba(20, 24, 28, 0.05));
+  background-image: linear-gradient(var(--hover), var(--hover));
 }
 .history-row.active > span,
 .history-row.active > strong {
-  background-image: linear-gradient(rgba(20, 24, 28, 0.09), rgba(20, 24, 28, 0.09));
+  background-image: linear-gradient(var(--pressed), var(--pressed));
 }
 /* 그래프에 표시 중인 줄: 맨 왼쪽 칸에 굵은 줄 */
 .history-row.active .history-time {
@@ -1391,7 +1401,7 @@ const hourlyOption = computed(() => {
 .history-tag {
   padding: 0 5px;
   border: 1px solid var(--line-strong);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--mute);
 }
 .history-tag.decision {
@@ -1411,11 +1421,11 @@ const hourlyOption = computed(() => {
   color: var(--ink);
 }
 .history-detail {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink-2);
 }
 .history-value {
-  font-size: 13px;
+  font-size: 15px;
   text-align: right;
   white-space: nowrap;
 }
@@ -1430,7 +1440,7 @@ const hourlyOption = computed(() => {
   background: transparent;
   border: 0;
   border-bottom: 1px dashed var(--faint);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--ink-2);
   cursor: pointer;
@@ -1456,7 +1466,7 @@ const hourlyOption = computed(() => {
   background: var(--card);
   border: 1px solid var(--line-strong);
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink-2);
 }
 .filter-reset:hover {

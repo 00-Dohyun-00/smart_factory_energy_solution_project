@@ -8,6 +8,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import Chart from '@/components/Chart.vue'
+import { useThemeStore } from '@/stores/useThemeStore'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import {
@@ -162,17 +163,16 @@ const exceededPercent = computed(() =>
 )
 
 // ---- 그래프 공통 ----
-// ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
-const COLOR = {
-  ink: '#14181c', // --ink
-  mute: '#646e77', // --mute
-  line: '#dde1e5', // --line
-  lineStrong: '#b9c0c7', // --line-strong
-  crit: '#c8372d', // --crit
-  grid: '#5b6472', // --src-grid
-}
-// 히트맵 색 단계: 낮음(옅음) → 높음(진함). --src-grid 색을 흰색에 섞은 값
-const HEAT_COLORS = ['#ebecee', '#cdd0d4', '#adb1b8', '#848b96', '#5b6472']
+// 그래프(ECharts)는 CSS 변수를 못 읽으므로, 테마 스토어가 global.css에서 읽어 둔 지금 테마 색을 씀
+// (라이트·다크를 바꾸면 이 색이 바뀌고 그래프도 다시 그려짐)
+const themeStore = useThemeStore()
+const COLOR = themeStore.colors
+// 그래프 툴팁도 지금 테마 색으로
+const tooltipColors = () => ({
+  backgroundColor: COLOR.card,
+  borderColor: COLOR.line,
+  textStyle: { color: COLOR.ink },
+})
 
 const axisStyle = {
   axisLabel: { color: COLOR.mute },
@@ -192,9 +192,11 @@ const dailyOption = computed(() => {
   const days = peak.value.dailyPeaks
   return {
     animation: false,
+    textStyle: { fontSize: 14, color: COLOR.ink2 }, // 그래프 글자 기본 크기·색 (기본 12px은 작아서 키움)
     grid: { left: 52, right: 16, top: 34, bottom: 24 },
     legend: { top: 0, right: 0, textStyle: { color: COLOR.mute } },
     tooltip: {
+      ...tooltipColors(),
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       valueFormatter: (value) => `${formatKw(value)} kW`,
@@ -304,7 +306,7 @@ const heatOption = computed(() => {
             verticalAlign: 'bottom',
             fill: COLOR.ink,
             font: 'bold 12px sans-serif',
-            backgroundColor: '#fff', // --card
+            backgroundColor: COLOR.card,
             borderColor: item.textAtTop ? COLOR.ink : 'transparent',
             borderWidth: 1,
             padding: [2, 5],
@@ -316,8 +318,10 @@ const heatOption = computed(() => {
 
   return {
     animation: false,
+    textStyle: { fontSize: 14, color: COLOR.ink2 }, // 그래프 글자 기본 크기·색 (기본 12px은 작아서 키움)
     grid: { left: 52, right: 12, top: 30, bottom: 22 },
     tooltip: {
+      ...tooltipColors(),
       formatter: (params) =>
         `${dayLabels[params.value[1]]} ${params.value[0]}시 · ${formatKw(params.value[2])} kW`,
     },
@@ -341,11 +345,11 @@ const heatOption = computed(() => {
       itemGap: 4,
       textStyle: { color: COLOR.mute },
       pieces: [
-        { lte: target * 0.72, color: HEAT_COLORS[0], label: '낮음' },
-        { gt: target * 0.72, lte: target * 0.8, color: HEAT_COLORS[1], label: ' ' },
-        { gt: target * 0.8, lte: target * 0.88, color: HEAT_COLORS[2], label: ' ' },
-        { gt: target * 0.88, lte: target * 0.95, color: HEAT_COLORS[3], label: ' ' },
-        { gt: target * 0.95, lte: target, color: HEAT_COLORS[4], label: '높음' },
+        { lte: target * 0.72, color: COLOR.heat1, label: '낮음' },
+        { gt: target * 0.72, lte: target * 0.8, color: COLOR.heat2, label: ' ' },
+        { gt: target * 0.8, lte: target * 0.88, color: COLOR.heat3, label: ' ' },
+        { gt: target * 0.88, lte: target * 0.95, color: COLOR.heat4, label: ' ' },
+        { gt: target * 0.95, lte: target, color: COLOR.heat5, label: '높음' },
         { gt: target, color: COLOR.crit, label: '목표 초과' },
       ],
     },
@@ -353,7 +357,7 @@ const heatOption = computed(() => {
       {
         type: 'heatmap',
         data: peak.value.heatmap.map((item) => [item.hour, dates.indexOf(item.date), item.peakKw]),
-        itemStyle: { borderColor: '#fff', borderWidth: 1 },
+        itemStyle: { borderColor: COLOR.card, borderWidth: 1 },
         emphasis: { itemStyle: { borderColor: COLOR.ink, borderWidth: 1 } },
       },
       {
@@ -362,7 +366,10 @@ const heatOption = computed(() => {
         silent: true,
         clip: false,
         z: 10,
-        tooltip: { show: false },
+        tooltip: {
+          ...tooltipColors(),
+          show: false,
+        },
         renderItem: renderOutline,
         data: outlines.map((_, index) => [index]),
       },
@@ -598,7 +605,7 @@ const heatOption = computed(() => {
 }
 .crumb-note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 
@@ -652,7 +659,7 @@ const heatOption = computed(() => {
 }
 .loading-note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 .date-error {
@@ -702,7 +709,7 @@ const heatOption = computed(() => {
   border-right: 0;
 }
 .summary dt {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--ink-2);
 }
 .summary dd {
@@ -713,7 +720,7 @@ const heatOption = computed(() => {
 }
 .summary small {
   margin-left: 4px;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 400;
   color: var(--ink-2);
 }
@@ -725,7 +732,7 @@ const heatOption = computed(() => {
 }
 .summary p {
   overflow: hidden;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -743,7 +750,7 @@ const heatOption = computed(() => {
 }
 .note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 
@@ -798,7 +805,7 @@ const heatOption = computed(() => {
 .windows-head {
   background: var(--card);
   border-bottom: 1px solid var(--ink);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--ink-2);
 }
@@ -814,11 +821,11 @@ const heatOption = computed(() => {
 /* 마우스를 올리거나 고른 줄은 칸 색 위에 옅은 먹색을 한 겹 더 얹음 */
 .window-row:hover > span,
 .window-row:hover > strong {
-  background-image: linear-gradient(rgba(20, 24, 28, 0.05), rgba(20, 24, 28, 0.05));
+  background-image: linear-gradient(var(--hover), var(--hover));
 }
 .window-row.active > span,
 .window-row.active > strong {
-  background-image: linear-gradient(rgba(20, 24, 28, 0.09), rgba(20, 24, 28, 0.09));
+  background-image: linear-gradient(var(--pressed), var(--pressed));
 }
 /* 고른 줄: 맨 왼쪽 칸에 굵은 줄 */
 .window-row.active .rank {
@@ -833,11 +840,11 @@ const heatOption = computed(() => {
   overflow: hidden;
   line-height: 20px;
   text-overflow: ellipsis;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink-2);
 }
 .window-result {
-  font-size: 13px;
+  font-size: 15px;
 }
 .windows-empty {
   padding: 16px 0;
@@ -855,7 +862,7 @@ const heatOption = computed(() => {
   background: transparent;
   border: 0;
   border-bottom: 1px dashed var(--faint);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--ink-2);
   cursor: pointer;
@@ -880,7 +887,7 @@ const heatOption = computed(() => {
   background: var(--card);
   border: 1px solid var(--line-strong);
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink-2);
 }
 .filter-reset:hover {
@@ -891,7 +898,7 @@ const heatOption = computed(() => {
   align-self: flex-end;
   margin-top: auto;
   padding-top: 10px;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink-2);
   text-decoration: underline;
 }

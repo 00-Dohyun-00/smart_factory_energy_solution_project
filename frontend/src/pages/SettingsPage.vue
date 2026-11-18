@@ -445,7 +445,7 @@ const historyRows = computed(() =>
 }
 .crumb-note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 .crumb-note strong {
@@ -471,7 +471,7 @@ const historyRows = computed(() =>
 }
 .note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 
@@ -509,7 +509,7 @@ const historyRows = computed(() =>
   padding: 0 10px;
   background: var(--card);
   border: 1px solid var(--line-strong);
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--ink);
   text-align: right;
@@ -524,14 +524,14 @@ const historyRows = computed(() =>
   color: var(--ink-2);
 }
 .unit {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink-2);
 }
 .item-help,
 .item-note,
 .item-error {
   grid-column: 1 / -1;
-  font-size: 12px;
+  font-size: 14px;
 }
 .item-help {
   color: var(--mute);
@@ -588,10 +588,10 @@ const historyRows = computed(() =>
   border-left: 1px solid var(--line-strong);
 }
 .mode strong {
-  font-size: 15px;
+  font-size: 17px;
 }
 .mode span {
-  font-size: 12px;
+  font-size: 14px;
 }
 .mode:hover {
   background: var(--bg);
@@ -623,7 +623,7 @@ const historyRows = computed(() =>
 }
 .foot-text {
   margin-right: auto;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--mute);
 }
 .foot-text.done {
@@ -681,7 +681,7 @@ const historyRows = computed(() =>
 .table th {
   padding: 6px 12px 6px 0;
   border-bottom: 1px solid var(--ink);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 400;
   color: var(--mute);
   text-align: left;
