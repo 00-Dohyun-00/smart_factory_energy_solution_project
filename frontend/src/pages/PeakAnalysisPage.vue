@@ -23,11 +23,11 @@ const realtimeStore = useRealtimeStore()
 
 // 처리 상태는 색만으로 구분하지 않도록 도형을 함께 표시 (운영 로그 화면과 같은 표시)
 const STATUS_SHAPES = { APPLIED: '●', AUTO: '◇', IGNORED: '✕' }
-const TOP_COUNT = 8 // "피크가 높았던 구간"에 보여 줄 개수
 
-// 그 구간의 추천 처리를 한 줄 문구로 (명세 16번은 action·status 코드만 주므로 화면에서 글자로 바꿈)
+// 그 구간의 추천 처리를 한 줄 문구로 (status 코드를 화면에서 글자로 바꿈)
+// 백엔드 note는 추천 이유 문장이라 표 칸에 넣기엔 길어서 쓰지 않음
 function windowNote(item) {
-  if (!item.action) return '방전 추천 없음'
+  if (!item.status) return '방전 추천 없음'
   if (item.status === 'IGNORED') return '추천을 넘김'
   if (item.status === 'AUTO') return '자동 방전 (시뮬레이션)'
   if (item.status === 'APPLIED') return '방전 적용'
@@ -74,9 +74,8 @@ function applyPreset(name) {
 
 function load(showLoading = true) {
   if (!fromDate.value || !toDate.value || dateError.value) return
+  // "피크가 높았던 구간" 표도 이 응답(topWindows)에 함께 들어 있음
   analysisStore.fetchPeak(fromDate.value, toDate.value, showLoading)
-  // "피크가 높았던 구간" 표는 명세 16번(demand-intervals)으로 따로 받음
-  analysisStore.fetchPeakWindows(fromDate.value, toDate.value, TOP_COUNT)
 }
 
 // "피크가 높았던 구간" 표에서 누른 구간의 시작 시각 (히트맵에 그 칸을 표시)
@@ -520,10 +519,7 @@ const heatOption = computed(() => {
               </tr>
             </tbody>
           </table>
-          <p v-if="analysisStore.peakWindowsError" class="windows-error" role="alert">
-            구간 순위를 불러오지 못했습니다. ({{ analysisStore.peakWindowsError }})
-          </p>
-          <p v-else-if="!analysisStore.peakWindows.length" class="windows-empty">
+          <p v-if="!analysisStore.peakWindows.length" class="windows-empty">
             이 기간에는 구간 기록이 없습니다.
           </p>
           <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>
