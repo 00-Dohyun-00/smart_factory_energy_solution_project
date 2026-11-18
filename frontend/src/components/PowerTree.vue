@@ -23,7 +23,8 @@ const props = defineProps({
   thresholds: { type: Object, default: () => ({}) },
 })
 
-const emit = defineEmits(['update:modelValue'])
+// update:modelValue: 구역을 누름 / select-equipment: 설비 상자를 누름 (설비 id를 넘김. 고르기·풀기는 부모가 정함)
+const emit = defineEmits(['update:modelValue', 'select-equipment'])
 
 // 구역 이름. id는 설비의 zoneId와 같아야 함 (예: 브레이징로 BRZ-01 → zoneId 'Z2')
 const ZONE_NAMES = [
@@ -322,12 +323,20 @@ function unitX(left, text, charWidth) {
         :x2="Math.max(selected.centerX, children[children.length - 1].centerX)"
         :y2="ZONE_Y + ZONE_HEIGHT + 48"
       />
+      <!-- 설비 상자 (누르면 선택, 다시 누르면 풀림. 오른쪽 "이 구역의 설비"와 같은 선택을 씀, 2026-11-18) -->
       <g
         v-for="item in children"
         :key="item.id"
         class="equipment"
-        :class="{ over: item.over }"
+        :class="{ over: item.over, selected: item.id === selectedEquipment }"
         :style="{ '--equipment-opacity': item.opacity }"
+        role="button"
+        tabindex="0"
+        :aria-pressed="item.id === selectedEquipment"
+        :aria-label="`${item.name} 설비 고르기`"
+        @click="emit('select-equipment', item.id)"
+        @keydown.enter="emit('select-equipment', item.id)"
+        @keydown.space.prevent="emit('select-equipment', item.id)"
       >
         <line
           class="wire"
@@ -506,6 +515,23 @@ function unitX(left, text, charWidth) {
 .zone.over .node {
   stroke: var(--crit);
   stroke-width: 2.5;
+}
+/* 설비 상자: 누를 수 있음 (구역 상자와 같은 마우스 올림·고름 표시) */
+.equipment {
+  cursor: pointer;
+  outline: none;
+}
+.equipment:hover .node {
+  stroke: var(--ink-2);
+}
+.equipment:focus-visible .node {
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+.equipment.selected .node {
+  fill: color-mix(in srgb, var(--zone) calc(16% * var(--tint-k)), var(--card));
+  stroke: var(--ink);
+  stroke-width: 3;
 }
 /* 설비 상자: 고른 구역 색, 설비마다 진하기만 다름 */
 .equipment .node {

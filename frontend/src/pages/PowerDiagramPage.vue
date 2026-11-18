@@ -319,6 +319,7 @@ const equipmentShareOption = computed(() => {
             :stale="!realtimeStore.connected"
             :selected-equipment="selectedEquipment"
             :thresholds="thresholds"
+            @select-equipment="toggleEquipment"
           />
         </div>
       </section>
