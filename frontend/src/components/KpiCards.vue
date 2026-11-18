@@ -256,7 +256,7 @@ const kpis = computed(() => {
             :key="index"
             class="seg"
             :class="[item.className, { ring: item.ring }]"
-            :d="item.ring ? 'M2 62 A58 58 0 0 1 118 62' : 'M10 62 A50 50 0 0 1 110 62'"
+            :d="item.ring ? 'M0.5 62 A59.5 59.5 0 0 1 119.5 62' : 'M10 62 A50 50 0 0 1 110 62'"
             pathLength="100"
             :stroke-dasharray="item.dash"
           />
@@ -392,6 +392,7 @@ const kpis = computed(() => {
 
 /* 계기판 */
 .gauge {
+  overflow: visible; /* 두꺼운 바깥 테가 그림 가장자리에서 잘리지 않게 */
   width: 100%;
   max-width: 200px;
   margin-top: 2px;
@@ -406,7 +407,7 @@ const kpis = computed(() => {
 }
 /* 바깥 가는 테 (정상 · 주의 · 경고 구간 표시) */
 .seg.ring {
-  stroke-width: 2.5; /* 안쪽 게이지와 살짝 띄운 가는 테 */
+  stroke-width: 4.5; /* 바깥 구간 테: 잘 보이게 두껍게, 안쪽 게이지와는 살짝 띄움 */
 }
 .seg.ring-ok {
   color: var(--gauge-ok);

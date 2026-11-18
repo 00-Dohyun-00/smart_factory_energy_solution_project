@@ -72,13 +72,14 @@
     --line: #342b45;
     --line-strong: #4f4463;
     --ink: #e9e5f0;
-    --ink-2: #c8c1d6;
-    --mute: #9c94ae;
-    --faint: #726a85;
+    /* 보조 글자색: 카드·옅게 칠한 상자 위에서도 글자 대비 4.5:1 이상이 되게 밝힘 (2026-11-18 다크 대비 점검) */
+    --ink-2: #d3cde0;
+    --mute: #b0a9c2;
+    --faint: #928ba7;
     --ok: #52b37c;
     --warn: #dba24a;
     --crit: #f06b60;
-    --lost: #847c96;
+    --lost: #9890aa;
     --accent: #e9e5f0;
     --src-grid: #93a0ae;
     --src-solar: #e3b23f;

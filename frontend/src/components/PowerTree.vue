@@ -534,6 +534,11 @@ function unitX(left, text, charWidth) {
   stroke: var(--ink);
   stroke-width: 2;
 }
+/* 고른 구역 상자는 색을 더 진하게 깔므로, 작은 글자도 한 단계 진한 글자색으로 (다크 모드 대비) */
+.zone.selected .sub,
+.zone.selected .unit {
+  fill: var(--ink-2);
+}
 .zone.selected .node {
   fill: color-mix(in srgb, var(--zone) calc(16% * var(--tint-k)), var(--card));
   stroke: var(--ink);
