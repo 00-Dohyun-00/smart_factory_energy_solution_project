@@ -240,13 +240,14 @@ src/
 | 8 | GET | `/api/recommendations?from=&to=` | `getBatteryDecisions` | 추천 이력, 추이 분석 (**연결됨**, 2026-11-17) |
 | 9 | GET | `/api/reports?month=` | `getReport` | 월간 성적표 (**연결됨**, 2026-11-18) |
 | 10 | GET | `/api/analyses/trend?from=&to=&interval=` | `getTrendAnalysis` | 추이 분석 (**연결됨**, 2026-11-18) |
-| 11 | GET | `/api/settings` | `getSettings` | 공통 틀, 환경 설정 |
-| 12 | PUT | `/api/settings` 본문 `[{ key, value }]` | `updateSettings` | 환경 설정 |
-| 13 | GET | `/api/setting-histories?from=&to=` | `getSettingHistories` | 환경 설정 |
+| 11 | GET | `/api/settings` | `getSettings` | 공통 틀, 환경 설정 (**연결됨**, 2026-11-18) |
+| 12 | PUT | `/api/settings` 본문 `[{ key, value }]` | `updateSettings` | 환경 설정 (**연결됨**, 2026-11-18) |
+| 13 | GET | `/api/setting-histories?from=&to=` | `getSettingHistories` | 환경 설정 (**연결됨**, 2026-11-18) |
 | (추가) | GET | `/api/analyses/peak?from=&to=` | `getPeakAnalysis` | 피크 분석 (**연결됨**, 2026-11-18) |
 
 - 명세 6번(`/api/site-powers/recent`)은 쓰는 화면이 없어 함수를 지웠다.
 - 명세 16번(`/api/demand-intervals`)은 백엔드가 피크 분석 응답의 `topWindows`로 함께 주기로 만들어서 함수를 지웠다(2026-11-18). `useAnalysisStore.peakWindows`는 `topWindows`를 꺼내 둔 것이다.
+- 설정은 공용 DB 값이라 화면에서 저장하면 팀원 모두에게 바로 바뀐다. 백엔드는 `peak.target_kw`·`peak.warn_ratio`·`ess.soc_low`·`ess.soc_high`·`ess.room_temp_limit`·`operation.auto_mode`만 저장을 허용하고, 화면에서 고칠 수 있게 둔 `operation.poll_seconds`·`operation.decision_valid_minutes`는 "화면에서 바꿀 수 없는 값"으로 거절한다(팀 결정 대기). 실시간 화면은 아직 가짜 데이터라 저장한 목표 피크가 통합 화면의 단계·게이지에는 반영되지 않는다.
 - 설정 값은 명세대로 **문자열**로 오고 간다. `useSettingsStore`가 `values`에서 숫자·`true`/`false`로 바꿔 주고, 저장할 때 다시 문자열로 보낸다. 키 이름은 명세 그대로 쓴다(예: `settingsStore.values['ess.max_power_kw']`).
 - 가짜 데이터에 임시로 넣어 쓰는 값(백엔드와 확정 필요): 최대 피크 `todayPeakKw`·`monthPeakKw`, 요금 시간대 `tariff{ period, label, until, nextLabel, periods[] }`, ESS `pcsStatus`·`sohPercent`.
 
