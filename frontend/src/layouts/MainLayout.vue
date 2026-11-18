@@ -4,12 +4,15 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
+import { useThemeStore } from '@/stores/useThemeStore'
+import WeatherIcon from '@/components/WeatherIcon.vue'
 import { formatClock } from '@/utils/format'
 
 const realtimeStore = useRealtimeStore()
 const route = useRoute()
 
 const settingsStore = useSettingsStore()
+const themeStore = useThemeStore() // 라이트 / 다크 테마 (아래쪽 버튼으로 바꿈)
 
 // 폴링 주기(초). 환경 설정의 "화면 갱신 주기"를 쓰고, 아직 못 받았으면 5초
 const pollSeconds = computed(() => settingsStore.values['operation.poll_seconds'] ?? 5)
@@ -186,6 +189,23 @@ const peakMark = computed(() => {
         >
           {{ realtimeStore.connected ? '●' : '◆' }}
         </span>
+        <!-- 접었을 때도 날씨는 아이콘으로 보여 줌 (마우스를 올리면 글자와 기온) -->
+        <span
+          v-if="realtimeStore.status"
+          class="rail-weather"
+          :title="`${realtimeStore.status.weather.text} ${realtimeStore.status.weather.tempC}℃`"
+        >
+          <WeatherIcon :text="realtimeStore.status.weather.text" :size="22" />
+        </span>
+        <!-- 접었을 때도 라이트/다크를 바꿀 수 있게 -->
+        <button
+          class="rail-theme"
+          :aria-label="themeStore.theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기'"
+          :title="themeStore.theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기'"
+          @click="themeStore.toggle()"
+        >
+          {{ themeStore.theme === 'dark' ? '☀' : '◐' }}
+        </button>
       </div>
 
       <nav v-if="!collapsed" class="menu" aria-label="주 메뉴">
@@ -202,7 +222,8 @@ const peakMark = computed(() => {
             {{ menu.label }}
           </button>
 
-          <ul v-if="opened.includes(menu.label)">
+          <!-- 하위 메뉴: 들여 쓰고 옅은 바탕 + 왼쪽 안내선으로 상위 메뉴와 구분 -->
+          <ul v-if="opened.includes(menu.label)" class="sub-list">
             <li v-for="child in menu.children" :key="child.to">
               <RouterLink :to="child.to" class="sub-link">
                 {{ child.label }}
@@ -223,16 +244,49 @@ const peakMark = computed(() => {
       </nav>
 
       <div v-if="!collapsed" class="foot">
-        <RouterLink to="/settings" class="settings-link">환경 설정</RouterLink>
+        <!-- 환경 설정 링크와 라이트/다크 전환 버튼을 한 줄에 -->
+        <div class="foot-top">
+          <RouterLink to="/settings" class="settings-link">
+            <!-- 톱니바퀴 아이콘 (SVG 직접 그림) -->
+            <svg class="gear-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="6.5" />
+              <circle cx="12" cy="12" r="2.5" />
+              <path
+                d="M18.5 12 H21.5 M16.6 16.6 L18.7 18.7 M12 18.5 V21.5 M7.4 16.6 L5.3 18.7 M5.5 12 H2.5 M7.4 7.4 L5.3 5.3 M12 5.5 V2.5 M16.6 7.4 L18.7 5.3"
+              />
+            </svg>
+            환경 설정
+          </RouterLink>
+          <button
+            class="theme-button"
+            :aria-label="
+              themeStore.theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기'
+            "
+            :title="themeStore.theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기'"
+            @click="themeStore.toggle()"
+          >
+            <span aria-hidden="true">{{ themeStore.theme === 'dark' ? '☀' : '◐' }}</span>
+            {{ themeStore.theme === 'dark' ? '라이트' : '다크' }}
+          </button>
+        </div>
         <!-- 시각은 브라우저 시계가 아니라 서버가 보낸 값(recordedAt)을 씀 -->
-        <p class="clock num">{{ formatClock(realtimeStore.status?.recordedAt) }}</p>
+        <p class="clock num">
+          <!-- 시계 아이콘 (SVG 직접 그림, 색은 글자색을 따라감) -->
+          <svg class="clock-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7 V12 L15.5 14" />
+          </svg>
+          {{ formatClock(realtimeStore.status?.recordedAt) }}
+        </p>
         <!-- 시계가 실제보다 빨리 가는 이유를 알려 줌 (시뮬레이션이 배속으로 돌 때만) -->
         <p v-if="realtimeStore.status?.simulationSpeed > 1" class="speed">
           시뮬레이션 <span class="num">{{ realtimeStore.status.simulationSpeed }}</span>배속
         </p>
+        <!-- 날씨: 아이콘 + 기온 + 날씨 글자 (글자도 함께 적어 아이콘을 모르는 사람도 알 수 있게) -->
         <p v-if="realtimeStore.status" class="weather">
-          {{ realtimeStore.status.weather.text }}
-          <span class="num">{{ realtimeStore.status.weather.tempC }}℃</span>
+          <WeatherIcon :text="realtimeStore.status.weather.text" :size="26" />
+          <span class="weather-temp num">{{ realtimeStore.status.weather.tempC }}℃</span>
+          <span class="weather-text">{{ realtimeStore.status.weather.text }}</span>
         </p>
         <p v-if="realtimeStore.connected" class="connection on">
           <span aria-hidden="true">●</span> 연결됨
@@ -367,6 +421,7 @@ const peakMark = computed(() => {
   flex: 1;
   overflow: auto;
 }
+/* 상위 메뉴(누르면 펼침): 굵은 글자 */
 .menu-button {
   display: flex;
   align-items: center;
@@ -376,6 +431,7 @@ const peakMark = computed(() => {
   background: none;
   border: 0;
   font-size: 15px;
+  font-weight: 700;
   color: var(--ink-2);
   text-align: left;
 }
@@ -391,10 +447,18 @@ const peakMark = computed(() => {
   font-size: 11px;
   color: var(--mute);
 }
+/* 하위 메뉴 묶음: 옅은 바탕 + 왼쪽 안내선 */
+.sub-list {
+  margin: 0 0 4px 26px;
+  background: var(--hover);
+  border-left: 2px solid var(--line-strong);
+}
+/* 하위 메뉴(화면 이동): 보통 굵기, 조금 작은 글자 */
 .sub-link {
   display: flex;
   align-items: center;
-  padding: 9px 16px 9px 40px;
+  padding: 8px 16px 8px 14px;
+  font-size: 14px;
   color: var(--ink-2);
 }
 .sub-link:hover {
@@ -402,7 +466,8 @@ const peakMark = computed(() => {
 }
 /* 지금 보고 있는 화면 (Vue Router가 자동으로 붙여 주는 클래스) */
 .sub-link.router-link-exact-active {
-  padding-left: 36px;
+  margin-left: -2px; /* 안내선 자리에 진한 선을 겹쳐 그림 */
+  padding-left: 12px;
   background: var(--bg);
   border-left: 4px solid var(--ink);
   font-weight: 700;
@@ -423,10 +488,17 @@ const peakMark = computed(() => {
   padding: 12px 20px 0;
   border-top: 1px solid var(--line);
 }
-/* 메뉴 맨 아래의 환경 설정 링크 */
-.settings-link {
-  display: block;
+/* 메뉴 맨 아래의 환경 설정 링크 + 라이트/다크 버튼 */
+.foot-top {
+  display: flex;
+  align-items: center;
   margin: -4px -20px 10px;
+}
+.settings-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
   padding: 9px 20px;
   font-size: 15px;
   color: var(--ink-2);
@@ -442,16 +514,84 @@ const peakMark = computed(() => {
   color: var(--ink);
 }
 .clock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 22px;
   font-weight: 700;
   line-height: 1.3;
+}
+.gear-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.clock-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .speed {
   font-size: 12px;
   color: var(--mute);
 }
 .weather {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 5px 0 6px; /* 위: 시각과 아주 살짝 띄움 / 아래: 연결 표시와의 간격을 예전의 1.5배로 */
+  color: var(--ink-2);
+}
+.weather-temp {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.weather-text {
   font-size: 13px;
+}
+.rail-weather {
+  color: var(--ink-2);
+}
+/* 라이트/다크 전환 버튼 */
+.theme-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center; /* 글자 가운데 정렬 */
+  gap: 4px;
+  width: 66px; /* 라이트 모드("◐ 다크")일 때 크기로 고정 → 다크로 바꿔도("☀ 라이트") 버튼 크기가 그대로 */
+  height: 28px;
+  margin-right: 16px;
+  padding: 0;
+  white-space: nowrap;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.theme-button:hover,
+.rail-theme:hover {
+  background: var(--bg);
+}
+.rail-theme {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 15px;
   color: var(--ink-2);
 }
 .connection {

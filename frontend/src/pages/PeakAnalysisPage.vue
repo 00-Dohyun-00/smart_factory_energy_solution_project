@@ -8,6 +8,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import Chart from '@/components/Chart.vue'
+import { useThemeStore } from '@/stores/useThemeStore'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import {
@@ -126,17 +127,24 @@ const exceededPercent = computed(() =>
 )
 
 // ---- 그래프 공통 ----
-// ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
-const COLOR = {
-  ink: '#14181c', // --ink
-  mute: '#646e77', // --mute
-  line: '#dde1e5', // --line
-  lineStrong: '#b9c0c7', // --line-strong
-  crit: '#c8372d', // --crit
-  grid: '#5b6472', // --src-grid
-}
+// 그래프(ECharts)는 CSS 변수를 못 읽으므로, 테마 스토어가 global.css에서 읽어 둔 지금 테마 색을 씀
+// (라이트·다크를 바꾸면 이 색이 바뀌고 그래프도 다시 그려짐)
+const themeStore = useThemeStore()
+const COLOR = themeStore.colors
+// 그래프 툴팁도 지금 테마 색으로
+const tooltipColors = () => ({
+  backgroundColor: COLOR.card,
+  borderColor: COLOR.line,
+  textStyle: { color: COLOR.ink },
+})
 // 히트맵 색 단계: 낮음(옅음) → 높음(진함). --src-grid 색을 흰색에 섞은 값
-const HEAT_COLORS = ['#ebecee', '#cdd0d4', '#adb1b8', '#848b96', '#5b6472']
+const HEAT_COLORS = computed(() => [
+  COLOR.heat1,
+  COLOR.heat2,
+  COLOR.heat3,
+  COLOR.heat4,
+  COLOR.heat5,
+])
 
 const axisStyle = {
   axisLabel: { color: COLOR.mute },
@@ -159,6 +167,7 @@ const dailyOption = computed(() => {
     grid: { left: 52, right: 16, top: 34, bottom: 24 },
     legend: { top: 0, right: 0, textStyle: { color: COLOR.mute } },
     tooltip: {
+      ...tooltipColors(),
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
       valueFormatter: (value) => `${formatKw(value)} kW`,
@@ -268,7 +277,7 @@ const heatOption = computed(() => {
             verticalAlign: 'bottom',
             fill: COLOR.ink,
             font: 'bold 12px sans-serif',
-            backgroundColor: '#fff', // --card
+            backgroundColor: COLOR.card,
             borderColor: item.textAtTop ? COLOR.ink : 'transparent',
             borderWidth: 1,
             padding: [2, 5],
@@ -282,6 +291,7 @@ const heatOption = computed(() => {
     animation: false,
     grid: { left: 52, right: 12, top: 30, bottom: 22 },
     tooltip: {
+      ...tooltipColors(),
       formatter: (params) =>
         `${dayLabels[params.value[1]]} ${params.value[0]}시 · ${formatKw(params.value[2])} kW`,
     },
@@ -305,11 +315,11 @@ const heatOption = computed(() => {
       itemGap: 4,
       textStyle: { color: COLOR.mute },
       pieces: [
-        { lte: target * 0.72, color: HEAT_COLORS[0], label: '낮음' },
-        { gt: target * 0.72, lte: target * 0.8, color: HEAT_COLORS[1], label: ' ' },
-        { gt: target * 0.8, lte: target * 0.88, color: HEAT_COLORS[2], label: ' ' },
-        { gt: target * 0.88, lte: target * 0.95, color: HEAT_COLORS[3], label: ' ' },
-        { gt: target * 0.95, lte: target, color: HEAT_COLORS[4], label: '높음' },
+        { lte: target * 0.72, color: HEAT_COLORS.value[0], label: '낮음' },
+        { gt: target * 0.72, lte: target * 0.8, color: HEAT_COLORS.value[1], label: ' ' },
+        { gt: target * 0.8, lte: target * 0.88, color: HEAT_COLORS.value[2], label: ' ' },
+        { gt: target * 0.88, lte: target * 0.95, color: HEAT_COLORS.value[3], label: ' ' },
+        { gt: target * 0.95, lte: target, color: HEAT_COLORS.value[4], label: '높음' },
         { gt: target, color: COLOR.crit, label: '목표 초과' },
       ],
     },
@@ -317,7 +327,7 @@ const heatOption = computed(() => {
       {
         type: 'heatmap',
         data: peak.value.heatmap.map((item) => [item.hour, dates.indexOf(item.date), item.peakKw]),
-        itemStyle: { borderColor: '#fff', borderWidth: 1 },
+        itemStyle: { borderColor: COLOR.card, borderWidth: 1 },
         emphasis: { itemStyle: { borderColor: COLOR.ink, borderWidth: 1 } },
       },
       {
