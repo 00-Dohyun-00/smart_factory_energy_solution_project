@@ -30,6 +30,7 @@ public class SupabaseHealthChecker {
     private final String primaryUrl;
     private final String primaryUsername;
     private final String primaryPassword;
+    private final boolean failoverEnabled;
     private final DbSyncService dbSyncService;
 
     private volatile String status = "UP";
@@ -44,10 +45,13 @@ public class SupabaseHealthChecker {
             @Value("${PRIMARY_DB_URL}") String primaryUrl,
             @Value("${PRIMARY_DB_USERNAME}") String primaryUsername,
             @Value("${PRIMARY_DB_PASSWORD}") String primaryPassword,
+            // 로컬 backup-db를 안 띄운 PC에서는 FAILOVER_ENABLED=false로 자동 전환 자체를 꺼둘 수 있음
+            @Value("${FAILOVER_ENABLED:true}") boolean failoverEnabled,
             DbSyncService dbSyncService) {
         this.primaryUrl = primaryUrl;
         this.primaryUsername = primaryUsername;
         this.primaryPassword = primaryPassword;
+        this.failoverEnabled = failoverEnabled;
         this.dbSyncService = dbSyncService;
     }
 
@@ -72,7 +76,7 @@ public class SupabaseHealthChecker {
 
     @Scheduled(fixedDelay = 10_000)
     public void check() {
-        if (manualTarget.get() != null) {
+        if (!failoverEnabled || manualTarget.get() != null) {
             return;
         }
 
@@ -107,14 +111,17 @@ public class SupabaseHealthChecker {
 
     private boolean ping() {
         try {
-            DriverManager.setLoginTimeout(3);
+            // Supabase 풀러는 매번 새 연결(SSL 핸드셰이크 포함)이라 HikariCP로 보는 "이미 연결된" 속도보다 느릴 수 있어서
+            // 넉넉하게 5초로 둠 (기존 3초는 간헐적으로 넘겨서 거짓 장애 감지를 일으켰음)
+            DriverManager.setLoginTimeout(5);
             try (Connection connection = DriverManager.getConnection(primaryUrl, primaryUsername, primaryPassword);
                  Statement statement = connection.createStatement()) {
-                statement.setQueryTimeout(3);
+                statement.setQueryTimeout(5);
                 statement.execute("SELECT 1");
                 return true;
             }
         } catch (SQLException e) {
+            log.warn("[DB-HEALTH] Supabase ping 실패: {}", e.getMessage());
             return false;
         }
     }

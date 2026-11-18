@@ -64,6 +64,8 @@ public class DataSourceConfig {
         // 둘 중 하나가 기동 시점에 이미 장애 상태여도 서버가 뜰 수 있게,
         // 풀 생성 시 첫 연결 확인에서 실패해도 앱을 멈추지 않습니다. (연결은 실제로 쓸 때 다시 시도)
         dataSource.setInitializationFailTimeout(-1);
+        // 전환된 DB가 실제로는 연결이 안 될 때, 기본값(30초)만큼 요청이 멈춰있지 않고 빠르게 실패하도록
+        dataSource.setConnectionTimeout(5_000);
         return dataSource;
     }
 }
