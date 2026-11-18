@@ -78,6 +78,13 @@ watch(
 
 const report = computed(() => reportStore.report)
 
+// 백엔드가 기록이 모자라면 hasData가 true여도 일별 피크·히트맵을 null로 줄 때가 있음 → 빈 목록으로 보고 "기록 없음" 표시
+const dailyPeaks = computed(() => report.value?.dailyPeaks ?? [])
+const heatCells = computed(() => report.value?.heatmap ?? [])
+// 목표 피크. 설정 값을 못 찾으면 null → 목표선·목표 판정을 그리지 않음
+const targetKw = computed(() => report.value?.targetPeakKw ?? null)
+const isOverTarget = (kw) => targetKw.value !== null && kw > targetKw.value
+
 // 받아 둔 성적표가 지금 고른 달의 것인지 (기록 없는 달은 month, 있는 달은 periodStart로 판단)
 const isSameMonth = computed(() => {
   const data = report.value
@@ -103,9 +110,11 @@ const historyLink = computed(() => ({
 // ---- 맨 위 핵심 숫자 4개 ----
 const kpis = computed(() => {
   const summary = report.value.summary
-  const target = report.value.targetPeakKw
+  const target = targetKw.value
   const bill = report.value.bill
-  const peakOver = summary.monthPeakKw > target
+  const peakOver = isOverTarget(summary.monthPeakKw)
+  // 목표 값이 없으면 달성/초과를 말할 수 없으므로 판정 글자를 뺌
+  const verdict = target === null ? '' : `${peakOver ? '■ 목표 초과' : '● 목표 달성'} · `
   // 전기요금은 아래 전기요금 카드의 큰 금액과 같은 기준으로 보여 줌
   // 진행 중인 달: 월말 예상 + "오늘까지" 금액 / 끝난 달: 그 달 전체 요금
   const billKpi = isLatestMonth.value
@@ -126,7 +135,7 @@ const kpis = computed(() => {
       value: formatKw(summary.monthPeakKw),
       unit: 'kW',
       // 색만으로 구분하지 않도록 도형 + 글자(■ 목표 초과 / ● 목표 달성)도 함께 적음
-      sub: `${peakOver ? '■ 목표 초과' : '● 목표 달성'} · 목표 ${formatKw(target)} kW · ${formatMonthDayTime(summary.monthPeakAt).slice(0, 11)}`,
+      sub: `${verdict}목표 ${formatKw(target)} kW · ${formatMonthDayTime(summary.monthPeakAt).slice(0, 11)}`,
       over: peakOver, // 목표를 넘었으면 빨강으로 표시
     },
     {
@@ -158,12 +167,13 @@ const axisStyle = {
 // ---- 일별 최대 피크와 저감량 ----
 // 차이를 알아보기 쉽게 세로축을 0이 아닌 값에서 시작함 (표시용 계산)
 const peakAxisMin = computed(() => {
-  const lowest = Math.min(...report.value.dailyPeaks.map((item) => item.peakKw))
+  if (!dailyPeaks.value.length) return 0
+  const lowest = Math.min(...dailyPeaks.value.map((item) => item.peakKw))
   return Math.floor((lowest * 0.9) / 100) * 100
 })
 
 const peakOption = computed(() => {
-  const target = report.value.targetPeakKw
+  const target = targetKw.value
   return {
     animation: false,
     grid: { left: 52, right: 16, top: 34, bottom: 24 },
@@ -175,7 +185,7 @@ const peakOption = computed(() => {
     },
     xAxis: {
       type: 'category',
-      data: report.value.dailyPeaks.map((item) => dayLabel(item.date)),
+      data: dailyPeaks.value.map((item) => dayLabel(item.date)),
       ...axisStyle,
     },
     yAxis: {
@@ -189,7 +199,7 @@ const peakOption = computed(() => {
         name: '방전하지 않았을 때 예상',
         type: 'bar',
         barWidth: '56%',
-        data: report.value.dailyPeaks.map((item) => item.expectedKw),
+        data: dailyPeaks.value.map((item) => item.expectedKw),
         itemStyle: { color: COLOR.lineStrong },
       },
       {
@@ -199,9 +209,9 @@ const peakOption = computed(() => {
         barWidth: '56%',
         barGap: '-100%',
         itemStyle: { color: COLOR.grid },
-        data: report.value.dailyPeaks.map((item) => ({
+        data: dailyPeaks.value.map((item) => ({
           value: item.peakKw,
-          itemStyle: { color: item.peakKw > target ? COLOR.crit : COLOR.grid },
+          itemStyle: { color: isOverTarget(item.peakKw) ? COLOR.crit : COLOR.grid },
         })),
         markLine: {
           silent: true,
@@ -213,7 +223,8 @@ const peakOption = computed(() => {
             color: COLOR.ink,
             fontWeight: 'bold',
           },
-          data: [{ yAxis: target }],
+          // 목표 값이 없으면 선을 그리지 않음 (null을 넣으면 ECharts 오류)
+          data: target === null ? [] : [{ yAxis: target }],
         },
       },
     ],
@@ -222,11 +233,11 @@ const peakOption = computed(() => {
 
 // ---- 피크가 몰리는 시간대 (날짜 × 시각 히트맵) ----
 // 세로로 긴 배치라 날짜 수에 맞춰 칸이 납작해지지 않게 높이를 잡음
-const heatHeight = computed(() => Math.max(240, report.value.dailyPeaks.length * 14 + 60))
+const heatHeight = computed(() => Math.max(240, dailyPeaks.value.length * 14 + 60))
 
 const heatOption = computed(() => {
-  const target = report.value.targetPeakKw
-  const dates = report.value.dailyPeaks.map((item) => item.date)
+  const target = targetKw.value
+  const dates = dailyPeaks.value.map((item) => item.date)
   const dayLabels = dates.map(dayLabel)
 
   return {
@@ -266,11 +277,7 @@ const heatOption = computed(() => {
     series: [
       {
         type: 'heatmap',
-        data: report.value.heatmap.map((item) => [
-          item.hour,
-          dates.indexOf(item.date),
-          item.peakKw,
-        ]),
+        data: heatCells.value.map((item) => [item.hour, dates.indexOf(item.date), item.peakKw]),
         itemStyle: { borderColor: '#fff', borderWidth: 1 },
         emphasis: { itemStyle: { borderColor: COLOR.ink, borderWidth: 1 } },
       },
@@ -387,7 +394,8 @@ const essOption = computed(() => ({
             단위 kW · 빨강은 목표 초과 · 세로축은 {{ formatKw(peakAxisMin) }}부터
           </span>
         </div>
-        <Chart class="chart" :option="peakOption" :height="230" />
+        <Chart v-if="dailyPeaks.length" class="chart" :option="peakOption" :height="230" />
+        <p v-else class="empty">이 달에는 일별 피크 기록이 없습니다.</p>
       </section>
 
       <section class="card">
@@ -396,7 +404,21 @@ const essOption = computed(() => ({
           <span class="note">칸 하나 = 그 날 그 시각의 최대 15분 피크</span>
         </div>
         <!-- key: 날짜 수가 바뀌면 그래프 높이도 바뀌므로 새로 만듦 -->
-        <Chart class="chart" :key="heatHeight" :option="heatOption" :height="heatHeight" />
+        <!-- 목표 값이 없으면 색 단계(목표 대비 비율)를 나눌 수 없어서 그리지 않음 -->
+        <Chart
+          v-if="dailyPeaks.length && targetKw !== null"
+          class="chart"
+          :key="heatHeight"
+          :option="heatOption"
+          :height="heatHeight"
+        />
+        <p v-else class="empty">
+          {{
+            dailyPeaks.length
+              ? '목표 피크 값이 없어 색 단계를 나눌 수 없습니다.'
+              : '이 달에는 시간대별 피크 기록이 없습니다.'
+          }}
+        </p>
       </section>
 
       <!-- 목표를 넘은 구간 -->
@@ -511,7 +533,8 @@ const essOption = computed(() => ({
             <!-- 배출계수는 임시 값이라 팀에서 확인 필요. 인쇄물에 찍히지 않게 화면에는 적지 않음 -->
             <div>
               <dt>적용 배출계수</dt>
-              <dd class="num">{{ report.solar.emissionFactor }} kgCO₂/kWh</dd>
+              <!-- 값이 없으면(null) 빈칸 대신 — 로 표시 -->
+              <dd class="num">{{ report.solar.emissionFactor ?? '—' }} kgCO₂/kWh</dd>
             </div>
           </dl>
         </section>
