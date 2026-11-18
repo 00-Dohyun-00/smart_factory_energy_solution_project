@@ -62,95 +62,6 @@ function printReport() {
   window.print()
 }
 
-// ---- CSV 저장 (엑셀에서 열 수 있는 표 파일) ----
-// 표 한 줄을 CSV 한 줄로 바꿈. 값에 쉼표·따옴표·줄바꿈이 있으면 따옴표로 감쌈
-function csvLine(cells) {
-  return cells
-    .map((cell) => {
-      const text = String(cell ?? '')
-      return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
-    })
-    .join(',')
-}
-
-// 지금 보고 있는 달의 성적표를 CSV 파일로 내려받음
-// 엑셀에서 계산에 쓸 수 있도록 숫자는 화면용으로 꾸미지 않고 받은 값 그대로 넣음
-function downloadCsv() {
-  const data = report.value
-  const summary = data.summary
-  const dischargeByDate = {}
-  for (const item of data.ess.dailyDischarge) dischargeByDate[item.date] = item.kwh
-
-  const lines = [
-    csvLine(['WATTever 월간 성적표', monthLabel.value, periodLabel.value]),
-    csvLine(['피크 저감량은 방전하지 않았을 때의 예상과 비교한 값이고 금액과 탄소는 추정값입니다']),
-    '',
-    csvLine(['항목', '값', '단위']),
-    csvLine(['목표 피크', data.targetPeakKw, 'kW']),
-    csvLine(['피크 방어 성공률', summary.defenseSuccessPercent, '%']),
-    csvLine(['방전 추천 횟수', summary.defenseTotal, '회']),
-    csvLine(['목표 달성 횟수', summary.defenseSuccess, '회']),
-    csvLine(['최대 피크', summary.monthPeakKw, 'kW']),
-    csvLine(['최대 피크 시각', summary.monthPeakAt, '']),
-    csvLine(['평균 피크 저감량', summary.avgReductionKw, 'kW']),
-    // 진행 중인 달의 합계는 오늘까지 금액이라 이름에 적어 둠. 끝난 달에는 "월말 예상" 줄을 넣지 않음
-    csvLine([
-      isLatestMonth.value ? '전기요금 추정 (오늘까지)' : '전기요금 추정',
-      data.bill.total,
-      '원',
-    ]),
-    csvLine(['전력량요금 추정', data.bill.energyCharge, '원']),
-    csvLine(['기본요금 추정', data.bill.baseCharge, '원']),
-    ...(isLatestMonth.value
-      ? [csvLine(['월말 예상 요금 추정', data.bill.monthEndEstimate, '원'])]
-      : []),
-    csvLine(['ESS 충전량', data.ess.chargeKwh, 'kWh']),
-    csvLine(['ESS 방전량', data.ess.dischargeKwh, 'kWh']),
-    csvLine(['태양광 발전량', data.solar.generationKwh, 'kWh']),
-    csvLine(['탄소 절감 추정', data.solar.carbonTon, 'tCO2']),
-    '',
-    csvLine(['날짜', '최대 피크 (kW)', '방전하지 않았을 때 예상 (kW)', 'ESS 방전량 (kWh)']),
-    ...data.dailyPeaks.map((item) =>
-      csvLine([item.date, item.peakKw, item.expectedKw, dischargeByDate[item.date]]),
-    ),
-    '',
-    csvLine(['요금 시간대', '구매전력 (kWh)', '비중 (%)', '전력량요금 (원)']),
-    ...data.bill.byTariff.map((item) => csvLine([item.label, item.kwh, item.percent, item.charge])),
-    '',
-    csvLine([
-      '목표를 넘은 구간 시작',
-      '끝',
-      '실제 피크 (kW)',
-      '초과 (kW)',
-      '추천 방전 (kW)',
-      '처리',
-      '원인',
-    ]),
-    ...data.exceeded.map((item) =>
-      csvLine([
-        item.windowStart,
-        item.windowEnd,
-        item.resultPeakKw,
-        item.overKw,
-        item.powerKw,
-        STATUS_LABELS[item.status],
-        item.cause,
-      ]),
-    ),
-  ]
-
-  // 맨 앞의 \uFEFF는 엑셀이 한글을 깨뜨리지 않게 하는 표시(BOM), 줄 사이는 엑셀이 쓰는 줄바꿈(\r\n)
-  const text = '\uFEFF' + lines.join('\r\n')
-  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  // 내려받기는 보이지 않는 링크를 만들어 누르는 방식으로 함 (브라우저에서 파일을 저장하는 표준 방법)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `WATTever_월간성적표_${month.value}.csv`
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
 // 달이 바뀌면 다시 조회
 watch(month, (value) => {
   if (value) reportStore.fetchReport(value)
@@ -422,10 +333,10 @@ const essOption = computed(() => ({
         <button class="action" :disabled="!report || !report.hasData" @click="printReport">
           인쇄 · PDF 저장
         </button>
-        <!-- 엑셀에서 열 수 있는 표 파일로 내려받음 -->
-        <button class="action" :disabled="!report || !report.hasData" @click="downloadCsv">
-          CSV 저장
-        </button>
+        <!--
+          CSV 저장은 2026-11-18 UI 피드백으로 뺐음 (원천 데이터를 CSV로 받을 일이 적음).
+          엑셀 저장은 백엔드가 .xlsx를 만들어 주는 방식으로 팀과 맞출 예정
+        -->
       </div>
     </div>
 
@@ -899,6 +810,10 @@ const essOption = computed(() => ({
   .kpi-value {
     font-size: 28px;
   }
+  /* 좁은 종이 폭에서 "목표 / 달성", "6,323만 / 원"처럼 낱말 중간에서 줄이 바뀌지 않게 */
+  .kpi-sub {
+    word-break: keep-all;
+  }
   /* 좁아진 폭에서 표가 잘리지 않게 긴 글(원인)은 줄을 바꿈 */
   .table-wrap {
     overflow: visible;
@@ -920,13 +835,26 @@ const essOption = computed(() => ({
     height: auto !important;
   }
   .chart :deep(div) {
+    position: relative;
     width: 100% !important;
     height: auto !important;
   }
+  /*
+    ECharts는 그래프 한 개를 캔버스 여러 장(층)으로 겹쳐 그리기도 함 (히트맵이 그렇다).
+    전부 static으로 두면 층이 위아래로 흩어져 칸과 축이 따로 찍히므로,
+    첫 장만 static으로 두어 높이를 잡고 나머지 층은 그 위에 겹쳐 둠 (2026-11-18 인쇄 검토)
+  */
   .chart :deep(canvas) {
-    position: static !important;
     width: 100% !important;
     height: auto !important;
+  }
+  .chart :deep(canvas:first-child) {
+    position: static !important;
+  }
+  .chart :deep(canvas:not(:first-child)) {
+    position: absolute !important;
+    top: 0;
+    left: 0;
   }
 }
 </style>
