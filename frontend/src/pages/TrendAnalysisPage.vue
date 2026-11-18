@@ -392,7 +392,7 @@ const socOption = computed(() => {
   ])
   return {
     animation: false,
-    grid: { left: 52, right: 20, top: 16, bottom: 24 },
+    grid: { left: 52, right: 20, top: 12, bottom: 22 },
     tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} %` },
     xAxis: timeAxis(false),
     yAxis: { ...valueAxis, min: 0, max: 100, interval: 50 },
@@ -409,11 +409,13 @@ const tempOption = computed(() => {
   return {
     animation: false,
     // 가로축에 날짜와 날씨를 두 줄로 적으므로 아래 여백을 넉넉히 둠
-    grid: { left: 52, right: 20, top: 34, bottom: 40 },
-    legend,
+    grid: { left: 52, right: 20, top: 24, bottom: 40 },
+    // 그래프가 낮아 오른쪽 위의 "온도 제한" 글자와 겹치므로 범례는 왼쪽 위에 둠
+    legend: { ...legend, right: 'auto', left: 52 },
     tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} ℃` },
     xAxis: timeAxis(true),
-    yAxis: { ...valueAxis, min: 0, max: 40, interval: 10 },
+    // 높이가 낮아 눈금은 20℃ 간격으로만
+    yAxis: { ...valueAxis, min: 0, max: 40, interval: 20 },
     series: [outside, room],
   }
 })
@@ -657,8 +659,12 @@ const hourlyOption = computed(() => {
       <div class="main">
         <!-- 왼쪽: 같은 시간 축을 쓰는 그래프 세 개 -->
         <section class="card charts">
+          <!--
+            전력이 이 화면의 주인공이라 크게, 배터리 잔량·온도는 보조라 작게 그림 (2026-11-18 UI 피드백)
+            세 그래프는 그대로 위아래로 두어 가로축(시각)을 맞춤
+          -->
           <template v-if="powerItems.length">
-            <h2 class="chart-title">
+            <h2 class="chart-title main-chart">
               전력 <small>kW</small>
               <span v-if="showPins" class="chart-note">
                 위쪽 기호 = 추천 (● 적용 · ◇ 자동 · ✕ 넘김 · ○ 추천 중), 올리면 자세히
@@ -675,23 +681,23 @@ const hourlyOption = computed(() => {
               key: 켜 둔 항목이 바뀌면 그래프를 새로 만듦.
               Chart.vue는 이전 설정에 새 설정을 덮어쓰는 방식이라, 선의 개수가 줄면 꺼 둔 선이 남기 때문
             -->
-            <Chart :key="`${powerItems.join()}-${showPins}`" :option="powerOption" :height="270" />
+            <Chart :key="`${powerItems.join()}-${showPins}`" :option="powerOption" :height="460" />
           </template>
 
           <template v-if="shown.includes('soc')">
-            <h2 class="chart-title">
+            <h2 class="chart-title sub-chart">
               배터리 잔량 <small>%</small>
               <span class="chart-note">점선은 잔량 하한과 상한</span>
             </h2>
-            <Chart :option="socOption" :height="130" />
+            <Chart :option="socOption" :height="100" />
           </template>
 
           <template v-if="shown.includes('temp')">
-            <h2 class="chart-title">
+            <h2 class="chart-title sub-chart">
               온도 <small>℃</small> · 날씨
               <span class="chart-note">날짜 아래에 그날 날씨</span>
             </h2>
-            <Chart :option="tempOption" :height="170" />
+            <Chart :option="tempOption" :height="120" />
           </template>
 
           <p v-if="!shown.length" class="state">"보기"에서 볼 항목을 하나 이상 골라 주세요.</p>
@@ -953,6 +959,14 @@ const hourlyOption = computed(() => {
   border-top: 1px solid var(--line);
   font-size: 15px;
   font-weight: 700;
+}
+/* 주 그래프(전력)는 제목을 크게, 보조 그래프(배터리 잔량·온도)는 작고 옅게 */
+.chart-title.main-chart {
+  font-size: 18px;
+}
+.chart-title.sub-chart {
+  font-size: 13px;
+  color: var(--ink-2);
 }
 .chart-title:first-child {
   margin-top: 0;
