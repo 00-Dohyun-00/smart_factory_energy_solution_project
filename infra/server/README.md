@@ -1,7 +1,12 @@
-# 서버 PC용 Docker Compose (backend + backup-db)
+# 서버 PC용 Docker Compose (backend + ai + backup-db)
 
-서버 PC 1대에서 띄우는 구성입니다. Spring(backend)과 로컬 백업 DB(backup-db)를 같이 띄웁니다.
-(Vue, FastAPI, Nginx, 서버 2대 이중화는 아직 설계 단계입니다 — `docs/decisions.md` 참고)
+서버 PC 1대에서 띄우는 구성입니다. Spring(backend), AI 서버(ai, FastAPI), 로컬 백업 DB(backup-db)를
+같이 띄웁니다.
+(Vue, Nginx, 서버 2대 이중화는 아직 설계 단계입니다 — `docs/decisions.md` 참고)
+
+`ai`는 지금 기본 뼈대만 있습니다(`ai/app/main.py`) — `POST /predict` 요청/응답 모양만 잡아뒀고,
+실제 예측 모델은 아직 없습니다(항상 `action: "IDLE"` 반환). Spring이 이 서버를 실제로 호출하는
+코드는 다음 작업입니다.
 
 ## 띄우기
 
@@ -20,9 +25,10 @@ docker compose -f infra/server/docker-compose.yml up -d --build
 ## 확인
 
 ```bash
-docker compose -f infra/server/docker-compose.yml ps        # 둘 다 healthy 떠야 정상
+docker compose -f infra/server/docker-compose.yml ps        # 셋 다 healthy 떠야 정상
 curl http://localhost:8080/actuator/health/liveness          # {"status":"UP"}
 curl http://localhost:8080/api/system/db-status
+curl http://localhost:8000/health                             # ai 서버
 docker exec -it backup-db psql -U postgres -d wattever -c "\dt"
 ```
 
