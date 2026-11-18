@@ -234,12 +234,15 @@ public class SitePowerService {
             return null;
         }
 
-        int index = 0;
+        int index = -1;
         for (int i = 0; i < periods.size(); i++) {
             if (isInPeriod(periods.get(i), now.toLocalTime())) {
                 index = i;
                 break;
             }
+        }
+        if (index < 0) {
+            return null; // 요금표에 빈 시각이 있으면 엉뚱한 시간대를 보여주지 않고 비워 둠
         }
         TariffPeriod current = periods.get(index);
 
