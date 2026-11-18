@@ -154,6 +154,7 @@ const visibleUsed = computed(() =>
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding-bottom: 7px;
 }
 .head {
   display: flex;

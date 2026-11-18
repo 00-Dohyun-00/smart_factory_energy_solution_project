@@ -242,14 +242,14 @@ const valueAxis = {
   splitLine: { lineStyle: { color: COLOR.line } },
 }
 
-const legend = {
+const legend = computed(() => ({
   right: 0,
   top: 0,
   icon: 'rect',
   itemWidth: 10,
   itemHeight: 10,
-  textStyle: { color: COLOR.legendText }, // 라이트 모드에서 잘 보이게 조금 진한 색 (다크 모드는 예전과 같은 색)
-}
+  textStyle: { color: COLOR.legendText },
+}))
 
 // 어떤 시각이 그래프의 어느 칸인지 (그 시각이 들어 있는 칸의 가로축 글자)
 function slotLabelOf(at) {
@@ -336,7 +336,7 @@ function markLines(lines, withPins = false) {
       data.push({
         xAxis: label,
         lineStyle: { color: 'rgba(0, 0, 0, 0)' },
-        label: { formatter: pinShapes(list), position: 'end', color: COLOR.ink2, fontSize: 11 },
+        label: { formatter: pinShapes(list), position: 'end', color: COLOR.legendText, fontSize: 11 },
       })
     }
   }
@@ -401,7 +401,7 @@ const powerOption = computed(() => {
     animation: false,
     // 위쪽에 범례와 추천 핀 기호가 들어가므로 여백을 넉넉히 둠
     grid: { left: 52, right: GRID_RIGHT, top: 44, bottom: 24 },
-    legend,
+    legend: legend.value,
     tooltip: {
       ...tooltipColors(),
       trigger: 'axis',
@@ -455,8 +455,8 @@ const socOption = computed(() => {
 
 // ---- 온도 (℃) · 날씨 ----
 const tempOption = computed(() => {
-  const room = lineSeries('배터리실 온도', 'roomTempC', COLOR.ink, 2.5)
-  const outside = lineSeries('바깥 기온', 'outsideTempC', COLOR.faint)
+  const room = lineSeries('배터리실 온도', 'roomTempC', COLOR.warn, 2.5)
+  const outside = lineSeries('바깥 기온', 'outsideTempC', COLOR.grid)
   const limit = trend.value.roomTempLimitC
   // 이름표는 그래프 밖 오른쪽에 짧게 ("선택" 글자와 겹치지 않게)
   room.markLine = markLines([
@@ -1233,7 +1233,7 @@ const patternOption = computed(() => {
   margin-left: auto;
   font-size: 12px;
   font-weight: 400;
-  color: var(--ink-2);
+  color: var(--legend-text);
 }
 .legend-swatch {
   width: 10px;
@@ -1241,16 +1241,16 @@ const patternOption = computed(() => {
   margin-left: 8px;
 }
 .legend-swatch.room {
-  background: var(--ink);
+  background: var(--warn);
 }
 .legend-swatch.outside {
-  background: var(--faint);
+  background: var(--src-grid);
 }
 .chart-note {
   margin-left: 8px;
   font-size: 12px;
   font-weight: 400;
-  color: var(--mute);
+  color: var(--legend-text);
 }
 
 .right {

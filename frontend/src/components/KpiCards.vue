@@ -193,7 +193,7 @@ const kpis = computed(() => {
       prefixIcon: s?.pcsStatus ?? '', // 글자 앞 아이콘 (대기 · 방전 · 충전)
       value: formatKw(essKw),
       unit: 'kW',
-      sub: '왼쪽 충전 / 오른쪽 방전',
+      sub: '왼쪽 충전 | 오른쪽 방전',
       min: maxPowerKw ? `충전 ${formatKw(maxPowerKw)}` : '충전',
       max: maxPowerKw ? `방전 ${formatKw(maxPowerKw)}` : '방전',
       // 바깥 가는 테: 가운데(대기)를 기준으로 왼쪽 충전 · 오른쪽 방전을 다른 색으로
@@ -376,9 +376,9 @@ const kpis = computed(() => {
   flex: 1;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
-  padding: 10px 14px 12px;
+  padding: 7px 10px 8px;
 }
 .kpi-top {
   display: flex;
@@ -397,7 +397,7 @@ const kpis = computed(() => {
 .gauge {
   overflow: visible; /* 두꺼운 바깥 테가 그림 가장자리에서 잘리지 않게 */
   width: 100%;
-  max-width: 200px;
+  max-width: 150px;
   margin-top: 2px;
 }
 /* 값이 바뀌면 원호가 바로 그 자리로 감 (움직이는 효과 없음, 2026-11-18)
@@ -476,7 +476,7 @@ const kpis = computed(() => {
   align-items: baseline;
   gap: 6px;
   margin-top: -4px;
-  font-size: 30px;
+  font-size: 24px;
   font-weight: 700;
   line-height: 1.2;
 }
@@ -491,19 +491,19 @@ const kpis = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 17px;
+  font-size: 14px;
 }
 .kpi-unit {
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 400;
   color: var(--ink-2);
 }
 .kpi-sub {
   align-self: stretch;
   white-space: pre-line; /* 글 안의 \n 에서 줄을 바꿈 */
-  height: 36px; /* 두 줄 높이로 고정: 한 줄 ↔ 두 줄로 바뀌어도 카드(와 그 아래 화면)가 움직이지 않음 */
+  height: 26px;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--mute);
   text-align: center;
   /* 좁은 화면에서는 잘라 내지 않고 두 줄로 내려 씀 (공급원 비율이 길어서) */
