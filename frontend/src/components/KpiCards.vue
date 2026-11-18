@@ -193,7 +193,8 @@ const kpis = computed(() => {
       prefixIcon: s?.pcsStatus ?? '', // 글자 앞 아이콘 (대기 · 방전 · 충전)
       value: formatKw(essKw),
       unit: 'kW',
-      sub: '왼쪽 충전 | 오른쪽 방전',
+      // 아랫줄을 글자 3개로 나눠 '|'를 카드(=계기판) 가운데에 고정, 양옆에 충전·방전 안내
+      sides: ['왼쪽 충전', '오른쪽 방전'],
       min: maxPowerKw ? `충전 ${formatKw(maxPowerKw)}` : '충전',
       max: maxPowerKw ? `방전 ${formatKw(maxPowerKw)}` : '방전',
       // 바깥 가는 테: 가운데(대기)를 기준으로 왼쪽 충전 · 오른쪽 방전을 다른 색으로
@@ -296,6 +297,12 @@ const kpis = computed(() => {
             {{ item.label }} {{ item.percent }}%
           </span>
         </p>
+        <!-- ESS: '왼쪽 충전' | '오른쪽 방전'. 양쪽 칸 폭을 같게(1fr) 두어 '|'가 언제나 정확히 가운데 -->
+        <p v-else-if="kpi.sides" class="kpi-sub kpi-sides">
+          <span class="side-left">{{ kpi.sides[0] }}</span>
+          <span class="side-bar" aria-hidden="true">|</span>
+          <span class="side-right">{{ kpi.sides[1] }}</span>
+        </p>
         <p v-else class="kpi-sub num" :class="{ over: kpi.over }">
           <template v-if="kpi.subLabel && kpi.sub">{{ kpi.subLabel }}</template>
           <!-- 온도계 아이콘 (SVG 직접 그림) -->
@@ -397,7 +404,7 @@ const kpis = computed(() => {
 .gauge {
   overflow: visible; /* 두꺼운 바깥 테가 그림 가장자리에서 잘리지 않게 */
   width: 100%;
-  max-width: 150px;
+  max-width: 165px;
   margin-top: 2px;
 }
 /* 값이 바뀌면 원호가 바로 그 자리로 감 (움직이는 효과 없음, 2026-11-18)
@@ -575,6 +582,18 @@ const kpis = computed(() => {
   stroke-width: 2.4;
   stroke-linecap: round;
 }
+.kpi-sides {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  column-gap: 6px;
+}
+.side-left {
+  text-align: right;
+}
+.side-right {
+  text-align: left;
+}
 .kpi-sub.over {
   font-weight: 700;
   color: var(--warn);
@@ -590,5 +609,23 @@ const kpis = computed(() => {
 }
 .stale .hub {
   fill: var(--lost);
+}
+
+/* 화면이 낮으면(노트북) 계기판을 줄여 아래 그래프 자리를 남김 (2026-11-18) */
+@media (max-height: 950px) {
+  .kpi {
+    padding: 5px 10px 6px;
+  }
+  .gauge {
+    max-width: 136px;
+    margin-top: 0;
+  }
+  .kpi-value {
+    font-size: 20px;
+  }
+  .kpi-sub {
+    height: auto;
+    max-height: 26px;
+  }
 }
 </style>

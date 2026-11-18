@@ -69,12 +69,20 @@ let appliedEssKw = 0 // 적용 중인 ESS 전력 (+방전, −충전, kW)
 
 // ---- 최근 이벤트 (모니터링 화면의 "최근 이벤트" 목록용) ----
 // level: CRITICAL(경고) | WARNING(주의) | NORMAL(정상) | INFO(그 밖의 기록)
+// category: STAGE(단계 변화) | RECOMMEND(추천) | ACTION(적용·넘김) | WINDOW(구간 종료) | BATTERY(배터리) | SETTING(설정 변경)
+//   (category는 이벤트 로그의 "종류" 칼럼·필터용으로 임시로 넣은 값. 백엔드와 확정 필요)
 const events = []
 let nextEventId = 1
 let lastPeakStatus = null // 단계가 바뀌었는지 알기 위해 직전 단계를 기억
 
-function addEvent(level, message, date = simNow()) {
-  events.unshift({ id: nextEventId++, occurredAt: toLocalDateTime(date), level, message })
+function addEvent(level, category, message, date = simNow()) {
+  events.unshift({
+    id: nextEventId++,
+    occurredAt: toLocalDateTime(date),
+    level,
+    category,
+    message,
+  })
   if (events.length > 50) events.pop()
 }
 
@@ -84,11 +92,11 @@ function seedEventsOnce(now) {
   if (eventsSeeded) return
   eventsSeeded = true
   const ago = (minutes) => new Date(now.getTime() - minutes * 60000)
-  addEvent('INFO', '계획 방전 추천을 넘김 (운영자)', ago(47))
-  addEvent('WARNING', '주의 단계 진입', ago(31))
-  addEvent('CRITICAL', '목표 초과 예상, 방전 500 kW 추천', ago(30))
-  addEvent('INFO', '방전 500 kW 적용 (운영자)', ago(29))
-  addEvent('NORMAL', '정상 단계로 돌아옴', ago(17))
+  addEvent('INFO', 'ACTION', '계획 방전 추천을 넘김 (운영자)', ago(47))
+  addEvent('WARNING', 'STAGE', '주의 단계 진입', ago(31))
+  addEvent('CRITICAL', 'RECOMMEND', '목표 초과 예상, 방전 500 kW 추천', ago(30))
+  addEvent('INFO', 'ACTION', '방전 500 kW 적용 (운영자)', ago(29))
+  addEvent('NORMAL', 'STAGE', '정상 단계로 돌아옴', ago(17))
 }
 
 // 1분 평균: 그 시각 직전 1분을 10초 간격으로 여섯 번 재서 평균 냄 (그래프가 톱니처럼 튀지 않게)
@@ -322,6 +330,7 @@ function updateWindow(nowMs, gridWithoutEss) {
       const to = toLocalDateTime(new Date(startMs)).slice(11, 16)
       addEvent(
         endedKw > TARGET_PEAK_KW ? 'CRITICAL' : 'NORMAL',
+        'WINDOW',
         `${from}–${to} 구간 ${endedKw.toLocaleString('ko-KR')} kW로 종료`,
         new Date(startMs),
       )
@@ -620,6 +629,7 @@ function updateDecision(now, info) {
   sessionDecisions.push(currentDecision)
   addEvent(
     kind === 'PEAK' ? 'CRITICAL' : 'INFO',
+    'RECOMMEND',
     kind === 'PEAK'
       ? `방어선 초과 예상, 방전 ${powerKw} kW 추천`
       : `${ADVICE_RULES[kind].ruleLabel} ${powerKw} kW 추천 (${untilText}까지)`,
@@ -631,7 +641,7 @@ function updateDecision(now, info) {
     currentDecision.appliedBy = '자동 모드' // 명세 v0.2 값. 화면이 "(시뮬레이션)"을 붙여 보여 줌
     currentDecision.appliedAt = toLocalDateTime(now)
     appliedEssKw = followKw(currentDecision)
-    addEvent('INFO', `${ACTION_TEXTS[action]} ${powerKw} kW 자동 적용 (시뮬레이션)`, now)
+    addEvent('INFO', 'ACTION', `${ACTION_TEXTS[action]} ${powerKw} kW 자동 적용 (시뮬레이션)`, now)
   }
 }
 
@@ -1121,14 +1131,14 @@ function updateLiveSoc(now) {
     if (appliedEssKw > 0) {
       // 하한에 닿으면 배터리를 보호하려고 방전을 멈춤
       appliedEssKw = 0
-      addEvent('WARNING', `잔량 하한 ${SOC_LOW_LIMIT}% 도달, 방전 멈춤`, now)
+      addEvent('WARNING', 'BATTERY', `잔량 하한 ${SOC_LOW_LIMIT}% 도달, 방전 멈춤`, now)
     }
   }
   if (liveSocPercent >= SOC_HIGH_LIMIT) {
     liveSocPercent = SOC_HIGH_LIMIT
     if (appliedEssKw < 0) {
       appliedEssKw = 0
-      addEvent('INFO', `잔량 상한 ${SOC_HIGH_LIMIT}% 도달, 충전 멈춤`, now)
+      addEvent('INFO', 'BATTERY', `잔량 상한 ${SOC_HIGH_LIMIT}% 도달, 충전 멈춤`, now)
     }
   }
 }
@@ -1204,8 +1214,8 @@ export async function fakeGetLatestStatus() {
 
   // 단계가 바뀌면 이벤트로 남김 (경고는 추천 이벤트와 겹치므로 주의·정상만)
   if (lastPeakStatus && lastPeakStatus !== peakStatus) {
-    if (peakStatus === 'WARNING') addEvent('WARNING', '주의 단계 진입', now)
-    if (peakStatus === 'NORMAL') addEvent('NORMAL', '정상 단계로 돌아옴', now)
+    if (peakStatus === 'WARNING') addEvent('WARNING', 'STAGE', '주의 단계 진입', now)
+    if (peakStatus === 'NORMAL') addEvent('NORMAL', 'STAGE', '정상 단계로 돌아옴', now)
   }
   lastPeakStatus = peakStatus
 
@@ -1292,11 +1302,12 @@ export async function fakeUpdateDecision(id, status) {
     appliedEssKw = sign * currentDecision.powerKw
     addEvent(
       'INFO',
+      'ACTION',
       `${ACTION_TEXTS[currentDecision.action]} ${currentDecision.powerKw} kW 적용 (운영자)`,
     )
   } else {
     appliedEssKw = 0
-    addEvent('INFO', `${currentDecision.ruleLabel} 추천을 넘김 (운영자)`)
+    addEvent('INFO', 'ACTION', `${currentDecision.ruleLabel} 추천을 넘김 (운영자)`)
   }
   return { ...currentDecision }
 }
@@ -1937,7 +1948,12 @@ export async function fakeUpdateSettings(changes) {
       newValue: change.value,
       changedBy: '운영자',
     })
-    addEvent('INFO', `설정 변경: ${item.label} ${oldValue} → ${change.value} (운영자)`, now)
+    addEvent(
+      'INFO',
+      'SETTING',
+      `설정 변경: ${item.label} ${oldValue} → ${change.value} (운영자)`,
+      now,
+    )
   }
   applySettings()
 

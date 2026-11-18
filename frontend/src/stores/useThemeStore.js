@@ -26,6 +26,7 @@ const COLOR_VARS = {
   solar: '--src-solar',
   ess: '--src-ess',
   band: '--band',
+  target: '--target-line',
   labelBg: '--label-bg',
   legendText: '--legend-text',
   heat1: '--heat-1',

@@ -1,7 +1,8 @@
 <!--
   예상 피크 카드 (모니터링 > 통합)
-  왼쪽: 단계·짧은 판정, 예상 피크(큰 숫자), 목표 피크·현재 누적·추가 방전
-  오른쪽: 15분 흐름 그래프 (구간 시작부터 지금까지 쌓인 값 → 끝까지 예상, 목표선)
+  위 왼쪽: 단계 표시, 예상 피크(큰 숫자)
+  위 오른쪽: 목표 피크·현재 누적·추가 방전
+  아래: 15분 흐름 그래프 (구간 시작부터 지금까지 쌓인 값 → 끝까지 예상, 목표선)
 
   2026-11-18 UI 피드백: "현재 15분 피크 구간"이 와닿지 않고 가로 막대 게이지가 별로라는 의견으로
   제목을 "예상 피크"로 바꾸고 막대 대신 흐름 그래프를 넣음. (이전 막대 모양은 커밋 dd472f1에 있음)
@@ -11,7 +12,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useThemeStore } from '@/stores/useThemeStore'
-import Chart from '@/components/Chart.vue'
+import FitChart from '@/components/FitChart.vue'
 import { formatHourMinute, formatInteger, formatKw, formatRemaining } from '@/utils/format'
 
 const props = defineProps({
@@ -58,6 +59,21 @@ const windowText = computed(() => {
   return status ? `${range} / 남은 ${formatRemaining(status.remainingSeconds)}` : range
 })
 
+// ---- 남은 시간 스톱워치 아이콘 ----
+// 안쪽 부채꼴이 15분 구간 중 남은 비율만큼 차 있다가, 시간이 지나며 줄어듦
+// 남은 시간은 서버가 준 remainingSeconds를 그대로 씀 (브라우저 시계로 따로 세지 않음)
+const TIMER_R = 4.25 // 부채꼴 반지름 (아래 SVG 좌표 기준. 선 굵기 8.5와 합쳐 시계 테두리(반지름 8.5)까지 칠해짐)
+const TIMER_LENGTH = 2 * Math.PI * TIMER_R // 부채꼴을 굵은 선(stroke)으로 그릴 때 한 바퀴 길이
+const remainingRatio = computed(() => {
+  const seconds = props.status?.remainingSeconds
+  if (seconds == null) return 0
+  return Math.min(1, Math.max(0, seconds / (WINDOW_MINUTES * 60)))
+})
+// stroke-dasharray: 남은 비율만큼만 선을 그리고 나머지는 비움 → 부채꼴이 남은 시간만큼만 보임
+const timerDash = computed(
+  () => `${(remainingRatio.value * TIMER_LENGTH).toFixed(2)} ${TIMER_LENGTH.toFixed(2)}`,
+)
+
 // 구간 시작부터 지금까지 쌓인 값 (백엔드의 windowPoints, 0에서 시작해 15분 끝에 그 구간의 피크가 됨)
 const points = computed(() => props.status?.windowPoints ?? [])
 // 지금 시점의 누적값 = 마지막 점
@@ -94,11 +110,12 @@ const chartOption = computed(() => {
   const markLines = [
     {
       yAxis: target,
-      lineStyle: { color: COLORS.ink, width: 1.5, type: 'solid' },
+      // 목표 피크선: 지금까지 쌓인 값(먹색 실선)과 섞이지 않게 전용 자주색 (2026-11-18)
+      lineStyle: { color: COLORS.target, width: 1.5, type: 'solid' },
       label: {
         formatter: `목표 피크 ${formatKw(target)} kW`,
         position: 'insideStartTop',
-        color: COLORS.ink,
+        color: COLORS.target,
         fontWeight: 700,
         backgroundColor: COLORS.card,
         padding: [2, 4],
@@ -206,53 +223,79 @@ const chartOption = computed(() => {
   <section class="card window" :class="stage.className">
     <div class="head">
       <h2 class="card-title">예상 피크</h2>
+      <!-- 단계 표시: 제목 바로 옆 (제목과 함께 읽히고, 큰 숫자 자리를 차지하지 않게, 2026-11-18) -->
+      <span class="chip"
+        ><span aria-hidden="true">{{ stage.shape }}</span> {{ stage.label }}</span
+      >
       <span class="range num">{{ windowText }}</span>
+      <!-- 스톱워치: 안쪽 부채꼴이 남은 시간만큼 차 있고 시간이 지나며 줄어듦 -->
+      <svg
+        v-if="status"
+        class="timer"
+        viewBox="0 0 24 24"
+        role="img"
+        :aria-label="`남은 시간 ${Math.round(remainingRatio * 100)}%`"
+      >
+        <!-- 위쪽 꼭지(버튼)와 오른쪽 위 작은 단추 -->
+        <rect class="timer-solid" x="10" y="1" width="4" height="2.5" rx="1" />
+        <line class="timer-line" x1="18.6" y1="6.4" x2="20.2" y2="4.8" />
+        <!-- 남은 시간 부채꼴: 반지름 4.25짜리 원을 굵기 8.5의 선으로 그리면 꽉 찬 원이 되고,
+             dasharray로 남은 비율만큼만 그려 부채꼴을 만듦. 12시 방향부터 시계 방향 -->
+        <circle
+          class="timer-pie"
+          cx="12"
+          cy="14"
+          :r="TIMER_R"
+          :stroke-dasharray="timerDash"
+          transform="rotate(-90 12 14)"
+        />
+        <!-- 시계 테두리: 부채꼴보다 나중에 그려 부채꼴 위에 오게 함 -->
+        <circle class="timer-line" cx="12" cy="14" r="8.5" />
+      </svg>
     </div>
 
-    <div class="body">
-      <!-- 왼쪽: 단계와 숫자 -->
+    <!-- 위: 왼쪽은 단계와 예상 피크, 오른쪽은 목표·누적·추가 방전 -->
+    <div class="summary">
       <div class="left">
-        <p class="chip">
-          <span aria-hidden="true">{{ stage.shape }}</span> {{ stage.label }}
-        </p>
         <p class="big">
           <span class="num">{{ formatKw(status?.predictedKw) }}</span>
           <span class="unit">kW</span>
         </p>
-
-        <dl class="stats">
-          <div>
-            <dt>목표 피크</dt>
-            <dd>
-              <span class="num">{{ formatKw(status?.targetPeakKw) }}</span> <small>kW</small>
-            </dd>
-          </div>
-          <div>
-            <dt
-              title="구간 시작부터 지금까지 쓴 전력을 15분 평균으로 바꾼 값. 15분이 끝날 때의 값이 그 구간의 피크입니다."
-            >
-              현재 누적
-            </dt>
-            <dd>
-              <span class="num">{{ formatKw(currentPoint?.demandKw) }}</span> <small>kW</small>
-            </dd>
-          </div>
-          <div>
-            <dt>추가 방전</dt>
-            <dd>
-              <span class="num">{{ formatKw(status?.defenseKw) }}</span> <small>kW</small>
-            </dd>
-          </div>
-        </dl>
       </div>
 
-      <!-- 오른쪽: 15분 흐름 그래프 -->
-      <div class="right">
-        <Chart v-if="chartOption" :option="chartOption" :height="230" />
-        <p v-else class="empty">
-          {{ status ? '구간 흐름 값이 없습니다.' : '값을 기다리는 중입니다.' }}
-        </p>
-      </div>
+      <dl class="stats">
+        <div>
+          <dt>목표 피크</dt>
+          <dd>
+            <span class="num">{{ formatKw(status?.targetPeakKw) }}</span> <small>kW</small>
+          </dd>
+        </div>
+        <div>
+          <dt
+            title="구간 시작부터 지금까지 쓴 전력을 15분 평균으로 바꾼 값. 15분이 끝날 때의 값이 그 구간의 피크입니다."
+          >
+            현재 누적
+          </dt>
+          <dd>
+            <span class="num">{{ formatKw(currentPoint?.demandKw) }}</span> <small>kW</small>
+          </dd>
+        </div>
+        <div>
+          <dt>추가 방전</dt>
+          <dd>
+            <span class="num">{{ formatKw(status?.defenseKw) }}</span> <small>kW</small>
+          </dd>
+        </div>
+      </dl>
+    </div>
+
+    <!-- 아래: 15분 흐름 그래프 -->
+    <div class="graph">
+      <!-- 카드의 남은 높이를 채움 (화면 높이에 따라 2줄 높이가 바뀌므로) -->
+      <FitChart v-if="chartOption" :option="chartOption" :min-height="70" />
+      <p v-else class="empty">
+        {{ status ? '구간 흐름 값이 없습니다.' : '값을 기다리는 중입니다.' }}
+      </p>
     </div>
   </section>
 </template>
@@ -284,29 +327,54 @@ const chartOption = computed(() => {
 
 .head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  gap: 10px;
 }
 .range {
   margin-left: auto;
   font-size: 13px;
   color: var(--mute);
 }
-.body {
+/* 스톱워치 아이콘: 테두리는 먹색, 남은 시간 부채꼴은 단계 색 */
+.timer {
+  flex: none;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+}
+.timer-line {
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.timer-solid {
+  fill: var(--ink-2);
+}
+.timer-pie {
+  fill: none;
+  stroke: var(--state);
+  stroke-width: 8.5;
+  /* 값이 바뀔 때 부채꼴이 부드럽게 줄어들게 함 */
+  transition: stroke-dasharray 1s linear;
+}
+.summary {
   display: flex;
-  flex: 1;
-  gap: 32px;
+  align-items: stretch;
+  gap: 48px;
 }
 
-/* 왼쪽 */
+/* 위 왼쪽 */
 .left {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   flex: none;
-  width: 250px;
 }
 /* 단계 표시: 테두리만 둔 작은 표시 (큰 숫자보다 눈에 덜 띄게) */
 .chip {
-  align-self: flex-start;
+  flex: none;
   padding: 1px 8px;
   border: 1px solid var(--state);
   border-radius: 3px;
@@ -318,26 +386,33 @@ const chartOption = computed(() => {
 .big {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  margin-top: 6px;
-  font-size: 56px;
+  gap: 8px;
+  /* 예상 피크 숫자: 앞에 같은 크기의 숫자 "0"이 하나 있는 것만큼 오른쪽으로 들임 (2026-11-18, UI 피드백으로 4ch → 1ch)
+     ch = 이 글자 크기에서 숫자 0 한 개의 폭 */
+  margin-left: 3.8ch;
+  font-size: 96px;
   font-weight: 700;
   line-height: 1.1;
   color: var(--state);
 }
 .unit {
-  font-size: 16px;
+  font-size: 28px;
   font-weight: 400;
   color: var(--mute);
 }
 
+/* 위 오른쪽 */
+/* 위 오른쪽: 카드 안에서 오른쪽 끝으로 붙임 (2026-11-18, UI 피드백) */
 .stats {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 6px;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
+  flex: none;
+  width: 230px;
+  margin-left: auto;
+  padding-left: 24px;
+  border-left: 1px solid var(--line);
 }
 .stats div {
   display: flex;
@@ -361,29 +436,57 @@ const chartOption = computed(() => {
   color: var(--mute);
 }
 
-/* 오른쪽 */
-.right {
+/* 아래 그래프 */
+.graph {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
 }
 .empty {
   padding-top: 40px;
   color: var(--mute);
 }
 
-/* 화면이 좁으면 왼쪽 칸과 큰 숫자를 줄여 그래프 자리를 남김 */
+/* 화면이 좁으면 오른쪽 칸과 큰 숫자를 줄임 */
 @media (max-width: 1600px) {
-  .body {
+  .summary {
     gap: 20px;
   }
-  .left {
-    width: 210px;
+  .stats {
+    width: 200px;
+    padding-left: 16px;
   }
   .big {
-    font-size: 46px;
+    font-size: 72px;
   }
   .stats dd {
     font-size: 17px;
+  }
+}
+
+/* 화면이 낮으면(노트북) 큰 숫자와 오른쪽 숫자를 줄여 아래 그래프 자리를 남김 (2026-11-18) */
+@media (max-height: 950px) {
+  .window {
+    gap: 6px;
+  }
+  .big {
+    font-size: 72px;
+  }
+  .unit {
+    font-size: 22px;
+  }
+  .stats {
+    gap: 2px;
+  }
+  .stats dd {
+    font-size: 16px;
+  }
+  .graph {
+    padding-top: 6px;
   }
 }
 </style>
