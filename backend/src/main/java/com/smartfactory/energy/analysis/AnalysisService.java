@@ -306,11 +306,15 @@ public class AnalysisService {
     // ---------- 작은 도우미 메서드 ----------
 
     // 15분 구간마다 한전 구매 평균 (= 그 구간의 피크 값). 한전이 기본요금을 매기는 방식
+    // 15분이 다 찬 구간만 씀 (피크 분석과 같은 기준. 진행 중인 구간은 아직 결과가 아님)
     private Map<LocalDateTime, Double> makeQuarterPeaks(List<SitePowerMinute> powers) {
         Map<LocalDateTime, List<SitePowerMinute>> groups = powers.stream()
                 .collect(Collectors.groupingBy(p -> bucketStart(p.getTs(), "QUARTER")));
         Map<LocalDateTime, Double> result = new TreeMap<>();
         for (LocalDateTime time : groups.keySet()) {
+            if (groups.get(time).size() < 15) {
+                continue;
+            }
             Double avg = average(groups.get(time).stream().map(SitePowerMinute::getGridKw).toList());
             if (avg != null) {
                 result.put(time, avg);
