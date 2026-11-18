@@ -57,4 +57,11 @@ public class Setting {
         this.updatedAt = updatedAt;
         this.updatedBy = updatedBy;
     }
+
+    // 값 바꾸기 (환경 설정 저장 때 씀)
+    public void changeValue(String value, LocalDateTime updatedAt, String updatedBy) {
+        this.value = value;
+        this.updatedAt = updatedAt;
+        this.updatedBy = updatedBy;
+    }
 }
