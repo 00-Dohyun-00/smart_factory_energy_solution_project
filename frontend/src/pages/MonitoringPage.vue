@@ -6,10 +6,11 @@
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import Chart from '@/components/Chart.vue'
 import EssAdviceCard from '@/components/EssAdviceCard.vue'
+import FitChart from '@/components/FitChart.vue'
 import KpiCards from '@/components/KpiCards.vue'
 import PeakWindowCard from '@/components/PeakWindowCard.vue'
+import { useThemeStore } from '@/stores/useThemeStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { formatHourMinute, formatKw } from '@/utils/format'
@@ -57,16 +58,16 @@ const EVENT_INFO = {
 }
 
 // ---- 오늘 전력 추이 ----
-// ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
-const COLOR = {
-  ink: '#14181c', // --ink
-  ink2: '#3c444c', // --ink-2
-  mute: '#646e77', // --mute
-  line: '#dde1e5', // --line
-  crit: '#c8372d', // --crit
-  grid: '#5b6472', // --src-grid
-  solar: '#d19a00', // --src-solar
-}
+// 그래프(ECharts)는 CSS 변수를 못 읽으므로, 테마 스토어가 global.css에서 읽어 둔 지금 테마 색을 씀
+// (라이트·다크를 바꾸면 이 색이 바뀌고 그래프도 다시 그려짐)
+const themeStore = useThemeStore()
+const COLOR = themeStore.colors
+// 그래프 툴팁도 지금 테마 색으로
+const tooltipColors = () => ({
+  backgroundColor: COLOR.card,
+  borderColor: COLOR.line,
+  textStyle: { color: COLOR.ink },
+})
 
 // 가로축: 하루를 15분으로 나눈 96칸 ('00:00', '00:15', … '23:45')
 // 아직 오지 않은 시간은 값 없이 비워 두어, 하루 중 지금이 어디쯤인지 보이게 함
@@ -92,7 +93,7 @@ function makeTrendOption(lines, withTarget) {
   const tariffAreas = (status.value?.tariff.periods ?? [])
     .filter((item) => item.period === 'PEAK')
     .map((item) => [
-      { xAxis: item.from, itemStyle: { color: 'rgba(20, 24, 28, 0.07)' } },
+      { xAxis: item.from, itemStyle: { color: COLOR.band } },
       { xAxis: item.to === '24:00' ? '23:45' : item.to },
     ])
 
@@ -138,6 +139,7 @@ function makeTrendOption(lines, withTarget) {
 
   return {
     animation: false,
+    textStyle: { fontSize: 14, color: COLOR.ink2 }, // 그래프 글자 기본 크기·색 (기본 12px은 작아서 키움)
     grid: { left: 52, right: 20, top: 28, bottom: 24 },
     legend: {
       right: 0,
@@ -147,7 +149,11 @@ function makeTrendOption(lines, withTarget) {
       itemHeight: 10,
       textStyle: { color: COLOR.ink2 },
     },
-    tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatKw(value)} kW` },
+    tooltip: {
+      ...tooltipColors(),
+      trigger: 'axis',
+      valueFormatter: (value) => `${formatKw(value)} kW`,
+    },
     xAxis: {
       type: 'category',
       data: SLOTS,
@@ -211,33 +217,56 @@ const trendCards = computed(() => [
     <!-- 1줄: KPI 5개 -->
     <KpiCards :status="status" />
 
-    <!-- 2줄: 15분 피크 + ESS 추천 -->
-    <div class="row middle">
+    <!-- 2줄: 왼쪽 절반은 현재 15분 피크 구간, 오른쪽 절반은 ESS 추천 · 이벤트 로그 · 오늘 그래프 두 개 (2026-11-18) -->
+    <div class="main-row">
       <PeakWindowCard class="peak" :status="status" :stale="!realtimeStore.connected" />
 
-      <div class="advice-wrap">
-        <EssAdviceCard
-          class="advice"
-          :decision="realtimeStore.decision"
-          :busy="busy"
-          :offline="!realtimeStore.connected"
-          :auto="settingsStore.values['operation.auto_mode'] === true"
-          @apply="answerDecision('APPLIED')"
-          @ignore="answerDecision('IGNORED')"
-        />
-        <p v-if="actionError" class="action-error" role="alert">{{ actionError }}</p>
-      </div>
-    </div>
+      <div class="right-col">
+        <!-- 위: ESS 추천 | 이벤트 로그 -->
+        <div class="right-top">
+          <div class="advice-wrap">
+            <EssAdviceCard
+              class="advice"
+              :decision="realtimeStore.decision"
+              :busy="busy"
+              :offline="!realtimeStore.connected"
+              :auto="settingsStore.values['operation.auto_mode'] === true"
+              @apply="answerDecision('APPLIED')"
+              @ignore="answerDecision('IGNORED')"
+            />
+            <p v-if="actionError" class="action-error" role="alert">{{ actionError }}</p>
+          </div>
 
-    <!-- 3줄: 오늘 그래프 두 개(공장 소비 / 한전 구매) + 이벤트 로그 -->
-    <div class="row bottom">
-      <div class="trends">
+          <section class="card events-card">
+            <div class="card-head">
+              <h2 class="card-title">이벤트 로그</h2>
+              <span class="note">단계 변화, 추천, 적용·넘김, 구간 종료</span>
+            </div>
+            <ul v-if="realtimeStore.events.length" class="events">
+              <li v-for="event in realtimeStore.events" :key="event.id">
+                <span class="event-time num">{{ formatHourMinute(event.occurredAt) }}</span>
+                <span class="event-text" :class="EVENT_INFO[event.level].className">
+                  <span aria-hidden="true">{{ EVENT_INFO[event.level].shape }}</span>
+                  {{ event.message }}
+                </span>
+              </li>
+            </ul>
+            <p v-else class="empty">아직 기록된 이벤트가 없습니다.</p>
+            <RouterLink to="/logs" class="more">추천 이력 보기</RouterLink>
+          </section>
+        </div>
+
+        <!-- 아래: 오늘 공장 소비 / 오늘 한전 구매 (시간축이 길게 보이도록 오른쪽 폭을 다 씀, 남은 높이를 나눠 채움) -->
         <section v-for="card in trendCards" :key="card.key" class="card trend">
           <div class="card-head">
             <h2 class="card-title">{{ card.title }}</h2>
             <span class="note">{{ card.note }}</span>
           </div>
-          <Chart v-if="realtimeStore.todayStatuses.length" :option="card.option" :height="170" />
+          <FitChart
+            v-if="realtimeStore.todayStatuses.length"
+            :option="card.option"
+            :min-height="120"
+          />
           <p v-else-if="realtimeStore.todayLoading" class="empty chart-empty">불러오는 중입니다.</p>
           <p v-else-if="realtimeStore.todayError" class="empty chart-empty" role="alert">
             그래프를 불러오지 못했습니다. ({{ realtimeStore.todayError }})
@@ -246,24 +275,6 @@ const trendCards = computed(() => [
           <p v-else class="empty chart-empty">오늘 기록이 아직 없습니다.</p>
         </section>
       </div>
-
-      <section class="card events-card">
-        <div class="card-head">
-          <h2 class="card-title">이벤트 로그</h2>
-          <span class="note">단계 변화, 추천, 적용·넘김, 구간 종료</span>
-        </div>
-        <ul v-if="realtimeStore.events.length" class="events">
-          <li v-for="event in realtimeStore.events" :key="event.id">
-            <span class="event-time num">{{ formatHourMinute(event.occurredAt) }}</span>
-            <span class="event-text" :class="EVENT_INFO[event.level].className">
-              <span aria-hidden="true">{{ EVENT_INFO[event.level].shape }}</span>
-              {{ event.message }}
-            </span>
-          </li>
-        </ul>
-        <p v-else class="empty">아직 기록된 이벤트가 없습니다.</p>
-        <RouterLink to="/logs" class="more">추천 이력 보기</RouterLink>
-      </section>
     </div>
   </div>
 </template>
@@ -278,7 +289,7 @@ const trendCards = computed(() => [
 }
 .tariff {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 /* 자동 모드 띠: 상태색이 아니라 먹색 바탕으로 눈에 띄게 함 */
@@ -290,15 +301,15 @@ const trendCards = computed(() => [
   padding: 5px 12px;
   background: var(--ink);
   color: var(--card);
-  font-size: 14px;
+  font-size: 16px;
 }
 .mode-sub {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--line);
 }
 .tariff strong {
   margin: 0 6px;
-  font-size: 15px;
+  font-size: 17px;
   color: var(--ink);
 }
 
@@ -314,7 +325,7 @@ const trendCards = computed(() => [
 }
 .note {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 .text-button {
@@ -322,7 +333,7 @@ const trendCards = computed(() => [
   background: none;
   border: 0;
   border-bottom: 1px solid var(--ink-2);
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink-2);
 }
 .empty {
@@ -334,17 +345,37 @@ const trendCards = computed(() => [
   color: var(--mute);
 }
 
-/* 2줄 */
-.peak {
+/* 2줄: 왼쪽 절반 | 오른쪽 절반 */
+.main-row {
+  display: grid;
   flex: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  min-height: 0;
+}
+.peak {
   min-width: 0;
+}
+.right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+}
+/* 오른쪽 위: ESS 추천 | 이벤트 로그. 높이는 ESS 추천 카드에 맞추고(최소 300px), 이벤트 로그는 그 높이에 들어가는 만큼만 보여 줌 */
+.right-top {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  min-height: 300px;
 }
 .advice-wrap {
   display: flex;
-  flex: none;
   flex-direction: column;
   gap: 8px;
-  width: 600px;
+  min-width: 0;
 }
 .advice {
   flex: 1;
@@ -352,26 +383,27 @@ const trendCards = computed(() => [
 .action-error {
   color: var(--crit);
 }
-
-/* 3줄 */
-.bottom {
-  flex: 1;
-}
-.trends {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
-.chart-empty {
-  height: 170px;
-}
 .events-card {
   display: flex;
-  flex: none;
   flex-direction: column;
-  width: 600px;
+  min-width: 0;
+  contain: size; /* 이벤트가 많아도 줄 높이를 밀어내지 않음 */
+}
+.events {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+/* 오른쪽 아래: 오늘 그래프 두 개가 남은 높이를 나눠 가짐 */
+.trend {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.chart-empty {
+  flex: 1;
+  height: auto;
 }
 .events li {
   display: flex;
@@ -403,15 +435,7 @@ const trendCards = computed(() => [
   align-self: flex-end;
   margin-top: auto;
   border-bottom: 1px solid var(--ink-2);
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink-2);
-}
-
-/* 화면이 좁으면 오른쪽 카드 폭을 줄여 왼쪽 그래프와 게이지 자리를 남김 */
-@media (max-width: 1600px) {
-  .advice-wrap,
-  .events-card {
-    width: 480px;
-  }
 }
 </style>

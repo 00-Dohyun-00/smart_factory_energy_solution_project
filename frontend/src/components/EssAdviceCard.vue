@@ -140,7 +140,7 @@ const visibleUsed = computed(() =>
 }
 .mode {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--mute);
 }
 .empty {
@@ -160,7 +160,7 @@ const visibleUsed = computed(() =>
   line-height: 1;
 }
 .unit {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 400;
   color: var(--ink-2);
 }
@@ -169,7 +169,7 @@ const visibleUsed = computed(() =>
   color: var(--ink-2);
 }
 .why {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--ink-2);
 }
 
@@ -184,7 +184,7 @@ const visibleUsed = computed(() =>
   margin-bottom: 4px;
 }
 .used h3 {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
 }
 .more-used {
@@ -193,7 +193,7 @@ const visibleUsed = computed(() =>
   background: none;
   border: 0;
   border-bottom: 1px solid var(--ink-2);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--ink-2);
 }
 .used dl {
@@ -202,11 +202,11 @@ const visibleUsed = computed(() =>
   gap: 4px 12px;
 }
 .used dt {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--mute);
 }
 .used dd {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
 }
 
@@ -226,7 +226,7 @@ const visibleUsed = computed(() =>
   height: 46px;
   background: var(--ink);
   border: 0;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--card);
   transition: background-color 0.15s;
@@ -251,12 +251,12 @@ const visibleUsed = computed(() =>
   cursor: default;
 }
 .blocked {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--ink-2);
 }
 .note {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--mute);
 }
 .done {

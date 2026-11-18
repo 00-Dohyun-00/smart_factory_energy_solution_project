@@ -247,7 +247,7 @@ const kpis = computed(() => {
   gap: 6px;
 }
 .kpi-name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 400;
   color: var(--ink-2);
   white-space: nowrap;
@@ -319,17 +319,17 @@ const kpis = computed(() => {
   color: var(--crit);
 }
 .kpi-prefix {
-  font-size: 17px;
+  font-size: 19px;
 }
 .kpi-unit {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 400;
   color: var(--ink-2);
 }
 .kpi-sub {
   align-self: stretch;
   min-height: 18px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--mute);
   text-align: center;
   /* 좁은 화면에서는 잘라 내지 않고 두 줄로 내려 씀 (공급원 비율이 길어서) */
