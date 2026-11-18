@@ -1,0 +1,45 @@
+services:
+  backend:
+    build:
+      context: ../../backend
+    container_name: backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../../backend/.env
+    environment:
+      # 컨테이너 안에서는 localhost가 아니라 서비스 이름(backup-db)으로 찾습니다.
+      # backend/.env의 BACKUP_DB_URL(localhost:5433, 호스트에서 직접 실행할 때용)을 덮어씁니다.
+      BACKUP_DB_URL: jdbc:postgresql://backup-db:5432/wattever
+    depends_on:
+      backup-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health/liveness"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+
+  backup-db:
+    image: postgres:17
+    container_name: backup-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wattever
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: wattever
+    ports:
+      - "5433:5432"
+    volumes:
+      - backup-db-data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  backup-db-data:
