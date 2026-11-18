@@ -10,11 +10,15 @@ import Chart from '@/components/Chart.vue'
 import EssAdviceCard from '@/components/EssAdviceCard.vue'
 import KpiCards from '@/components/KpiCards.vue'
 import PeakWindowCard from '@/components/PeakWindowCard.vue'
+import { useThemeStore } from '@/stores/useThemeStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { formatHourMinute, formatKw } from '@/utils/format'
 
 const realtimeStore = useRealtimeStore()
+
+// 요금 시간대 이름 → 배지 색 이름
+const TARIFF_CLASS = { 최대부하: 'peak', 중간부하: 'mid', 경부하: 'light' }
 const settingsStore = useSettingsStore() // 운영 모드를 알기 위해 (값은 공통 틀이 받아 둠)
 
 const busy = ref(false) // 적용/넘기기 요청 중
@@ -57,15 +61,16 @@ const EVENT_INFO = {
 }
 
 // ---- 오늘 전력 추이 ----
-// ECharts option에는 CSS 변수를 쓸 수 없어 global.css의 값을 그대로 적습니다.
-const COLOR = {
-  ink: '#14181c', // --ink
-  ink2: '#3c444c', // --ink-2
-  mute: '#646e77', // --mute
-  line: '#dde1e5', // --line
-  grid: '#5b6472', // --src-grid
-  solar: '#d19a00', // --src-solar
-}
+// 그래프(ECharts)는 CSS 변수를 못 읽으므로, 테마 스토어가 global.css에서 읽어 둔 지금 테마 색을 씀
+// (라이트·다크를 바꾸면 이 색이 바뀌고 그래프도 다시 그려짐)
+const themeStore = useThemeStore()
+const COLOR = themeStore.colors
+// 그래프 툴팁도 지금 테마 색으로
+const tooltipColors = () => ({
+  backgroundColor: COLOR.card,
+  borderColor: COLOR.line,
+  textStyle: { color: COLOR.ink },
+})
 
 // 가로축: 하루를 15분으로 나눈 96칸 ('00:00', '00:15', … '23:45')
 // 아직 오지 않은 시간은 값 없이 비워 두어, 하루 중 지금이 어디쯤인지 보이게 함
@@ -91,7 +96,7 @@ function makeTrendOption(lines, withTarget) {
   const tariffAreas = (status.value?.tariff.periods ?? [])
     .filter((item) => item.period === 'PEAK')
     .map((item) => [
-      { xAxis: item.from, itemStyle: { color: 'rgba(20, 24, 28, 0.07)' } },
+      { xAxis: item.from, itemStyle: { color: COLOR.band } },
       { xAxis: item.to === '24:00' ? '23:45' : item.to },
     ])
 
@@ -147,7 +152,11 @@ function makeTrendOption(lines, withTarget) {
       itemHeight: 10,
       textStyle: { color: COLOR.ink2 },
     },
-    tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatKw(value)} kW` },
+    tooltip: {
+      ...tooltipColors(),
+      trigger: 'axis',
+      valueFormatter: (value) => `${formatKw(value)} kW`,
+    },
     xAxis: {
       type: 'category',
       data: SLOTS,
@@ -195,9 +204,18 @@ const trendCards = computed(() => [
       <span class="crumb-parent">모니터링</span>
       <span class="crumb-parent" aria-hidden="true">›</span>
       <h1 class="crumb-title">통합</h1>
+      <!-- 요금 시간대: 지금 시간대를 색 배지로 크게, 다음 시간대는 옅은 배지로 (최대부하 빨강 · 중간부하 주황 · 경부하 초록) -->
       <p v-if="status" class="tariff">
-        요금 시간대 <strong>{{ status.tariff.label }}</strong>
-        <span class="num">{{ status.tariff.until }}</span>부터 {{ status.tariff.nextLabel }}
+        <span class="tariff-caption">요금 시간대</span>
+        <strong class="tariff-badge" :class="TARIFF_CLASS[status.tariff.label]">
+          <span class="tariff-dot" aria-hidden="true"></span>{{ status.tariff.label }}
+        </strong>
+        <span class="tariff-next">
+          <span class="num">{{ status.tariff.until }}</span>부터
+          <span class="tariff-badge small" :class="TARIFF_CLASS[status.tariff.nextLabel]">
+            {{ status.tariff.nextLabel }}
+          </span>
+        </span>
       </p>
       <!-- 자동 모드일 때 멀리서도 보이게 제목 줄에 크게 표시 (실제 제어가 아니라 시뮬레이션) -->
       <p v-if="settingsStore.values['operation.auto_mode'] === true" class="mode-band">
@@ -277,9 +295,57 @@ const trendCards = computed(() => [
   padding: 20px;
 }
 .tariff {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.tariff-caption {
   font-size: 13px;
   color: var(--mute);
+}
+.tariff-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* 요금 시간대 배지: 시간대 색을 옅게 깐 바탕 + 같은 색 테두리·글자 */
+.tariff-badge {
+  --tariff: var(--ink-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  background: color-mix(in srgb, var(--tariff) 14%, var(--card));
+  border: 1.5px solid var(--tariff);
+  border-radius: 999px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--tariff);
+}
+.tariff-badge.small {
+  padding: 1px 8px;
+  background: none;
+  border-width: 1px;
+  font-size: 13px;
+  font-weight: 400;
+}
+.tariff-badge.peak {
+  --tariff: var(--crit);
+}
+.tariff-badge.mid {
+  --tariff: var(--warn);
+}
+.tariff-badge.light {
+  --tariff: var(--ok);
+}
+.tariff-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--tariff);
 }
 /* 자동 모드 띠: 상태색이 아니라 먹색 바탕으로 눈에 띄게 함 */
 .mode-band {
@@ -295,11 +361,6 @@ const trendCards = computed(() => [
 .mode-sub {
   font-size: 12px;
   color: var(--line);
-}
-.tariff strong {
-  margin: 0 6px;
-  font-size: 15px;
-  color: var(--ink);
 }
 
 .row {
@@ -326,7 +387,11 @@ const trendCards = computed(() => [
   color: var(--mute);
 }
 
-/* 2줄 */
+/* 2줄: 높이 고정 (ESS 추천이 와서 버튼·판단 근거가 생겨도 줄 높이가 변하지 않아 아래 화면이 움직이지 않음)
+   내용이 아주 길면(판단 근거 "모두 보기") ESS 추천 카드 안에서만 스크롤 */
+.middle {
+  height: 340px;
+}
 .peak {
   flex: 1;
   min-width: 0;
@@ -340,6 +405,8 @@ const trendCards = computed(() => [
 }
 .advice {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .action-error {
   color: var(--crit);
@@ -363,7 +430,13 @@ const trendCards = computed(() => [
   display: flex;
   flex: none;
   flex-direction: column;
+  contain: size; /* 이벤트가 늘어나도 줄 높이를 밀어내지 않음 (그래프 두 개 높이에 맞춤, 넘치는 이벤트는 가려짐) */
   width: 600px;
+}
+.events {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 .events li {
   display: flex;

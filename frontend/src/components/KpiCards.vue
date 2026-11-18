@@ -35,11 +35,19 @@ function clamp(ratio) {
 }
 
 // 반원 위의 색 구간 하나. from·to는 반원 전체를 100으로 봤을 때의 위치(%)
-function segment(from, to, className) {
+// ring이 true면 안쪽 굵은 반원이 아니라 바깥쪽 가는 테(정상·주의·경고 구간 표시)에 그림
+function segment(from, to, className, ring = false) {
   const start = clamp(from / 100) * 100
   const end = clamp(to / 100) * 100
   // 길이 0에서 시작 → start만큼 비움 → (end - start)만큼 칠함 → 나머지는 비움
-  return { dash: `0 ${start} ${Math.max(0, end - start)} 200`, className }
+  return { dash: `0 ${start} ${Math.max(0, end - start)} 200`, className, ring }
+}
+
+// 값이 어느 구간에 있는지에 따라 차오르는 게이지 색을 고름 (바깥 테와 같은 색)
+function zoneClass(value, warnAt, critAt) {
+  if (value >= critAt) return 'fill-crit'
+  if (value >= warnAt) return 'fill-warn'
+  return 'fill-ok'
 }
 
 // 바늘 끝 좌표. ratio 0이면 왼쪽 끝, 1이면 오른쪽 끝 (반원 중심 60,62 / 바늘 길이 40)
@@ -79,17 +87,42 @@ const kpis = computed(() => {
   const targetAt = s && gridMax ? (target / gridMax) * 100 : 0
 
   // ESS: 가운데가 대기, 왼쪽이 충전, 오른쪽이 방전
+  // 배터리 잔량이 있는 구간 (하한 아래 경고 · 상한 위 주의 · 그 사이 정상)
+  const socClass = !s
+    ? ''
+    : s.socPercent < (socLow ?? 0)
+      ? 'fill-crit'
+      : s.socPercent > (socHigh ?? 100)
+        ? 'fill-warn'
+        : 'fill-ok'
+  // 한전 구매전력이 있는 구간
+  const gridClass = s ? zoneClass(s.gridKw, s.warnKw, target) : ''
+
   const essRatio = s && maxPowerKw ? 0.5 + ((charging ? -essKw : essKw) / maxPowerKw) * 0.5 : 0.5
 
   return [
     {
       key: 'load',
+      dot: 'mix', // 계기판이 한전 · 태양광 · ESS 세 색으로 칠해지므로 세 색을 나란히
       name: '공장 소비전력',
       value: formatKw(s?.loadKw),
       unit: 'kW',
-      sub: s
-        ? `한전 ${Math.round(s.sourceRatio.gridPercent)}% / 태양광 ${Math.round(s.sourceRatio.solarPercent)}% / ESS ${Math.round(s.sourceRatio.essPercent)}%`
-        : '',
+      // 아랫줄: 각 공급원이 계기판에서 어떤 색인지 작은 네모로 함께 보여 줌
+      legend: s
+        ? [
+            {
+              label: '한전',
+              percent: Math.round(s.sourceRatio.gridPercent),
+              className: 'fill-grid',
+            },
+            {
+              label: '태양광',
+              percent: Math.round(s.sourceRatio.solarPercent),
+              className: 'fill-solar',
+            },
+            { label: 'ESS', percent: Math.round(s.sourceRatio.essPercent), className: 'fill-ess' },
+          ]
+        : null,
       min: '0',
       max: loadMax ? formatKw(loadMax) : '',
       segments: [
@@ -102,6 +135,7 @@ const kpis = computed(() => {
     },
     {
       key: 'grid',
+      dot: gridClass, // 지금 구간 색 (정상 초록 · 주의 주황 · 목표 초과 빨강)
       name: '한전 구매전력',
       value: formatKw(s?.gridKw),
       unit: 'kW',
@@ -110,22 +144,26 @@ const kpis = computed(() => {
       sub: !s
         ? ''
         : over
-          ? '▲ 순간값이 목표 초과 (피크 판정은 15분 평균)'
+          ? '▲ 순간값이 목표 초과\n(피크 판정은 15분 평균)' // \n 자리에서 줄을 바꿈 (아래 white-space: pre-line)
           : `목표 ${formatKw(target)} kW의 ${formatOneDecimal(gridPercent.value)}%`,
       over,
       min: '0',
       max: gridMax ? formatKw(gridMax) : '',
+      // 바깥 가는 테: 정상 · 주의 · 경고 구간 / 안쪽: 바늘 위치까지 차오르는 게이지 (색은 지금 구간 색)
       segments: s
         ? [
-            segment(0, warnAt, 'band-ok'),
-            segment(warnAt, targetAt, 'band-warn'),
-            segment(targetAt, 100, 'band-crit'),
+            segment(0, warnAt, 'ring-ok', true),
+            segment(warnAt, targetAt, 'ring-warn', true),
+            segment(targetAt, 100, 'ring-crit', true),
+            segment(0, 100, 'track'),
+            segment(0, (s.gridKw / gridMax) * 100, gridClass),
           ]
         : [segment(0, 100, 'track')],
       needle: s && gridMax ? needle(s.gridKw / gridMax) : null,
     },
     {
       key: 'solar',
+      dot: 'fill-solar',
       name: '태양광 발전량',
       value: formatKw(s?.solarKw),
       unit: 'kW',
@@ -141,34 +179,55 @@ const kpis = computed(() => {
     },
     {
       key: 'ess',
+      // 충전 파랑 · 방전 주황 · 대기 회색 (계기판 안쪽 게이지와 같은 색)
+      dot: !s
+        ? ''
+        : charging
+          ? 'fill-charge'
+          : s.pcsStatus === 'DISCHARGING'
+            ? 'fill-discharge'
+            : 'standby',
       name: 'ESS 충·방전',
       // 숫자 앞에 지금 무엇을 하는 중인지 적음 (방전 500 kW / 충전 300 kW / 대기 0.0 kW)
       prefix: s ? (PCS_SHORT[s.pcsStatus] ?? '') : '',
+      prefixIcon: s?.pcsStatus ?? '', // 글자 앞 아이콘 (대기 · 방전 · 충전)
       value: formatKw(essKw),
       unit: 'kW',
       sub: '왼쪽 충전 / 오른쪽 방전',
       min: maxPowerKw ? `충전 ${formatKw(maxPowerKw)}` : '충전',
       max: maxPowerKw ? `방전 ${formatKw(maxPowerKw)}` : '방전',
+      // 바깥 가는 테: 가운데(대기)를 기준으로 왼쪽 충전 · 오른쪽 방전을 다른 색으로
+      // 안쪽: 가운데에서 바늘까지 차오름 (충전이면 충전 색, 방전이면 방전 색)
       segments: [
+        segment(0, 49.5, 'ring-charge', true),
+        segment(50.5, 100, 'ring-discharge', true),
         segment(0, 100, 'track'),
-        segment(Math.min(50, essRatio * 100), Math.max(50, essRatio * 100), 'fill-ess'),
+        segment(
+          Math.min(50, essRatio * 100),
+          Math.max(50, essRatio * 100),
+          charging ? 'fill-charge' : 'fill-discharge',
+        ),
       ],
       needle: s && maxPowerKw ? needle(essRatio) : null,
     },
     {
       key: 'soc',
+      dot: socClass, // 지금 구간 색
       name: '배터리 잔량 (SOC)',
       value: formatOneDecimal(s?.socPercent),
       unit: '%',
       sub: s ? `배터리실 ${formatOneDecimal(s.batteryTempC)}℃` : '',
+      thermometer: true, // 아랫줄 앞에 온도계 아이콘
       min: '0',
       max: '100',
-      // 하한 아래와 상한 위는 연한 띠로 표시 (설정값)
+      // 바깥 가는 테: 하한 아래 경고 · 하한~상한 정상 · 상한 위 주의 (설정값)
+      // 안쪽: 잔량만큼 차오르는 게이지 (색은 지금 구간 색)
       segments: [
+        segment(0, socLow ?? 0, 'ring-crit', true),
+        segment(socLow ?? 0, socHigh ?? 100, 'ring-ok', true),
+        segment(socHigh ?? 100, 100, 'ring-warn', true),
         segment(0, 100, 'track'),
-        segment(0, socLow ?? 0, 'band-crit'),
-        segment(socHigh ?? 100, 100, 'band-warn'),
-        segment(0, s ? s.socPercent : 0, 'fill-ess thin'),
+        ...(s ? [segment(0, s.socPercent, socClass)] : []),
       ],
       needle: s ? needle(s.socPercent / 100) : null,
     },
@@ -186,7 +245,8 @@ const kpis = computed(() => {
     <div class="kpis">
       <section v-for="kpi in kpis" :key="kpi.key" class="card kpi" :class="kpi.key">
         <div class="kpi-top">
-          <span class="dot" aria-hidden="true"></span>
+          <!-- 이름 앞 색: 이 카드 계기판에서 지금 차오른 게이지의 색과 같음 -->
+          <span class="dot" :class="kpi.dot" aria-hidden="true"></span>
           <h2 class="kpi-name">{{ kpi.name }}</h2>
         </div>
         <!-- 반원 계기판: 색 구간 + 바늘 (값을 못 받았으면 바늘 없이 회색 반원만) -->
@@ -195,8 +255,8 @@ const kpis = computed(() => {
             v-for="(item, index) in kpi.segments"
             :key="index"
             class="seg"
-            :class="item.className"
-            d="M10 62 A50 50 0 0 1 110 62"
+            :class="[item.className, { ring: item.ring }]"
+            :d="item.ring ? 'M2 62 A58 58 0 0 1 118 62' : 'M10 62 A50 50 0 0 1 110 62'"
             pathLength="100"
             :stroke-dasharray="item.dash"
           />
@@ -208,11 +268,46 @@ const kpis = computed(() => {
           <text class="scale" x="116" y="71" text-anchor="end">{{ kpi.max }}</text>
         </svg>
         <p class="kpi-value">
-          <span v-if="kpi.prefix" class="kpi-prefix">{{ kpi.prefix }}</span>
+          <span v-if="kpi.prefix" class="kpi-prefix" :class="kpi.prefixIcon.toLowerCase()">
+            <!-- 대기: 일시정지 / 방전: 번개 / 충전: 플러그 (SVG 직접 그림, 색은 글자색) -->
+            <svg class="prefix-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <template v-if="kpi.prefixIcon === 'DISCHARGING'">
+                <path class="solid" d="M13 2 L4 14 H11 L9 22 L20 9 H13 Z" />
+              </template>
+              <template v-else-if="kpi.prefixIcon === 'CHARGING'">
+                <path d="M9 2 V7 M15 2 V7 M6 7 H18 V11 a6 6 0 0 1 -12 0 Z M12 17 V22" />
+              </template>
+              <template v-else>
+                <circle cx="12" cy="12" r="9" />
+                <path d="M10 8.5 V15.5 M14 8.5 V15.5" />
+              </template>
+            </svg>
+            {{ kpi.prefix }}
+          </span>
           <span class="num">{{ kpi.value }}</span>
           <span class="kpi-unit">{{ kpi.unit }}</span>
         </p>
-        <p class="kpi-sub num" :class="{ over: kpi.over }">{{ kpi.sub }}</p>
+        <!-- 아랫줄 (높이를 두 줄로 고정해서 글자가 바뀌어도 카드 높이가 변하지 않음) -->
+        <p v-if="kpi.legend" class="kpi-sub num">
+          <span v-for="item in kpi.legend" :key="item.label" class="legend-item">
+            <span class="swatch" :class="item.className" aria-hidden="true"></span>
+            {{ item.label }} {{ item.percent }}%
+          </span>
+        </p>
+        <p v-else class="kpi-sub num" :class="{ over: kpi.over }">
+          <!-- 온도계 아이콘 (SVG 직접 그림) -->
+          <svg
+            v-if="kpi.thermometer && kpi.sub"
+            class="thermo"
+            viewBox="0 0 16 24"
+            aria-hidden="true"
+          >
+            <path d="M6 3.5 a2 2 0 0 1 4 0 V14.5 a4 4 0 1 1 -4 0 Z" />
+            <circle class="thermo-fill" cx="8" cy="17.5" r="2.2" />
+            <line class="thermo-fill-line" x1="8" y1="8" x2="8" y2="16" />
+          </svg>
+          {{ kpi.sub }}
+        </p>
       </section>
     </div>
   </div>
@@ -234,24 +329,45 @@ const kpis = computed(() => {
   gap: 16px;
 }
 
-/* 공급원 색 */
+/* 이름 앞 색 네모: 계기판 게이지 색과 같은 변수 (값을 아직 못 받았으면 회색) */
 .dot {
   flex: none;
   width: 10px;
   height: 10px;
-  background: var(--source, var(--ink));
+  background: var(--line-strong);
 }
-.grid {
-  --source: var(--src-grid);
+.dot.mix {
+  background: linear-gradient(
+    to right,
+    var(--gauge-grid) 0 34%,
+    var(--gauge-solar) 34% 67%,
+    var(--gauge-ess) 67% 100%
+  );
 }
-.solar {
-  --source: var(--src-solar);
+.dot.fill-ok {
+  background: var(--gauge-ok);
 }
-.ess,
-.soc {
-  --source: var(--src-ess);
+.dot.fill-warn {
+  background: var(--gauge-warn);
 }
-
+.dot.fill-crit {
+  background: var(--gauge-crit);
+}
+.dot.fill-solar {
+  background: var(--gauge-solar);
+}
+.dot.fill-charge {
+  background: var(--gauge-charge);
+}
+.dot.fill-discharge {
+  background: var(--gauge-discharge);
+}
+.dot.standby {
+  background: var(--mute);
+}
+.stale .dot {
+  background: var(--lost);
+}
 .kpi {
   display: flex;
   flex: 1;
@@ -260,10 +376,6 @@ const kpis = computed(() => {
   gap: 2px;
   min-width: 0;
   padding: 10px 14px 12px;
-}
-/* 공장 소비전력은 특정 공급원이 아니므로 점을 먹색으로 */
-.kpi.load {
-  --source: var(--ink);
 }
 .kpi-top {
   display: flex;
@@ -284,47 +396,70 @@ const kpis = computed(() => {
   max-width: 200px;
   margin-top: 2px;
 }
+/* 값이 바뀌면 원호가 바로 그 자리로 감 (움직이는 효과 없음, 2026-11-18)
+   색은 color에 두고 stroke와 빛 번짐(drop-shadow)이 같은 색을 따라가게 함 */
 .seg {
   fill: none;
+  stroke: currentColor;
   stroke-width: 10;
   stroke-linecap: butt;
-  transition: stroke-dasharray 0.4s ease;
 }
-.seg.thin {
-  stroke-width: 4;
+/* 바깥 가는 테 (정상 · 주의 · 경고 구간 표시) */
+.seg.ring {
+  stroke-width: 2.5; /* 안쪽 게이지와 살짝 띄운 가는 테 */
+}
+.seg.ring-ok {
+  color: var(--gauge-ok);
+}
+.seg.ring-warn {
+  color: var(--gauge-warn);
+}
+.seg.ring-crit {
+  color: var(--gauge-crit);
+}
+/* ESS: 왼쪽 충전 · 오른쪽 방전 색 */
+.seg.ring-charge,
+.seg.fill-charge {
+  color: var(--gauge-charge);
+}
+.seg.ring-discharge,
+.seg.fill-discharge {
+  color: var(--gauge-discharge);
+}
+/* 차오르는 게이지 색 = 지금 값이 있는 구간의 색 */
+.seg.fill-ok {
+  color: var(--gauge-ok);
+}
+.seg.fill-warn {
+  color: var(--gauge-warn);
+}
+.seg.fill-crit {
+  color: var(--gauge-crit);
 }
 .seg.track {
-  stroke: var(--line);
+  color: var(--line);
 }
 .seg.fill-grid {
-  stroke: var(--src-grid);
+  color: var(--gauge-grid);
 }
 .seg.fill-solar {
-  stroke: var(--src-solar);
+  color: var(--gauge-solar);
 }
 .seg.fill-ess {
-  stroke: var(--src-ess);
+  color: var(--gauge-ess);
 }
-/* 정상 · 주의 · 경고 띠는 상태색을 연하게 깔아 바늘이 잘 보이게 함 */
-.seg.band-ok {
-  stroke: var(--ok);
-  stroke-opacity: 0.25;
-}
-.seg.band-warn {
-  stroke: var(--warn);
-  stroke-opacity: 0.3;
-}
-.seg.band-crit {
-  stroke: var(--crit);
-  stroke-opacity: 0.25;
+/* 다크 모드에서만 채워진 원호가 빛나 보이게 (라이트는 --gauge-glow가 0이라 그대로). 바늘은 빛나지 않음 */
+.seg[class*='fill-'] {
+  filter: drop-shadow(0 0 var(--gauge-glow) currentColor);
 }
 .needle {
-  stroke: var(--ink);
+  color: var(--gauge-needle);
+  stroke: currentColor;
   stroke-width: 2.5;
   stroke-linecap: round;
 }
 .hub {
-  fill: var(--ink);
+  fill: var(--gauge-needle);
 }
 .scale {
   font-size: 7px;
@@ -333,6 +468,7 @@ const kpis = computed(() => {
 
 .kpi-value {
   display: flex;
+  justify-content: center;
   align-items: baseline;
   gap: 6px;
   margin-top: -4px;
@@ -340,7 +476,17 @@ const kpis = computed(() => {
   font-weight: 700;
   line-height: 1.2;
 }
+/* 숫자 칸 폭을 5글자(예: 2,046)로 고정 → 자릿수가 바뀌어도 단위와 숫자 위치가 흔들리지 않음
+   숫자는 오른쪽(단위 쪽)에 붙여 단위와 떨어져 보이지 않게 함 */
+.kpi-value .num {
+  display: inline-block;
+  min-width: 5ch;
+  text-align: right;
+}
 .kpi-prefix {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 17px;
 }
 .kpi-unit {
@@ -350,12 +496,80 @@ const kpis = computed(() => {
 }
 .kpi-sub {
   align-self: stretch;
-  min-height: 18px;
+  white-space: pre-line; /* 글 안의 \n 에서 줄을 바꿈 */
+  height: 36px; /* 두 줄 높이로 고정: 한 줄 ↔ 두 줄로 바뀌어도 카드(와 그 아래 화면)가 움직이지 않음 */
+  overflow: hidden;
   font-size: 12px;
   color: var(--mute);
   text-align: center;
   /* 좁은 화면에서는 잘라 내지 않고 두 줄로 내려 씀 (공급원 비율이 길어서) */
   word-break: keep-all;
+}
+/* ESS 글자 앞 아이콘 */
+.prefix-icon {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.prefix-icon .solid {
+  fill: currentColor;
+  stroke: none;
+}
+.kpi-prefix.discharging .prefix-icon {
+  color: var(--gauge-discharge);
+}
+.kpi-prefix.charging .prefix-icon {
+  color: var(--gauge-charge);
+}
+.kpi-prefix.standby .prefix-icon {
+  color: var(--mute);
+}
+/* 공장 소비전력 아랫줄: 공급원마다 계기판 색 네모 */
+.legend-item {
+  display: inline-flex; /* 네모 + 이름 + % 를 한 덩어리로 (중간에서 줄이 바뀌지 않음) */
+  align-items: center;
+  white-space: nowrap;
+}
+.legend-item + .legend-item {
+  margin-left: 10px; /* 항목 사이는 / 대신 공백으로 구분 */
+}
+.swatch {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-right: 3px;
+}
+.swatch.fill-grid {
+  background: var(--gauge-grid);
+}
+.swatch.fill-solar {
+  background: var(--gauge-solar);
+}
+.swatch.fill-ess {
+  background: var(--gauge-ess);
+}
+/* 온도계 아이콘 */
+.thermo {
+  width: 10px;
+  height: 15px;
+  margin-right: 2px;
+  vertical-align: -3px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+.thermo-fill {
+  fill: var(--crit);
+  stroke: none;
+}
+.thermo-fill-line {
+  stroke: var(--crit);
+  stroke-width: 2.4;
+  stroke-linecap: round;
 }
 .kpi-sub.over {
   font-weight: 700;
@@ -368,15 +582,9 @@ const kpis = computed(() => {
   color: var(--lost);
 }
 .stale .needle {
-  stroke: var(--lost);
+  color: var(--lost);
 }
 .stale .hub {
   fill: var(--lost);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .seg {
-    transition: none;
-  }
 }
 </style>
