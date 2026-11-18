@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 원본 데이터·참고 파일 (저장소에 올리지 않음)
+# - data/: 공장 전력·태양광·날씨 원본 CSV. 화면용으로는 src/api/fakeEnergyData.json으로 변환해 두었음
+# - docs/*.pdf: 참고 논문
+# - docs/*.xlsx: API 명세 복사본. 기준은 팀 구글 시트 (옛 버전과 헷갈리지 않게 올리지 않음)
+data/
+docs/*.pdf
+docs/*.xlsx

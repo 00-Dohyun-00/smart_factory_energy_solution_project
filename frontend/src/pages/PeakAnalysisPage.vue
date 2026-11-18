@@ -23,6 +23,16 @@ const realtimeStore = useRealtimeStore()
 
 // 처리 상태는 색만으로 구분하지 않도록 도형을 함께 표시 (운영 로그 화면과 같은 표시)
 const STATUS_SHAPES = { APPLIED: '●', AUTO: '◇', IGNORED: '✕' }
+const TOP_COUNT = 8 // "피크가 높았던 구간"에 보여 줄 개수
+
+// 그 구간의 추천 처리를 한 줄 문구로 (명세 16번은 action·status 코드만 주므로 화면에서 글자로 바꿈)
+function windowNote(item) {
+  if (!item.action) return '방전 추천 없음'
+  if (item.status === 'IGNORED') return '추천을 넘김'
+  if (item.status === 'AUTO') return '자동 방전 (시뮬레이션)'
+  if (item.status === 'APPLIED') return '방전 적용'
+  return '추천 중'
+}
 
 // ---- 조회 조건 ----
 const preset = ref('month') // month(이번 달) | lastMonth(지난 달) | week(최근 7일) | custom(직접 입력)
@@ -65,6 +75,8 @@ function applyPreset(name) {
 function load(showLoading = true) {
   if (!fromDate.value || !toDate.value || dateError.value) return
   analysisStore.fetchPeak(fromDate.value, toDate.value, showLoading)
+  // "피크가 높았던 구간" 표는 명세 16번(demand-intervals)으로 따로 받음
+  analysisStore.fetchPeakWindows(fromDate.value, toDate.value, TOP_COUNT)
 }
 
 // "피크가 높았던 구간" 표에서 누른 구간의 시작 시각 (히트맵에 그 칸을 표시)
@@ -72,7 +84,7 @@ const selectedStart = ref('')
 
 // "피크가 높았던 구간" 표의 필터 (머리줄의 처리 · 결과 칸)
 const windowStatus = ref('ALL') // ALL | APPLIED | AUTO | IGNORED | NONE(추천 없음)
-const windowResult = ref('ALL') // ALL | DEFENDED(목표 이내) | EXCEEDED(목표 초과)
+const windowResult = ref('ALL') // ALL | DEFENDED(목표 달성) | EXCEEDED(목표 초과)
 
 function toggleWindow(windowStart) {
   selectedStart.value = selectedStart.value === windowStart ? '' : windowStart
@@ -84,19 +96,23 @@ watch([fromDate, toDate], () => {
   load()
 })
 
-// 표에 보여 줄 줄: 순위는 거르기 전 순위를 그대로 둠. 결과는 목표 피크와 비교한 표시용 구분
-const windowRows = computed(() =>
-  (peak.value?.topWindows ?? []).map((item, index) => {
-    const overKw = item.peakKw - peak.value.targetPeakKw
+// 표에 보여 줄 줄 (명세 16번 구간 순위 API 결과). 순위는 거르기 전 순위를 그대로 둠
+// 결과는 목표 피크와 비교한 표시용 구분, 처리 글자는 windowNote로 만듦
+const windowRows = computed(() => {
+  const target = peak.value?.targetPeakKw
+  if (!target) return []
+  return analysisStore.peakWindows.map((item, index) => {
+    const overKw = item.peakKw - target
     return {
       ...item,
       rank: index + 1,
-      statusKey: item.status ?? 'NONE',
+      note: windowNote(item),
+      statusKey: item.action ? item.status : 'NONE', // 추천이 없던 구간은 NONE
       result: overKw > 0 ? 'EXCEEDED' : 'DEFENDED',
       overKw,
     }
-  }),
-)
+  })
+})
 const filteredWindows = computed(() =>
   windowRows.value.filter((row) => {
     if (windowStatus.value !== 'ALL' && row.statusKey !== windowStatus.value) return false
@@ -243,7 +259,9 @@ const heatOption = computed(() => {
   if (selectedStart.value) {
     const hour = Number(selectedStart.value.slice(11, 13))
     const row = dates.indexOf(selectedStart.value.slice(0, 10))
-    const picked = peak.value.topWindows.find((item) => item.windowStart === selectedStart.value)
+    const picked = analysisStore.peakWindows.find(
+      (item) => item.windowStart === selectedStart.value,
+    )
     if (row >= 0 && picked) {
       outlines.push({
         x0: hour,
@@ -426,7 +444,7 @@ const heatOption = computed(() => {
           </dd>
           <p class="num">
             {{ shortTime(summary.maxPeakAt) }},
-            {{ summary.maxPeakKw > peak.targetPeakKw ? '목표 초과' : '목표 이내' }}
+            {{ summary.maxPeakKw > peak.targetPeakKw ? '목표 초과' : '목표 달성' }}
           </p>
         </div>
         <div>
@@ -490,11 +508,11 @@ const heatOption = computed(() => {
               필터 초기화
             </button>
           </div>
-          <!-- 칸: 순위 | 15분 구간 | 피크 | 처리 | 결과. 머리줄의 처리 · 결과 칸이 곧 필터 -->
+          <!-- 칸: 순위 | 대상 시간 | 피크 | 처리 | 결과. 머리줄의 처리 · 결과 칸이 곧 필터 -->
           <div class="windows">
             <div class="windows-head">
               <span>순위</span>
-              <span class="col-time">15분 구간</span>
+              <span class="col-time">대상 시간</span>
               <span class="right-text">피크</span>
               <span class="col-detail">
                 <select
@@ -507,6 +525,7 @@ const heatOption = computed(() => {
                   <option value="APPLIED">적용</option>
                   <option value="AUTO">자동</option>
                   <option value="IGNORED">넘김</option>
+                  <option value="RECOMMENDED">추천 중</option>
                   <option value="NONE">추천 없음</option>
                 </select>
               </span>
@@ -518,7 +537,7 @@ const heatOption = computed(() => {
                   aria-label="결과 필터"
                 >
                   <option value="ALL">결과</option>
-                  <option value="DEFENDED">목표 이내</option>
+                  <option value="DEFENDED">목표 달성</option>
                   <option value="EXCEEDED">목표 초과</option>
                 </select>
               </span>
@@ -540,7 +559,7 @@ const heatOption = computed(() => {
                     {{ formatKw(row.peakKw) }} kW
                   </strong>
                   <span class="col-detail window-detail" :title="row.note">
-                    <span v-if="row.status" aria-hidden="true">{{
+                    <span v-if="row.action && STATUS_SHAPES[row.status]" aria-hidden="true">{{
                       STATUS_SHAPES[row.status]
                     }}</span>
                     {{ row.note }}
@@ -549,11 +568,17 @@ const heatOption = computed(() => {
                     <template v-if="row.overKw > 0">
                       목표 초과 +{{ formatKw(row.overKw) }}
                     </template>
-                    <template v-else>목표 이내</template>
+                    <template v-else>목표 달성</template>
                   </span>
                 </button>
               </li>
             </ul>
+            <p v-else-if="analysisStore.peakWindowsError" class="windows-error" role="alert">
+              구간 순위를 불러오지 못했습니다. ({{ analysisStore.peakWindowsError }})
+            </p>
+            <p v-else-if="!windowRows.length" class="windows-empty">
+              이 기간에는 구간 기록이 없습니다.
+            </p>
             <p v-else class="windows-empty">조건에 맞는 구간이 없습니다. 필터를 바꿔 보세요.</p>
           </div>
           <RouterLink to="/logs" class="more">추천 이력 보기</RouterLink>
@@ -817,6 +842,10 @@ const heatOption = computed(() => {
 .windows-empty {
   padding: 16px 0;
   color: var(--mute);
+}
+.windows-error {
+  padding: 16px 0;
+  color: var(--crit);
 }
 /* 머리줄의 필터 선택 상자: 평소엔 칸 이름처럼 보이고(테두리 없음), 고르면 먹색 바탕 */
 .head-select {

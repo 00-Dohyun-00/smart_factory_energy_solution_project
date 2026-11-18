@@ -91,7 +91,7 @@ src/
 
 메뉴 이름은 "운영 로그"다(2026-11-16에 "로그"에서 변경). 주소(`/logs`)와 파일 이름(`HistoryPage.vue`)은 그대로 두었다.
 
-- 표 한 줄 = 추천 1건. 열: 추천 시각, 대상 시간, 추천(행동·kW), 이유, 예상 피크, 처리(추천 중/적용/자동/넘김), 처리자, 처리 시각, 실제 피크, 목표 달성(달성/초과). (2026-11-17, UI 피드백으로 칼럼 이름을 바꾸고 처리자와 처리 시각을 나눔. 예전 이름: 15분 구간, 근거, 예상 평균, 처리자·시각, 결과 피크, 결과. 조회 조건의 "근거"도 "이유"로 바꿈)
+- 표 한 줄 = 추천 1건. 열: 추천 시각, 대상 시간, 추천(행동·kW), 규칙, 예상 피크, 처리(추천 중/적용/자동/넘김), 처리자, 처리 시각, 실제 피크, 목표 달성(달성/초과). (2026-11-17, UI 피드백으로 칼럼 이름을 바꾸고 처리자와 처리 시각을 나눔. 예전 이름: 15분 구간, 근거, 예상 평균, 처리자·시각, 결과 피크, 결과. 조회 조건의 "근거"는 "규칙"으로 바꿈. 펼친 줄은 "이유"와 "판단 근거" 제목으로 나눔)
 - 줄을 누르면 추천 이유와 판단에 쓴 값(`usedValues`)이 펼쳐진다. 판단 값 목록은 백엔드가 주는 배열을 그대로 그린다.
 - 기간(오늘/최근 7일/직접 입력)은 API로 조회하고, 추천·처리·근거·검색어 조건은 받아 온 목록을 화면에서 거른다. 근거 선택 상자의 목록은 받아 온 이력에 나온 `ruleLabel`로 만든다.
 - "오늘"은 서버가 보낸 시각(`status.recordedAt`)에서 구한다. 조회 기간에 오늘이 들어 있으면 5초마다 조용히 다시 받는다.
@@ -121,7 +121,7 @@ src/
   - 카드마다 숫자 위에 반원 계기판(바늘)을 그린다. 멀리서도 보이게 하기 위해서다(2026-11-17, UI 피드백. 이전 막대 모양은 커밋 `c560e9c`에 있다). SVG를 직접 그리며 ECharts는 쓰지 않는다.
   - 눈금 범위는 표시용으로 화면에서 정한다: 공장 소비 0~목표 피크×1.5(공급원 비율대로 색을 나눠 칠함), 한전 구매 0~목표 피크×1.2(정상·주의·경고 띠, 기준선은 백엔드의 `warnKw`·`targetPeakKw`), 태양광은 공장 소비 대비 비율, ESS는 가운데가 대기이고 왼쪽 충전·오른쪽 방전(끝은 설정의 최대 출력), 배터리 잔량 0~100%(설정의 하한·상한 밖은 연한 띠).
 - 2줄: 현재 15분 피크 구간(`PeakWindowCard.vue`) / ESS 추천(`EssAdviceCard.vue`).
-  - 현재 15분 피크 구간: 왼쪽에 예상 평균·한 줄 판정·단계, 오른쪽에 피크 게이지(정상·주의·경고 띠 위에 예상 평균 표시), 목표 피크·예상 평균·방어 필요 전력·남은 시간, 구간 진행 막대. 단계와 기준선은 백엔드가 주는 값을 쓴다. 게이지에 그리는 범위만 목표 피크 기준으로 화면에서 정한다(표시용). 주의선 기준(예: 목표의 97%)은 확인 필요.
+  - 현재 15분 피크 구간: 왼쪽에 예상 피크·한 줄 판정·단계, 오른쪽에 피크 게이지(정상·주의·경고 띠 위에 예상 피크 표시), 목표 피크·예상 피크·추가 방전·남은 시간, 구간 진행 막대. 단계와 기준선은 백엔드가 주는 값을 쓴다. 게이지에 그리는 범위만 목표 피크 기준으로 화면에서 정한다(표시용). 주의선 기준(예: 목표의 97%)은 확인 필요.
   - ESS 추천: 행동(충전/방전/대기), 추천 kW, 이유 문장, 판단 근거(백엔드가 준 `usedValues` 목록을 그대로), `[방전 500 kW 적용]` `[넘기기]` 버튼. 기본은 **운영자 승인 모드**다. 추천 만료 규칙은 확인 필요이며, 정해지기 전에는 최신 추천 1건만 버튼을 활성화한다. 판단 근거는 앞의 4개만 보이고 `[모두 보기 (11개)]`로 펼친다(1366×768에서 [적용] 버튼이 첫 화면 아래로 밀리지 않게, 2026-11-17).
   - 현재 15분 피크 구간 카드: 경고일 때 판정 문장은 "목표 N kW를 넘을 것으로 보입니다"다. `defenseKw`는 넘는 양이 아니라 더 방전해야 할 전력이라 문장에 쓰지 않는다. 첫 값을 받기 전에는 "○ 불러오는 중", 연결이 끊기면 "◆ 통신 단절"(회색)이다. 1600px 이하에서는 숫자 4개를 2×2로 놓는다.
 - 3줄: 오늘 그래프 두 개를 위아래로 둔다. 위는 "오늘 공장 소비"(공장 소비 선, 태양광 점선), 아래는 "오늘 한전 구매"(한전 구매 선, 목표 피크선). 한 그래프에 선이 많으면 비교가 어려워 나눴다(2026-11-17, UI 피드백). 두 그래프 모두 최대부하 회색 띠와 "지금" 세로선이 있고, 가로축은 하루 전체이며 아직 오지 않은 시간은 비워 둔다 / 이벤트 로그(단계 변화, 추천 발생, 적용·넘김, 15분 구간 종료를 최신 순으로 10건. 단계는 도형과 색으로 표시). 공급원 흐름 카드는 2026-11-16에 이벤트 로그로 바꿨고, 공급원별 kW와 비율은 KPI의 공장 소비전력 카드에서 본다.
@@ -172,7 +172,7 @@ src/
 - 아래의 변경 기록은 백엔드가 준 목록(저장 시각, 항목, 저장 전·후 값, 변경자)을 그대로 보여 준다.
 - 설정은 `useSettingsStore`에 있고 공통 틀(`MainLayout.vue`)이 처음에 한 번 받아 둔다. "화면 갱신 주기"는 공통 틀의 폴링 주기로 쓰이고, 운영 모드가 자동이면 왼쪽 메뉴 맨 위, 통합 화면 제목 줄, ESS 추천 카드에 자동 모드(시뮬레이션)임을 표시한다.
 - 가짜 백엔드에서는 저장한 값이 바로 반영된다: 목표 피크·주의선(통합의 단계와 게이지), 최대 출력(추천 kW), 배터리 용량·잔량 하한/상한·온도 제한(분석), 운영 모드(자동이면 추천을 바로 적용한 것으로 기록). 추천 유효 시간은 저장만 되고 계산에는 쓰이지 않는다. 새로 고치면 처음 값으로 돌아간다.
-- 이 화면용 가짜 데이터(백엔드와 확정 필요): `GET /api/energy-settings` → `[{ key, value, updatedAt, updatedBy }]`, `PUT /api/energy-settings/{key}`(본문 `{ value }`), 변경 기록 `[{ id, changedAt, key, before, after, changedBy }]`(주소 미정). 설정 이름: `targetPeakKw`, `warnPercent`, `priceLightWon`, `priceMidWon`, `pricePeakWon`, `basePriceWon`, `capacityKwh`, `maxPowerKw`, `socLowPercent`, `socHighPercent`, `efficiencyPercent`, `roomTempLimitC`, `operationMode`(`MANUAL`·`AUTO`), `pollSeconds`, `decisionValidMinutes`.
+- 명세 v0.2 모양(2026-11-17): `GET /api/settings` → `[{ key, group, label, value(문자열), unit, updatedAt, updatedBy }]`, `PUT /api/settings`(본문 `[{ key, value }]`, 묶음의 바뀐 값을 한 번에), `GET /api/setting-histories?from=&to=` → `[{ id, changedAt, key, label, oldValue, newValue, changedBy }]`(서버 날짜 기준 최근 30일). 화면의 설정 키: `peak.target_kw`, `peak.warn_ratio`, `ess.capacity_kwh`·`ess.max_power_kw`(명세 "보기만" → 읽기 전용), `ess.soc_low`, `ess.soc_high`, `ess.room_temp_limit`, `operation.auto_mode`(`"true"`/`"false"`). `operation.poll_seconds`, `operation.decision_valid_minutes`는 명세에 없어 화면에서 뺄지 팀 결정 대기.
 
 ### 모니터링 > 설비 모니터링 세부
 
@@ -227,25 +227,30 @@ src/
 
 - 흐름: 페이지 → Store(`use{기능}Store.js`) → API 함수(`{기능}Api.js`) → `api()`. 페이지에서 `fetch`를 직접 부르지 않는다.
 - 필드 이름은 **Swagger(http://localhost:8080/swagger-ui.html)에 나온 그대로** 쓴다. 이름을 바꾸는 변환 코드를 두지 않는다.
-- 주소 규칙은 `/api/{복수형 명사}`다. `api()`에는 `/api`를 뺀 경로를 넘긴다. (예: `api('/battery-statuses/latest')`)
+- 주소 규칙은 `/api/{복수형 명사}`다. `api()`에는 `/api`를 뺀 경로를 넘긴다. (예: `api('/site-powers/latest')`)
 - **백엔드가 아직 없는 API**는 해당 `{기능}Api.js` 함수가 임시로 가짜 데이터를 돌려주게 만든다. 함수 이름과 응답 모양은 실제와 같게 하고, `// TODO: 백엔드 연결 후 교체` 주석을 남긴다. Store와 페이지는 고치지 않아도 되게 한다.
-- 현재 백엔드에는 API가 하나도 없다. 아래는 기획 초안이며 백엔드와 확정되면 `api/` 폴더만 고친다.
+- 주소와 응답 모양의 기준은 **팀 API 명세 v0.2**(구글 시트 "(api 명세서) 2조 에너지솔루션")다. 명세와 화면의 차이·백엔드 요청 목록은 `docs/api-spec-diff.md`에 있다. (예전 `docs/api-spec.md`는 v0.1 주소라 쓰지 않는다)
+- 대부분의 API는 아직 백엔드에 없어 `api/` 함수가 가짜 데이터(`fakeBackend.js`)를 돌려준다. 함수 이름은 그대로 두고, 백엔드가 열리면 각 파일 맨 위 주석의 "교체 예" 한 줄로 바꾼다. 가짜 응답도 명세 v0.2 모양에 맞춰 두었다(2026-11-17). **실제 백엔드에 연결한 API는 아래 표의 "쓰는 화면" 칸에 "(연결됨)"으로 적는다.**
 
-| 메서드 | 주소 | 용도 |
-|---|---|---|
-| GET | `/api/battery-statuses/latest` | 실시간 관제용 최신 1건 |
-| GET | `/api/battery-statuses?from=&to=` | 그래프용 기간 조회 |
-| GET | `/api/battery-decisions?from=&to=` | 운영 이력 |
-| PATCH | `/api/battery-decisions/{id}` | 적용 / 무시 |
-| GET | `/api/reports?month=` | 성적표 |
-| GET | `/api/energy-settings` | 설정 조회 |
-| PUT | `/api/energy-settings/{key}` | 설정 변경 |
+| 명세 번호 | 메서드 | 주소 (v0.2) | 프론트 함수 | 쓰는 화면 |
+|---|---|---|---|---|
+| 1 | GET | `/api/site-powers/latest` | `getLatestBatteryStatus` | 공통 틀, 통합, 설비 모니터링 |
+| 2 | GET | `/api/recommendations/latest` (없으면 204) | `getLatestBatteryDecision` | 통합 |
+| 3 | PATCH | `/api/recommendations/{id}` 본문 `{ status }` | `updateBatteryDecision` | 통합 |
+| 4 | GET | `/api/events?limit=10` | `getRecentEvents` | 통합 |
+| 5 | GET | `/api/site-powers/today` | `getTodayBatteryStatuses` | 통합 |
+| 7 | GET | `/api/zones/{zoneName}` (예: `Z2`) | `getZoneRecent` | 설비 모니터링 |
+| 8 | GET | `/api/recommendations?from=&to=` | `getBatteryDecisions` | 추천 이력, 추이 분석 (**연결됨**, 2026-11-17) |
+| 9 | GET | `/api/reports?month=` | `getReport` | 월간 성적표 |
+| 10 | GET | `/api/analyses/trend?from=&to=&interval=` | `getTrendAnalysis` | 추이 분석 |
+| 11 | GET | `/api/settings` | `getSettings` | 공통 틀, 환경 설정 |
+| 12 | PUT | `/api/settings` 본문 `[{ key, value }]` | `updateSettings` | 환경 설정 |
+| 13 | GET | `/api/setting-histories?from=&to=` | `getSettingHistories` | 환경 설정 |
+| 16 | GET | `/api/demand-intervals?from=&to=&limit=8` | `getDemandIntervals` | 피크 분석 |
+| (추가 요청) | GET | `/api/analyses/peak?from=&to=` | `getPeakAnalysis` | 피크 분석 |
 
-주요 값 (초안, 확인 필요):
-
-- 상태 1건: `recordedAt`, `loadKw`, `solarKw`, `chargeKw`, `dischargeKw`, `gridKw`, `socPercent`, `windowKwh`, `predictedKw`
-- 추천 1건: `decidedAt`, `ruleNo`, `action`(`CHARGE`/`DISCHARGE`/`IDLE`), `powerKw`, `reason`, `status`(`RECOMMENDED`/`APPLIED`/`IGNORED`/`AUTO`), `appliedBy`, `appliedAt`, `resultPeakKw`
-- 배터리실 온도, 날씨, 값의 출처 구분, 설비별 소비전력·공급원 비율 필드는 확인 필요.
+- 명세 6번(`/api/site-powers/recent`)은 쓰는 화면이 없어 함수를 지웠다.
+- 설정 값은 명세대로 **문자열**로 오고 간다. `useSettingsStore`가 `values`에서 숫자·`true`/`false`로 바꿔 주고, 저장할 때 다시 문자열로 보낸다. 키 이름은 명세 그대로 쓴다(예: `settingsStore.values['ess.max_power_kw']`).
 - 가짜 데이터에 임시로 넣어 쓰는 값(백엔드와 확정 필요): 15분 구간 누적 `windowPoints[{ minute, demandKw }]`, 최대 피크 `todayPeakKw`·`monthPeakKw`, 요금 시간대 `tariff{ period, label, until, nextLabel, periods[] }`, ESS `pcsStatus`·`sohPercent`.
 
 성적표의 운영 방식 비교(한전 100% / 태양광 자가소비 / 태양광+ESS 추천 운영)는 **지금 성적표 화면에 넣지 않는다** (2026-11-15 결정). 나중에 백엔드의 가상 시나리오 시뮬레이션이 연결되면 그때 비교 화면을 만든다. 만들 때는 개수를 코드에 박지 않고 API가 주는 배열을 `v-for`로 그대로 그린다.
@@ -261,6 +266,22 @@ src/
   - kWh 소수 1자리, % 소수 1자리, 원은 정수, 탄소는 kg 또는 t.
 - 주석과 화면 문구는 한국어로 쓴다. "SCADA"라는 명칭은 화면에 쓰지 않는다.
 - 같은 것은 어느 화면에서나 같은 말로 부른다. 추천을 받아들이지 않는 것은 "넘기기"(버튼) / "넘김"(기록)이고 "무시"라고 쓰지 않는다. 다른 화면으로 가는 링크는 도착하는 화면 이름을 그대로 쓴다(예: "추천 이력 보기").
+- 용어표 (2026-11-17 통일, 새 화면도 이 말을 쓴다):
+
+  | 뜻 | 쓰는 말 | 쓰지 않는 말 |
+  |---|---|---|
+  | 15분 평균이 목표 피크를 지켰는지 | 목표 달성 / 목표 초과 (표 칸 값은 "● 달성" / "■ 초과") | 목표 이내 |
+  | 구간이 끝난 뒤 실제 15분 평균 | 실제 피크 | 결과 피크 |
+  | 지금 구간(또는 추천 당시) 예상한 15분 평균 | 예상 피크 | 예상 평균 |
+  | 표에서 15분 구간의 시각 범위 칸 | 대상 시간 ("15분 구간 N개"처럼 개수를 셀 때는 15분 구간) | 15분 구간(칸 이름) |
+  | 추천을 낸 규칙 이름 (피크 방어, 계획 방전 등) | 규칙 | 근거, 이유 |
+  | 추천을 왜 냈는지 설명하는 문장 / 판단에 쓴 값 | 이유 / 판단 근거 | — |
+  | 더 방전해야 하는 전력 (`defenseKw`) | 추가 방전 | 방어 필요 전력 |
+  | 운영 방식 | 운영자 승인 모드 / 자동 모드 (시뮬레이션) | 운영자 승인 |
+  | 처리 상태 | 추천 중 / 적용 / 자동 / 넘김 | 자동 (시뮬레이션) — 표·선택 상자에서는 "자동"만 |
+  | 성적표에서 보고 있는 달의 전 달 | 전달 (기간 버튼처럼 오늘 기준이면 "지난 달") | — |
+
+  판단 근거 이름(`usedValues.label`)과 이유 문장은 백엔드가 글자 그대로 보내므로, 가짜 백엔드도 이 표에 맞췄고 실제 백엔드 팀과도 맞춰야 한다.
 - 요청받은 범위만 고친다. 관련 없는 파일을 정리하거나 이름을 바꾸지 않는다.
 
 ## 9. 디자인

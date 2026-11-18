@@ -143,7 +143,7 @@ function toggleFocus(at) {
 
 // ---- 이벤트 히스토리 ----
 // 추천(몇 시에 무슨 추천이 나와 어떻게 처리됐나)과 눈에 띄는 구간을 한 줄씩 로그처럼 모아 최신 순으로 보여 줌
-const RESULT_TEXTS = { DEFENDED: '목표 이내', EXCEEDED: '목표 초과' }
+const RESULT_TEXTS = { DEFENDED: '목표 달성', EXCEEDED: '목표 초과' } // 팀 용어표: 목표 달성 / 목표 초과
 
 // 처리 글자 (자동은 실제 제어가 아니라 시뮬레이션이라는 점을 함께 적음)
 function processText(item) {
@@ -759,7 +759,7 @@ const hourlyOption = computed(() => {
           </dd>
           <p class="num">
             {{ shortTime(summary.maxPeakAt) }},
-            {{ summary.maxPeakKw > trend.targetPeakKw ? '목표 초과' : '목표 이내' }}
+            {{ summary.maxPeakKw > trend.targetPeakKw ? '목표 초과' : '목표 달성' }}
           </p>
         </div>
         <div>
@@ -965,7 +965,7 @@ const hourlyOption = computed(() => {
                     aria-label="결과 필터"
                   >
                     <option value="ALL">결과</option>
-                    <option value="DEFENDED">목표 이내</option>
+                    <option value="DEFENDED">목표 달성</option>
                     <option value="EXCEEDED">목표 초과</option>
                   </select>
                 </span>

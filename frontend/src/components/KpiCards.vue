@@ -61,9 +61,9 @@ const kpis = computed(() => {
   // ESS는 충전 중이면 충전 전력을, 그 밖에는 방전 전력을 보여 줌
   const charging = s?.pcsStatus === 'CHARGING'
   const essKw = s ? (charging ? s.chargeKw : s.dischargeKw) : null
-  const maxPowerKw = settingsStore.values.maxPowerKw
-  const socLow = settingsStore.values.socLowPercent
-  const socHigh = settingsStore.values.socHighPercent
+  const maxPowerKw = settingsStore.values['ess.max_power_kw']
+  const socLow = settingsStore.values['ess.soc_low']
+  const socHigh = settingsStore.values['ess.soc_high']
 
   // 공장 소비전력: 눈금 끝까지 중 지금 위치를 공급원 비율대로 나눠 칠함
   const loadMax = target ? target * LOAD_SCALE : null
