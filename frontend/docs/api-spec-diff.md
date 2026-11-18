@@ -66,7 +66,7 @@
 
 **화면이 쓰는 필드 (명세에 모두 있음):**
 - 기본 값: `recordedAt`, `loadKw`, `solarKw`, `chargeKw`, `dischargeKw`, `gridKw`, `socPercent`, `batteryTempC`, `pcsStatus`, `weather.text`, `weather.tempC`, `simulationSpeed`
-- 15분 피크: `windowStart`, `windowEnd`, `remainingSeconds`, `predictedKw`, `targetPeakKw`, `warnKw`, `peakStatus`, `defenseKw`
+- 15분 피크: `windowStart`, `windowEnd`, `remainingSeconds`, `predictedKw`, `targetPeakKw`, `warnKw`, `peakStatus`, `defenseKw`, `windowPoints[]`(예상 피크 카드의 15분 흐름 그래프, 2026-11-18부터)
 - 요금 시간대: `tariff.label`, `tariff.until`, `tariff.nextLabel`, `tariff.periods[]`
 - 공급원 비율: `sourceRatio.gridPercent`, `sourceRatio.solarPercent`, `sourceRatio.essPercent`
 - 설비: `equipments[].id`, `equipments[].name`, `equipments[].loadKw`, `equipments[].state`
@@ -88,7 +88,6 @@
 | `sohPercent` | 팀 결정 "배터리 건강도 X"(확인 필요 11번). 명세에서 빼기 |
 | `todayPeakKw`, `monthPeakKw` | 통합 화면에서 뺀 지 오래됨. 성적표는 9번 `summary.monthPeakKw`를 씀 |
 | `todayEnergy.*` | 쓰는 화면 없음 |
-| `windowPoints[]` | 15분 구간 그래프는 지금 화면에 없음 |
 | `equipments[].origin` | 실측·시뮬레이션 출처 표시는 보류 중(프론트 문서 6장) |
 
 **설비 상태:** 명세는 `RUNNING` / `HEATING`이다. 화면은 `STOPPED`(정지)도 그릴 수 있다. 정지를 보낼 일이 있으면 값 목록에 `STOPPED`를 더한다. 없으면 그대로 두면 된다.
@@ -255,7 +254,7 @@
 1. **피크 분석 API 추가:** `GET /api/analyses/peak?from=&to=` (2-9의 응답 모양)
 2. **환경 설정 상태 정정:** 11~13번 "화면 없음" → 화면 있음(환경 설정 > 기준값). 우선순위를 "나중"보다 올리기
 3. **예시 값 갱신:** `ruleLabel`(안전 제한 / 피크 방어 / 계획 충전 / 계획 방전 / 조치 없음), `usedValues[].label`의 "예상 평균" → "예상 피크"
-4. **빼도 되는 것 표시:** 6번 API, `sohPercent`, `todayPeakKw`, `monthPeakKw`, `todayEnergy.*`, `windowPoints[]`, `durationMinutes`, `equipments[].origin` (화면이 안 씀)
+4. **빼도 되는 것 표시:** 6번 API, `sohPercent`, `todayPeakKw`, `monthPeakKw`, `todayEnergy.*`, `durationMinutes`, `equipments[].origin` (화면이 안 씀)
 5. **표기 정정:** 오류 응답 `{ "status", "message" }`
 6. **(선택)** 설비 상태에 `STOPPED`를 보낼 일이 있으면 값 목록에 추가
 

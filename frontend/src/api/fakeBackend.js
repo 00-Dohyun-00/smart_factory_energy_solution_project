@@ -1236,7 +1236,7 @@ export async function fakeGetLatestStatus() {
     defenseKw: Math.ceil(
       neededDischargeKw(predictedKw, remainingMinutes, lineKw, livePlan.marginKw),
     ),
-    // 구간 시작부터 지금까지 쌓인 값 (명세 1번에 있음. 지금 화면은 안 씀)
+    // 구간 시작부터 지금까지 쌓인 값 (명세 1번. 예상 피크 카드의 15분 흐름 그래프)
     windowPoints: windowState.points.slice(),
     // 오늘·이번 달 최대 피크 (명세 1번에 있음. 지금 화면은 안 씀)
     todayPeakKw: todayPeakOf(now),
