@@ -92,7 +92,7 @@ public class ReportService {
         // 5. 화면 구역별로 만들기
         ReportSummary summary = makeSummary(recommendations, resultPeaks, targetPeakKw, peak);
         Double monthPeakKw = peak.hasData() ? peak.summary().maxPeakKw() : null;
-        ReportBill bill = makeBill(yearMonth, powers, monthPeakKw, targetPeakKw, periodEnd);
+        ReportBill bill = makeBill(yearMonth, powers, monthPeakKw, targetPeakKw);
         List<ReportExceeded> exceeded = makeExceeded(intervals, recommendations, targetPeakKw);
         ReportEss ess = makeEss(essList, recommendations, resultPeaks, targetPeakKw);
         ReportSolar solar = makeSolar(powers);
@@ -135,7 +135,7 @@ public class ReportService {
     // ---------- 전기요금 (bill) ----------
 
     private ReportBill makeBill(YearMonth yearMonth, List<SitePowerMinute> powers, Double monthPeakKw,
-                                Double targetPeakKw, LocalDate periodEnd) {
+                                Double targetPeakKw) {
         Double basePrice = settingNumber("tariff.base_charge");
         List<TariffPeriod> periods = tariffPeriodRepository.findBySeason(seasonOf(yearMonth.atDay(1)));
 
@@ -165,9 +165,10 @@ public class ReportService {
             overTarget = Math.round(Math.max(0, monthPeakKw - targetPeakKw) * basePrice);
         }
 
-        // 월말 예상: 지금까지의 하루 평균 전력량요금 × 그 달 날수 + 기본요금
-        int daysSoFar = periodEnd.getDayOfMonth();
-        long monthEndEstimate = Math.round((double) energyCharge / daysSoFar * yearMonth.lengthOfMonth()) + baseCharge;
+        // 월말 예상: 실제 기록된 시간 기준 하루 평균 전력량요금 × 그 달 날수 + 기본요금
+        // (달력 날짜로 나누면 기록이 빈 날이나 진행 중인 오늘도 하루로 세서 낮게 나옴)
+        double recordedDays = powers.size() / 1440.0; // 1분 기록 1440개 = 하루
+        long monthEndEstimate = Math.round(energyCharge / recordedDays * yearMonth.lengthOfMonth()) + baseCharge;
 
         List<ReportTariffUsage> byTariff = new ArrayList<>();
         for (TariffPeriodType type : TariffPeriodType.values()) {
