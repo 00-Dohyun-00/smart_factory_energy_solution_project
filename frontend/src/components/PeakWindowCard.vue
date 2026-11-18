@@ -10,6 +10,7 @@
 -->
 <script setup>
 import { computed } from 'vue'
+import { useThemeStore } from '@/stores/useThemeStore'
 import Chart from '@/components/Chart.vue'
 import { formatHourMinute, formatInteger, formatKw, formatRemaining } from '@/utils/format'
 
@@ -22,22 +23,23 @@ const props = defineProps({
 
 const WINDOW_MINUTES = 15
 
-// ECharts option에는 CSS 변수를 못 써서 global.css와 같은 값을 적음
-const COLORS = {
-  ink: '#14181c', // --ink
-  mute: '#646e77', // --mute
-  faint: '#98a1a9', // --faint
-  line: '#eef0f2', // --bg (격자선은 카드 배경보다 살짝 진한 정도로만)
-  lineStrong: '#b9c0c7', // --line-strong
-  future: '#f7f8f9', // 아직 오지 않은 시간
-}
+// 그래프(ECharts)는 CSS 변수를 못 읽으므로, 테마 스토어가 global.css에서 읽어 둔 지금 테마 색을 씀
+// (라이트·다크를 바꾸면 이 색이 바뀌고 그래프도 다시 그려짐)
+const themeStore = useThemeStore()
+const COLORS = themeStore.colors
+// 그래프 툴팁도 지금 테마 색으로
+const tooltipColors = () => ({
+  backgroundColor: COLORS.card,
+  borderColor: COLORS.line,
+  textStyle: { color: COLORS.ink },
+})
 
 const STAGE_INFO = {
-  NORMAL: { shape: '●', label: '정상', className: 'ok', color: '#2f7d4f' }, // --ok
-  WARNING: { shape: '▲', label: '주의', className: 'warn', color: '#9c5f08' }, // --warn
-  CRITICAL: { shape: '■', label: '경고', className: 'crit', color: '#c8372d' }, // --crit
-  LOST: { shape: '◆', label: '통신 단절', className: 'lost', color: '#8a9299' }, // --lost
-  WAITING: { shape: '○', label: '불러오는 중', className: 'lost', color: '#8a9299' },
+  NORMAL: { shape: '●', label: '정상', className: 'ok', color: 'ok' }, // 색 이름 (테마 스토어 colors의 키)
+  WARNING: { shape: '▲', label: '주의', className: 'warn', color: 'warn' },
+  CRITICAL: { shape: '■', label: '경고', className: 'crit', color: 'crit' },
+  LOST: { shape: '◆', label: '통신 단절', className: 'lost', color: 'lost' },
+  WAITING: { shape: '○', label: '불러오는 중', className: 'lost', color: 'lost' },
 }
 
 // 화면에 보여 줄 단계
@@ -77,13 +79,17 @@ const chartOption = computed(() => {
   if (!status || !now) return null
 
   const target = status.targetPeakKw
-  const stateColor = stage.value.color
+  const stateColor = COLORS[stage.value.color]
   // 연결이 끊기면 지금까지의 선도 회색으로 (멈춘 값임을 보여 줌)
-  const actualColor = props.stale ? stage.value.color : COLORS.ink
+  const actualColor = props.stale ? COLORS[stage.value.color] : COLORS.ink
 
   // 세로축 끝: 목표·예상 중 큰 값보다 조금 위 (100 단위, 표시용)
   const top = Math.max(target, status.predictedKw)
   const yMax = Math.ceil((top * 1.08) / 100) * 100
+
+  // 예상 값이 목표선 가까이(세로축의 8% 이내)이면 "예상" 이름표를 점선 아래쪽에 붙임
+  // (위쪽에 붙이면 목표선이 글자를 가로질러 숫자가 안 읽힘. 점선은 아래에서 올라오므로 아래쪽이 목표선과 먼 쪽)
+  const labelBelow = Math.abs(status.predictedKw - target) < yMax * 0.08
 
   const markLines = [
     {
@@ -94,6 +100,9 @@ const chartOption = computed(() => {
         position: 'insideStartTop',
         color: COLORS.ink,
         fontWeight: 700,
+        backgroundColor: COLORS.card,
+        padding: [2, 4],
+        borderRadius: 3,
       },
     },
   ]
@@ -110,6 +119,7 @@ const chartOption = computed(() => {
       data: ['현재 누적', '끝까지 예상'],
     },
     tooltip: {
+      ...tooltipColors(),
       trigger: 'axis',
       formatter: (params) => {
         const rows = params.map(
@@ -134,7 +144,7 @@ const chartOption = computed(() => {
       max: yMax,
       splitNumber: 4,
       axisLabel: { color: COLORS.faint, formatter: (value) => formatInteger(value) },
-      splitLine: { lineStyle: { color: COLORS.line } },
+      splitLine: { lineStyle: { color: COLORS.bg } },
     },
     series: [
       {
@@ -147,7 +157,7 @@ const chartOption = computed(() => {
         // 아직 오지 않은 시간은 옅게 칠함
         markArea: {
           silent: true,
-          itemStyle: { color: COLORS.future },
+          itemStyle: { color: COLORS.hover },
           data: [[{ xAxis: now.minute }, { xAxis: WINDOW_MINUTES }]],
         },
         markLine: { silent: true, symbol: 'none', data: markLines },
@@ -170,10 +180,14 @@ const chartOption = computed(() => {
           symbol: 'none',
           lineStyle: { color: 'rgba(0, 0, 0, 0)' },
           label: {
-            position: 'insideEndTop',
+            position: labelBelow ? 'insideEndBottom' : 'insideEndTop',
             formatter: `예상 ${formatKw(status.predictedKw)} kW`,
             color: stateColor,
             fontWeight: 700,
+            // 글자 뒤를 카드 바탕색으로 칠해, 선이 지나가도 숫자가 읽히게 함
+            backgroundColor: COLORS.card,
+            padding: [2, 4],
+            borderRadius: 3,
           },
           data: [
             [

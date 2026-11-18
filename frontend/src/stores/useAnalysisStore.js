@@ -37,6 +37,32 @@ export const useAnalysisStore = defineStore('analysis', () => {
     }
   }
 
+  // ---- 시간대별 사용 패턴용 데이터 (추이 분석 화면 오른쪽 카드) ----
+  // 위 그래프의 간격(15분/1시간/1일)과 상관없이 항상 1시간 간격으로 받아 두고,
+  // 화면이 1시간 · 4시간 · 1일로 묶어서 그림
+  const pattern = ref(null)
+  const patternLoading = ref(false)
+  const patternError = ref('')
+  let latestPatternRequest = 0 // 가장 최근 요청의 응답만 반영하기 위한 번호
+
+  async function fetchPattern(from, to) {
+    const requestId = ++latestPatternRequest
+    patternLoading.value = true
+    try {
+      const result = await getTrendAnalysis(from, to, 'HOUR')
+      if (requestId !== latestPatternRequest) return
+      pattern.value = result
+      patternError.value = ''
+    } catch (error) {
+      if (requestId !== latestPatternRequest) return
+      patternError.value = error.message
+    } finally {
+      if (requestId === latestPatternRequest) {
+        patternLoading.value = false
+      }
+    }
+  }
+
   // ---- 피크 분석 ----
   const peak = ref(null) // 피크 분석 결과 (아직 못 받았으면 null)
   // 피크가 높았던 구간 순위. 피크 분석 응답의 topWindows를 그대로 꺼내 둔 것
@@ -71,6 +97,10 @@ export const useAnalysisStore = defineStore('analysis', () => {
   }
 
   return {
+    pattern,
+    patternLoading,
+    patternError,
+    fetchPattern,
     peakWindows,
     trend,
     loading,
