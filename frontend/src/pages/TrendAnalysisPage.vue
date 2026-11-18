@@ -475,8 +475,9 @@ const PATTERN_STEPS = [
   { value: 'HOUR4', label: '4시간' },
   { value: 'DAY', label: '1일' },
 ]
-// 한 화면에 보여 줄 막대 수. 이보다 많으면 아래 스크롤 막대로 좌우로 옮겨 봄
-const PATTERN_WINDOW = { HOUR: 24, HOUR4: 42, DAY: 31 }
+// 한 화면에 보여 줄 막대 수 (간격과 상관없이 고정 → 막대 굵기가 항상 같음).
+// 이보다 많으면 아래 스크롤 막대로 좌우로 옮겨 봄
+const PATTERN_WINDOW = 24
 
 // 고른 기간이 며칠인지 (시작일과 종료일 포함)
 const periodDays = computed(() => {
@@ -552,7 +553,7 @@ const patternOption = computed(() => {
       : []
 
   // 처음에는 가장 최근 막대들을 보여 줌 (한 화면 막대 수만큼)
-  const windowSize = PATTERN_WINDOW[activeStep.value]
+  const windowSize = PATTERN_WINDOW
   const startValue = Math.max(0, bars.length - windowSize)
   const endValue = Math.max(0, bars.length - 1)
   // 좌우 스크롤: 그래프 위에서 드래그 · 휠, 아래 막대로 옮김.
@@ -872,9 +873,13 @@ const patternOption = computed(() => {
                 </button>
               </p>
               <p v-else class="state">이 기간의 기록이 없습니다.</p>
+              <!-- 문장마다(마침표 기준) 줄을 바꿈 -->
               <p class="foot-note">
-                기간 동안의 평균 한전 구매 (kW). 그래프를 끌거나 아래 막대로 좌우로 옮겨 봅니다.
-                <template v-if="activeStep === 'HOUR'">회색 띠는 최대부하 시간대입니다.</template>
+                <span class="foot-line">기간 동안의 평균 한전 구매 (kW).</span>
+                <span class="foot-line">그래프를 끌거나 아래 막대로 좌우로 옮겨 봅니다.</span>
+                <span v-if="activeStep === 'HOUR'" class="foot-line">
+                  회색 띠는 최대부하 시간대입니다.
+                </span>
               </p>
             </template>
             <template v-else>
@@ -1194,6 +1199,9 @@ const patternOption = computed(() => {
   height: 28px;
   padding: 0 10px;
   font-size: 13px;
+}
+.foot-line {
+  display: block;
 }
 /* 시간대별 사용 패턴: 막대 간격 고르기 */
 .step-row {
