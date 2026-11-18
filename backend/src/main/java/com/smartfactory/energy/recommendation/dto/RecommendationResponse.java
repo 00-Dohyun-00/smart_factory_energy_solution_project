@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 추천 1건 응답. 필드 이름은 프론트 목데이터(fakeBackend.js)와 같게 맞췄습니다.
+ * 추천 1건 응답. 필드 이름은 프론트 목데이터(fakeBackend.js)와 같게 맞춤.
  */
 public record RecommendationResponse(
         Long id,
@@ -25,15 +25,15 @@ public record RecommendationResponse(
         BigDecimal targetPeakKw,
         String reason,
         List<Object> usedValues,
-        RecommendationStatus status,
+        String status,
         String appliedBy,
         LocalDateTime appliedAt,
         BigDecimal resultPeakKw,
         String resultStatus
 ) {
 
-    // Entity -> DTO 변환
-    public static RecommendationResponse from(Recommendation recommendation) {
+    // Entity -> DTO 변환. resultPeakKw는 그 15분 구간이 끝난 뒤의 실제 피크 (아직 안 끝났으면 null)
+    public static RecommendationResponse from(Recommendation recommendation, BigDecimal resultPeakKw) {
         return new RecommendationResponse(
                 recommendation.getRecommendationId(),
                 recommendation.getRecommendedAt(),
@@ -48,12 +48,30 @@ public record RecommendationResponse(
                 recommendation.getTargetPeakKw(),
                 recommendation.getDescription(),
                 List.of(), // 판단에 쓴 값: ERD에 칸이 없어서 아직 빈 목록
-                recommendation.getStatus(),
+                toStatusCode(recommendation.getStatus()),
                 recommendation.getHandledBy(),
                 recommendation.getHandledAt(),
-                null, // 결과 피크: demand_interval_15m 뷰 연결은 다음에
-                null // 결과(막음/뚫림): 결과 피크가 생기면 계산
+                resultPeakKw,
+                toResultStatus(resultPeakKw, recommendation.getTargetPeakKw())
         );
+    }
+
+    // 처리 상태를 화면 코드로 바꿈 (SKIPPED·EXPIRED → IGNORED, PENDING → RECOMMENDED)
+    private static String toStatusCode(RecommendationStatus status) {
+        return switch (status) {
+            case APPLIED -> "APPLIED";
+            case AUTO -> "AUTO";
+            case SKIPPED, EXPIRED -> "IGNORED";
+            case PENDING -> "RECOMMENDED";
+        };
+    }
+
+    // 실제 피크가 목표 이하면 DEFENDED(달성), 넘으면 EXCEEDED(초과). 아직 모르면 null
+    private static String toResultStatus(BigDecimal resultPeakKw, BigDecimal targetPeakKw) {
+        if (resultPeakKw == null || targetPeakKw == null) {
+            return null;
+        }
+        return resultPeakKw.compareTo(targetPeakKw) <= 0 ? "DEFENDED" : "EXCEEDED";
     }
 
     // 이유 코드를 화면에 보여줄 한국어 이름으로 바꿈
