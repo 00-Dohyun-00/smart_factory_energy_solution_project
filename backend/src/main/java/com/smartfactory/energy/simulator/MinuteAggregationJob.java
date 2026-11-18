@@ -19,12 +19,15 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 // 1분(60초)간 MinuteBuffer에 모인 값을 평균/최대/최소/kWh로 집계해서 실시간 테이블에 저장합니다.
+// 팀 공용 DB라서 시뮬레이터는 한 명(SIMULATOR_ENABLED=true)만 돌립니다.
 @Slf4j
 @Component
+@ConditionalOnProperty(name = "simulator.enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class MinuteAggregationJob {
 

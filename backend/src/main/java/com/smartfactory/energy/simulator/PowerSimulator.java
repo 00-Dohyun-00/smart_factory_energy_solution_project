@@ -12,11 +12,14 @@ import com.smartfactory.energy.solar.SolarPowerType;
 import java.math.BigDecimal;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 // raw_factory_load를 1초에 한 행씩 재생해서, 이번 초의 설비별/공장 전체 kW를 계산해 MinuteBuffer에 쌓습니다.
+// 팀 공용 DB라서 시뮬레이터는 한 명(SIMULATOR_ENABLED=true)만 돌립니다.
 @Component
+@ConditionalOnProperty(name = "simulator.enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class PowerSimulator {
 
