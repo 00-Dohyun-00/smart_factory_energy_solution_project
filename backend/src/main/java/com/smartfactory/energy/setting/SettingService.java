@@ -27,7 +27,9 @@ public class SettingService {
             "peak.warn_ratio", new double[]{50, 100},
             "ess.soc_low", new double[]{0, 100},
             "ess.soc_high", new double[]{0, 100},
-            "ess.room_temp_limit", new double[]{0, 80}
+            "ess.room_temp_limit", new double[]{0, 80},
+            "operation.poll_seconds", new double[]{1, 60},
+            "operation.decision_valid_minutes", new double[]{1, 60}
     );
 
     // 화면에서 바꿀 수 있는 true/false 키
