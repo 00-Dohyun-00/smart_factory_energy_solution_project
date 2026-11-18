@@ -131,6 +131,70 @@ img {
   background: var(--bg);
 }
 
+/* ---- 여러 화면이 같이 쓰는 조각 (2026-11-17, 화면마다 모양이 달랐던 것을 하나로 모음) ---- */
+
+/* [다시 시도] 버튼: 불러오기에 실패한 자리에 둠 */
+.retry {
+  height: 34px;
+  padding: 0 14px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.retry:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* 기간 빠른 선택처럼 붙어 있는 버튼 묶음. 고른 버튼은 먹색 바탕 (aria-pressed와 같이 씀) */
+.presets {
+  display: flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.presets button {
+  height: 32px;
+  padding: 0 12px;
+  background: var(--card);
+  border: 0;
+  color: var(--ink-2);
+}
+.presets button + button {
+  border-left: 1px solid var(--line-strong);
+}
+.presets button:hover {
+  background: var(--bg);
+}
+.presets button.active {
+  background: var(--ink);
+  font-weight: 700;
+  color: var(--card);
+}
+
+/* 다른 화면으로 가는 글자 링크 (예: "추천 이력 보기") */
+.more-link {
+  font-size: 13px;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.more-link:hover {
+  color: var(--ink);
+}
+
+/* 표 머리글: 작은 회색 글자 + 아래 선. 칸 여백은 화면마다 정함 */
+.table th {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--mute);
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line-strong);
+}
+
 /* 숫자는 자릿수가 바뀌어도 흔들리지 않게 같은 너비로 */
 .num {
   font-variant-numeric: tabular-nums;
@@ -161,8 +225,12 @@ img {
   }
   body {
     background: var(--card);
-    /* 화면 배치를 종이 폭에 맞게 줄임 (A4 세로 종이 폭 약 718px ÷ 0.6 = 화면 폭 약 1,200px = 보고서 최대 폭) */
-    zoom: 0.6;
+    /*
+      화면 배치를 종이 폭에 맞게 줄임. A4 세로 종이 폭 약 718px ÷ 0.8 = 화면 폭 약 900px로 배치됨.
+      예전 0.6은 글자가 6pt 정도로 너무 작게 찍혀서 0.8로 올림 (본문 15px × 0.8 = 12px ≈ 9pt).
+      줄어든 폭에 맞춘 글자 크기·배치는 각 화면(ReportPage.vue)의 @media print에서 정함
+    */
+    zoom: 0.8;
   }
   /* 카드가 두 쪽에 걸쳐 잘리지 않게 함 */
   .card {

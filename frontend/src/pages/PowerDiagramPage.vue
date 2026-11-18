@@ -1,12 +1,11 @@
 <!--
   모니터링 > 설비 모니터링
-  KPI 5개 → 가운데 전력 계통도 + 오른쪽에 고른 구역의 상세
+  전력 계통도 + 오른쪽에 고른 구역의 상세 (KPI 5개는 2026-11-18에 뺌)
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Chart from '@/components/Chart.vue'
-import KpiCards from '@/components/KpiCards.vue'
 import PowerTree from '@/components/PowerTree.vue'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { formatHourMinute, formatInteger, formatKw, formatOneDecimal } from '@/utils/format'
@@ -23,7 +22,13 @@ const ZONE_LABELS = {
   Z5: '검사',
   U: '유틸리티',
 }
-const STATE_LABELS = { RUNNING: '운전', HEATING: '승온 중', STOPPED: '정지' }
+// 설비 운전 상태. 피크 상태(● 정상 등)와 헷갈리지 않게 상태색(초록·주황·빨강)은 쓰지 않고
+// 상태마다 도형과 글자를 다르게 함 (PowerTree.vue와 같은 모양)
+const STATE_INFO = {
+  RUNNING: { shape: '●', label: '운전', className: 'running' },
+  HEATING: { shape: '▲', label: '가열 중', className: 'heating' },
+  STOPPED: { shape: '○', label: '정지', className: 'stopped' },
+}
 
 // 고른 구역은 주소에 적어 둠 (예: /monitoring/diagram?zone=Z3)
 // 새로 고치거나 주소를 다른 사람에게 보내도 같은 구역이 열리고, 통합 화면의 설비 순위에서 바로 넘어올 수 있음
@@ -70,7 +75,7 @@ const equipmentRows = computed(() =>
   zoneEquipments.value.map((item) => ({
     ...item,
     percent: zoneKw.value ? (item.loadKw / zoneKw.value) * 100 : 0,
-    stateLabel: STATE_LABELS[item.state] ?? '—',
+    stateInfo: STATE_INFO[item.state] ?? { shape: '', label: '—', className: '' },
   })),
 )
 
@@ -124,8 +129,10 @@ const trendOption = computed(() => ({
 
     <!-- 서버 연결이 끊겼다는 알림은 공통 틀(MainLayout)이 모든 화면에 띄움 -->
 
-    <!-- KPI 5개 (통합 화면과 같은 카드) -->
-    <KpiCards :status="status" />
+    <!--
+      KPI 5개(통합 화면과 같은 카드)는 2026-11-18 UI 피드백으로 뺐음.
+      이 화면은 설비가 주인공이어야 해서, 그 자리에는 설비 전체 통계를 넣을 예정 (구성은 팀 검토 중)
+    -->
 
     <div class="row">
       <!-- 계통도 -->
@@ -135,7 +142,7 @@ const trendOption = computed(() => ({
           <span class="note">구역을 누르면 설비가 펼쳐집니다</span>
         </div>
         <div class="tree-body">
-          <PowerTree v-model="selectedZone" :status="status" />
+          <PowerTree v-model="selectedZone" :status="status" :stale="!realtimeStore.connected" />
         </div>
       </section>
 
@@ -159,7 +166,7 @@ const trendOption = computed(() => ({
         <Chart v-if="detail" :option="trendOption" :height="150" />
         <p v-else-if="realtimeStore.zoneError" class="empty" role="alert">
           불러오지 못했습니다.
-          <button class="text-button" @click="realtimeStore.fetchZoneDetail(selectedZone)">
+          <button class="retry" @click="realtimeStore.fetchZoneDetail(selectedZone)">
             다시 시도
           </button>
         </p>
@@ -170,7 +177,10 @@ const trendOption = computed(() => ({
           <li v-for="item in equipmentRows" :key="item.id">
             <div class="equipment-text">
               <strong>{{ item.name }}</strong>
-              <span class="state"><span aria-hidden="true">●</span> {{ item.stateLabel }}</span>
+              <span class="state" :class="item.stateInfo.className">
+                <span aria-hidden="true">{{ item.stateInfo.shape }}</span>
+                {{ item.stateInfo.label }}
+              </span>
               <span class="equipment-kw"
                 ><span class="num">{{ formatKw(item.loadKw) }}</span> kW</span
               >
@@ -306,14 +316,6 @@ const trendOption = computed(() => ({
   height: 150px;
   color: var(--mute);
 }
-.text-button {
-  padding: 0;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--ink-2);
-  font-size: 13px;
-  color: var(--ink-2);
-}
 .equipments {
   display: flex;
   flex-direction: column;
@@ -324,9 +326,19 @@ const trendOption = computed(() => ({
   align-items: baseline;
   gap: 8px;
 }
+/* 설비 운전 상태: 상태색 대신 먹색 계열로, 도형과 글자로 구분 */
 .state {
   font-size: 12px;
-  color: var(--ok);
+}
+.state.running {
+  color: var(--ink-2);
+}
+.state.heating {
+  font-weight: 700;
+  color: var(--ink);
+}
+.state.stopped {
+  color: var(--mute);
 }
 .equipment-kw {
   margin-left: auto;

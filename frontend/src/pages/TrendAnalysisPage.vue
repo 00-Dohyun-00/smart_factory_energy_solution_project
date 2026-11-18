@@ -276,14 +276,14 @@ function pinTooltip(label) {
 }
 
 // 기준선(가로), 추천 기호, 고른 시각(세로)을 그리는 설정
-// lines 예: [{ value: 1800, text: '목표 피크 1,800', color: COLOR.crit, dashed: false }]
+// lines 예: [{ value: 1800, text: '목표 피크 1,800', color: COLOR.ink, dashed: false }]
 // withPins = true면 그래프 위쪽 띠에 추천 기호를 적음 (전력 그래프만)
 function markLines(lines, withPins = false) {
   const data = lines.map((item) => ({
     yAxis: item.value,
     lineStyle: {
       color: item.color,
-      width: item.dashed ? 1.5 : 2,
+      width: 1.5,
       type: item.dashed ? 'dashed' : 'solid',
     },
     label: {
@@ -347,7 +347,7 @@ const powerOption = computed(() => {
   // 목표 피크선은 한전 구매전력과 비교하는 선이라, 한전 구매를 켰을 때만 그림
   const target = trend.value.targetPeakKw
   const lines = shown.value.includes('grid')
-    ? [{ value: target, text: `목표 피크 ${formatKw(target)}`, color: COLOR.crit }]
+    ? [{ value: target, text: `목표 피크 ${formatKw(target)}`, color: COLOR.ink }]
     : []
   if (series.length) series[0].markLine = markLines(lines, true)
 
@@ -392,7 +392,7 @@ const socOption = computed(() => {
   ])
   return {
     animation: false,
-    grid: { left: 52, right: 20, top: 16, bottom: 24 },
+    grid: { left: 52, right: 20, top: 12, bottom: 22 },
     tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} %` },
     xAxis: timeAxis(false),
     yAxis: { ...valueAxis, min: 0, max: 100, interval: 50 },
@@ -409,11 +409,13 @@ const tempOption = computed(() => {
   return {
     animation: false,
     // 가로축에 날짜와 날씨를 두 줄로 적으므로 아래 여백을 넉넉히 둠
-    grid: { left: 52, right: 20, top: 34, bottom: 40 },
-    legend,
+    grid: { left: 52, right: 20, top: 24, bottom: 40 },
+    // 그래프가 낮아 오른쪽 위의 "온도 제한" 글자와 겹치므로 범례는 왼쪽 위에 둠
+    legend: { ...legend, right: 'auto', left: 52 },
     tooltip: { trigger: 'axis', valueFormatter: (value) => `${formatOneDecimal(value)} ℃` },
     xAxis: timeAxis(true),
-    yAxis: { ...valueAxis, min: 0, max: 40, interval: 10 },
+    // 높이가 낮아 눈금은 20℃ 간격으로만
+    yAxis: { ...valueAxis, min: 0, max: 40, interval: 20 },
     series: [outside, room],
   }
 })
@@ -483,11 +485,11 @@ const hourlyOption = computed(() => {
         markLine: {
           silent: true,
           symbol: 'none',
-          lineStyle: { color: COLOR.crit, width: 2, type: 'solid' },
+          lineStyle: { color: COLOR.ink, width: 1.5, type: 'solid' },
           label: {
-            formatter: `목표 ${formatKw(target)}`,
+            formatter: `목표 피크 ${formatKw(target)}`,
             position: 'insideEndTop',
-            color: COLOR.crit,
+            color: COLOR.ink,
             fontWeight: 'bold',
           },
           data: [{ yAxis: target }],
@@ -512,13 +514,25 @@ const hourlyOption = computed(() => {
       <div class="field">
         <span class="field-label">기간</span>
         <div class="presets" role="group" aria-label="기간 빠른 선택">
-          <button :class="{ active: preset === 'today' }" @click="applyPreset('today')">
+          <button
+            :class="{ active: preset === 'today' }"
+            :aria-pressed="preset === 'today'"
+            @click="applyPreset('today')"
+          >
             오늘
           </button>
-          <button :class="{ active: preset === 'week' }" @click="applyPreset('week')">
+          <button
+            :class="{ active: preset === 'week' }"
+            :aria-pressed="preset === 'week'"
+            @click="applyPreset('week')"
+          >
             최근 7일
           </button>
-          <button :class="{ active: preset === 'month' }" @click="applyPreset('month')">
+          <button
+            :class="{ active: preset === 'month' }"
+            :aria-pressed="preset === 'month'"
+            @click="applyPreset('month')"
+          >
             이번 달
           </button>
         </div>
@@ -546,6 +560,7 @@ const hourlyOption = computed(() => {
             v-for="item in INTERVALS"
             :key="item.value"
             :class="{ active: interval === item.value }"
+            :aria-pressed="interval === item.value"
             @click="interval = item.value"
           >
             {{ item.label }}
@@ -644,8 +659,12 @@ const hourlyOption = computed(() => {
       <div class="main">
         <!-- 왼쪽: 같은 시간 축을 쓰는 그래프 세 개 -->
         <section class="card charts">
+          <!--
+            전력이 이 화면의 주인공이라 크게, 배터리 잔량·온도는 보조라 작게 그림 (2026-11-18 UI 피드백)
+            세 그래프는 그대로 위아래로 두어 가로축(시각)을 맞춤
+          -->
           <template v-if="powerItems.length">
-            <h2 class="chart-title">
+            <h2 class="chart-title main-chart">
               전력 <small>kW</small>
               <span v-if="showPins" class="chart-note">
                 위쪽 기호 = 추천 (● 적용 · ◇ 자동 · ✕ 넘김 · ○ 추천 중), 올리면 자세히
@@ -662,23 +681,23 @@ const hourlyOption = computed(() => {
               key: 켜 둔 항목이 바뀌면 그래프를 새로 만듦.
               Chart.vue는 이전 설정에 새 설정을 덮어쓰는 방식이라, 선의 개수가 줄면 꺼 둔 선이 남기 때문
             -->
-            <Chart :key="`${powerItems.join()}-${showPins}`" :option="powerOption" :height="270" />
+            <Chart :key="`${powerItems.join()}-${showPins}`" :option="powerOption" :height="460" />
           </template>
 
           <template v-if="shown.includes('soc')">
-            <h2 class="chart-title">
+            <h2 class="chart-title sub-chart">
               배터리 잔량 <small>%</small>
               <span class="chart-note">점선은 잔량 하한과 상한</span>
             </h2>
-            <Chart :option="socOption" :height="130" />
+            <Chart :option="socOption" :height="100" />
           </template>
 
           <template v-if="shown.includes('temp')">
-            <h2 class="chart-title">
+            <h2 class="chart-title sub-chart">
               온도 <small>℃</small> · 날씨
               <span class="chart-note">날짜 아래에 그날 날씨</span>
             </h2>
-            <Chart :option="tempOption" :height="170" />
+            <Chart :option="tempOption" :height="120" />
           </template>
 
           <p v-if="!shown.length" class="state">"보기"에서 볼 항목을 하나 이상 골라 주세요.</p>
@@ -841,30 +860,6 @@ const hourlyOption = computed(() => {
   border-radius: 4px;
   color: var(--ink);
 }
-.presets {
-  display: flex;
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.presets button {
-  height: 32px;
-  padding: 0 12px;
-  background: var(--card);
-  border: 0;
-  color: var(--ink-2);
-}
-.presets button + button {
-  border-left: 1px solid var(--line-strong);
-}
-.presets button:hover {
-  background: var(--bg);
-}
-.presets button.active {
-  background: var(--ink);
-  font-weight: 700;
-  color: var(--card);
-}
 .check {
   display: flex;
   align-items: center;
@@ -899,14 +894,6 @@ const hourlyOption = computed(() => {
 }
 .state.error {
   color: var(--crit);
-}
-.retry {
-  height: 34px;
-  padding: 0 14px;
-  background: var(--card);
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  color: var(--ink-2);
 }
 .over {
   color: var(--crit);
@@ -973,6 +960,14 @@ const hourlyOption = computed(() => {
   font-size: 15px;
   font-weight: 700;
 }
+/* 주 그래프(전력)는 제목을 크게, 보조 그래프(배터리 잔량·온도)는 작고 옅게 */
+.chart-title.main-chart {
+  font-size: 18px;
+}
+.chart-title.sub-chart {
+  font-size: 13px;
+  color: var(--ink-2);
+}
 .chart-title:first-child {
   margin-top: 0;
   padding-top: 0;
@@ -1020,12 +1015,6 @@ const hourlyOption = computed(() => {
 }
 .table th {
   padding: 6px 12px 6px 0;
-  border-bottom: 1px solid var(--ink);
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--mute);
-  text-align: left;
-  white-space: nowrap;
 }
 .table td {
   padding: 9px 12px 9px 0;

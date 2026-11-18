@@ -1,13 +1,17 @@
 <!--
-  현재 15분 피크 구간 카드
-  왼쪽: 예상 피크(큰 숫자), 한 줄 판정, 단계
-  오른쪽: 피크 게이지(정상·주의·경고 띠 위에 예상 피크 표시), 목표·예상·추가 방전·남은 시간, 구간 진행 막대
+  예상 피크 카드 (모니터링 > 통합)
+  왼쪽: 단계·짧은 판정, 예상 피크(큰 숫자), 목표 피크·현재 누적·추가 방전
+  오른쪽: 15분 흐름 그래프 (구간 시작부터 지금까지 쌓인 값 → 끝까지 예상, 목표선)
 
-  예상값, 목표, 주의선, 단계는 모두 백엔드가 준 값이고 여기서는 보여 주기만 합니다.
+  2026-11-18 UI 피드백: "현재 15분 피크 구간"이 와닿지 않고 가로 막대 게이지가 별로라는 의견으로
+  제목을 "예상 피크"로 바꾸고 막대 대신 흐름 그래프를 넣음. (이전 막대 모양은 커밋 dd472f1에 있음)
+
+  그래프의 값(windowPoints), 예상, 목표, 단계는 모두 백엔드가 준 값이고 여기서는 그리기만 합니다.
 -->
 <script setup>
 import { computed } from 'vue'
-import { formatClock, formatHourMinute, formatKw, formatRemaining } from '@/utils/format'
+import Chart from '@/components/Chart.vue'
+import { formatHourMinute, formatInteger, formatKw, formatRemaining } from '@/utils/format'
 
 const props = defineProps({
   // 최신 상태 1건 (아직 못 받았으면 null)
@@ -16,14 +20,24 @@ const props = defineProps({
   stale: { type: Boolean, default: false },
 })
 
-const WINDOW_SECONDS = 15 * 60
+const WINDOW_MINUTES = 15
+
+// ECharts option에는 CSS 변수를 못 써서 global.css와 같은 값을 적음
+const COLORS = {
+  ink: '#14181c', // --ink
+  mute: '#646e77', // --mute
+  faint: '#98a1a9', // --faint
+  line: '#eef0f2', // --bg (격자선은 카드 배경보다 살짝 진한 정도로만)
+  lineStrong: '#b9c0c7', // --line-strong
+  future: '#f7f8f9', // 아직 오지 않은 시간
+}
 
 const STAGE_INFO = {
-  NORMAL: { shape: '●', label: '정상', className: 'ok' },
-  WARNING: { shape: '▲', label: '주의', className: 'warn' },
-  CRITICAL: { shape: '■', label: '경고', className: 'crit' },
-  LOST: { shape: '◆', label: '통신 단절', className: 'lost' },
-  WAITING: { shape: '○', label: '불러오는 중', className: 'lost' },
+  NORMAL: { shape: '●', label: '정상', className: 'ok', color: '#2f7d4f' }, // --ok
+  WARNING: { shape: '▲', label: '주의', className: 'warn', color: '#9c5f08' }, // --warn
+  CRITICAL: { shape: '■', label: '경고', className: 'crit', color: '#c8372d' }, // --crit
+  LOST: { shape: '◆', label: '통신 단절', className: 'lost', color: '#8a9299' }, // --lost
+  WAITING: { shape: '○', label: '불러오는 중', className: 'lost', color: '#8a9299' },
 }
 
 // 화면에 보여 줄 단계
@@ -35,104 +49,162 @@ const stage = computed(() => {
   return STAGE_INFO[props.status.peakStatus]
 })
 
-// 큰 숫자 아래 한 줄 판정
-const verdict = computed(() => {
+// 제목 오른쪽: "14:00 – 14:15 / 남은 6분 0초"
+const windowText = computed(() => {
   const status = props.status
-  if (!status) return '값을 기다리는 중입니다'
-  if (props.stale) return `연결이 끊겨 ${formatClock(status.recordedAt)} 값에서 멈춰 있습니다`
-  const target = `목표 ${formatKw(status.targetPeakKw)} kW`
-  // defenseKw는 "넘는 양"이 아니라 "더 방전해야 하는 전력"이라 여기에 쓰지 않음 (아래 숫자 칸에 따로 보임)
-  if (status.peakStatus === 'CRITICAL') return `${target}를 넘을 것으로 보입니다`
-  if (status.peakStatus === 'WARNING') return `${target}에 거의 닿았습니다`
-  return `${target} 안쪽입니다`
+  const range = `${formatHourMinute(status?.windowStart)} – ${formatHourMinute(status?.windowEnd)}`
+  return status ? `${range} / 남은 ${formatRemaining(status.remainingSeconds)}` : range
 })
 
-// ---- 게이지 ----
-// 게이지에 그릴 범위는 목표 피크를 기준으로 화면에서 정함 (표시용, 목표 1,800이면 1,400 ~ 2,100)
-const gaugeMin = computed(() => Math.floor((props.status.targetPeakKw * 0.78) / 100) * 100)
-const gaugeMax = computed(
-  () => props.status.targetPeakKw + (props.status.targetPeakKw - gaugeMin.value) * 0.75,
-)
+// 구간 시작부터 지금까지 쌓인 값 (백엔드의 windowPoints, 0에서 시작해 15분 끝에 그 구간의 피크가 됨)
+const points = computed(() => props.status?.windowPoints ?? [])
+// 지금 시점의 누적값 = 마지막 점
+const currentPoint = computed(() => points.value[points.value.length - 1] ?? null)
 
-// kW 값이 게이지의 왼쪽에서 몇 % 위치인지 (범위를 벗어나면 양 끝에 붙임)
-function position(kw) {
-  const percent = ((kw - gaugeMin.value) / (gaugeMax.value - gaugeMin.value)) * 100
-  return Math.min(100, Math.max(0, percent))
+// 구간 시작으로부터 n분 뒤의 시각 "14:05" (가로축 눈금과 툴팁용)
+function clockAfter(minutes) {
+  const start = props.status.windowStart
+  const total = Number(start.slice(11, 13)) * 60 + Number(start.slice(14, 16)) + Math.round(minutes)
+  const hour = String(Math.floor(total / 60) % 24).padStart(2, '0')
+  const minute = String(total % 60).padStart(2, '0')
+  return `${hour}:${minute}`
 }
 
-const gauge = computed(() => {
-  if (!props.status) return null
-  const predicted = position(props.status.predictedKw)
+// ---- 15분 흐름 그래프 ----
+const chartOption = computed(() => {
+  const status = props.status
+  const now = currentPoint.value
+  if (!status || !now) return null
+
+  const target = status.targetPeakKw
+  const stateColor = stage.value.color
+  // 연결이 끊기면 지금까지의 선도 회색으로 (멈춘 값임을 보여 줌)
+  const actualColor = props.stale ? stage.value.color : COLORS.ink
+
+  // 세로축 끝: 목표·예상 중 큰 값보다 조금 위 (100 단위, 표시용)
+  const top = Math.max(target, status.predictedKw)
+  const yMax = Math.ceil((top * 1.08) / 100) * 100
+
+  const markLines = [
+    {
+      yAxis: target,
+      lineStyle: { color: COLORS.ink, width: 1.5, type: 'solid' },
+      label: {
+        formatter: `목표 피크 ${formatKw(target)} kW`,
+        position: 'insideStartTop',
+        color: COLORS.ink,
+        fontWeight: 700,
+      },
+    },
+  ]
+
   return {
-    warn: position(props.status.warnKw),
-    target: position(props.status.targetPeakKw),
-    predicted,
-    // 예상값 글자가 게이지 밖으로 나가지 않게, 오른쪽 끝에 가까우면 글자를 표시선 왼쪽에 둠
-    labelOnLeft: predicted > 78,
+    animation: false,
+    grid: { left: 4, right: 20, top: 30, bottom: 4, containLabel: true },
+    legend: {
+      top: 0,
+      right: 0,
+      itemWidth: 16,
+      itemHeight: 8,
+      textStyle: { color: COLORS.mute, fontSize: 12 },
+      data: ['현재 누적', '끝까지 예상'],
+    },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params) => {
+        const rows = params.map(
+          (item) => `${item.marker}${item.seriesName} <b>${formatKw(item.value[1])} kW</b>`,
+        )
+        return [clockAfter(params[0].value[0]), ...rows].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'value',
+      min: 0,
+      max: WINDOW_MINUTES,
+      interval: 5,
+      axisLine: { lineStyle: { color: COLORS.lineStrong } },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { color: COLORS.faint, formatter: (minute) => clockAfter(minute) },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: yMax,
+      splitNumber: 4,
+      axisLabel: { color: COLORS.faint, formatter: (value) => formatInteger(value) },
+      splitLine: { lineStyle: { color: COLORS.line } },
+    },
+    series: [
+      {
+        name: '현재 누적',
+        type: 'line',
+        data: points.value.map((point) => [point.minute, point.demandKw]),
+        showSymbol: false,
+        lineStyle: { color: actualColor, width: 2 },
+        itemStyle: { color: actualColor },
+        // 아직 오지 않은 시간은 옅게 칠함
+        markArea: {
+          silent: true,
+          itemStyle: { color: COLORS.future },
+          data: [[{ xAxis: now.minute }, { xAxis: WINDOW_MINUTES }]],
+        },
+        markLine: { silent: true, symbol: 'none', data: markLines },
+      },
+      {
+        // 지금 점에서 구간 끝의 예상 피크까지 점선으로 이음
+        name: '끝까지 예상',
+        type: 'line',
+        data: [
+          { value: [now.minute, now.demandKw], symbol: 'none' },
+          { value: [WINDOW_MINUTES, status.predictedKw], symbol: 'circle', symbolSize: 8 },
+        ],
+        lineStyle: { color: stateColor, width: 2, type: 'dashed' },
+        itemStyle: { color: stateColor },
+        // "예상 1,346 kW" 이름표를 점선 기울기에 맞춰 선 위에 붙임.
+        // ECharts의 markLine 이름표는 선 방향대로 기울어지므로, 같은 두 점을 잇는 보이지 않는 선을 하나 더 두고 이름표만 씀
+        // (선을 opacity 0으로 숨기면 이름표까지 사라져서 투명한 색을 씀)
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          lineStyle: { color: 'rgba(0, 0, 0, 0)' },
+          label: {
+            position: 'insideEndTop',
+            formatter: `예상 ${formatKw(status.predictedKw)} kW`,
+            color: stateColor,
+            fontWeight: 700,
+          },
+          data: [
+            [
+              { coord: [now.minute, now.demandKw] },
+              { coord: [WINDOW_MINUTES, status.predictedKw] },
+            ],
+          ],
+        },
+      },
+    ],
   }
 })
-
-// 15분 구간에서 지나간 시간 (표시용)
-const elapsedSeconds = computed(() =>
-  props.status ? WINDOW_SECONDS - props.status.remainingSeconds : null,
-)
-const elapsedPercent = computed(() =>
-  elapsedSeconds.value === null ? 0 : (elapsedSeconds.value / WINDOW_SECONDS) * 100,
-)
 </script>
 
 <template>
   <section class="card window" :class="stage.className">
     <div class="head">
-      <h2 class="card-title">현재 15분 피크 구간</h2>
-      <span class="range num">
-        {{ formatHourMinute(status?.windowStart) }} – {{ formatHourMinute(status?.windowEnd) }}
-      </span>
+      <h2 class="card-title">예상 피크</h2>
+      <span class="range num">{{ windowText }}</span>
     </div>
 
     <div class="body">
-      <!-- 왼쪽: 예상 피크와 판정 -->
+      <!-- 왼쪽: 단계와 숫자 -->
       <div class="left">
-        <p class="caption">예상 피크</p>
+        <p class="chip">
+          <span aria-hidden="true">{{ stage.shape }}</span> {{ stage.label }}
+        </p>
         <p class="big">
           <span class="num">{{ formatKw(status?.predictedKw) }}</span>
           <span class="unit">kW</span>
         </p>
-        <p class="verdict">{{ verdict }}</p>
-        <p class="chip">
-          <span aria-hidden="true">{{ stage.shape }}</span> {{ stage.label }}
-        </p>
-      </div>
-
-      <!-- 오른쪽: 게이지와 숫자 -->
-      <div class="right">
-        <div v-if="gauge" class="gauge" aria-hidden="true">
-          <p
-            class="predicted-label num"
-            :class="{ 'on-left': gauge.labelOnLeft }"
-            :style="{ left: `${gauge.predicted}%` }"
-          >
-            예상 {{ formatKw(status.predictedKw) }}
-          </p>
-          <div class="zones">
-            <span class="zone zone-ok" :style="{ width: `${gauge.warn}%` }">● 정상</span>
-            <span class="zone zone-warn" :style="{ width: `${gauge.target - gauge.warn}%` }"></span>
-            <span class="zone zone-crit">■ 경고</span>
-            <i class="target-line" :style="{ left: `${gauge.target}%` }"></i>
-            <i class="predicted-line" :style="{ left: `${gauge.predicted}%` }"></i>
-          </div>
-          <div class="axis num">
-            <span>{{ formatKw(gaugeMin) }}</span>
-            <span class="axis-target" :style="{ left: `${gauge.target}%` }">
-              목표 {{ formatKw(status.targetPeakKw) }}
-            </span>
-            <span class="axis-max">{{ formatKw(gaugeMax) }} kW</span>
-          </div>
-          <p class="warn-note num">
-            <span aria-hidden="true">▲</span> 주의는 {{ formatKw(status.warnKw) }} kW부터
-          </p>
-        </div>
-        <p v-else class="empty">값을 기다리는 중입니다.</p>
 
         <dl class="stats">
           <div>
@@ -142,9 +214,13 @@ const elapsedPercent = computed(() =>
             </dd>
           </div>
           <div>
-            <dt>예상 피크</dt>
-            <dd class="state">
-              <span class="num">{{ formatKw(status?.predictedKw) }}</span> <small>kW</small>
+            <dt
+              title="구간 시작부터 지금까지 쓴 전력을 15분 평균으로 바꾼 값. 15분이 끝날 때의 값이 그 구간의 피크입니다."
+            >
+              현재 누적
+            </dt>
+            <dd>
+              <span class="num">{{ formatKw(currentPoint?.demandKw) }}</span> <small>kW</small>
             </dd>
           </div>
           <div>
@@ -153,21 +229,15 @@ const elapsedPercent = computed(() =>
               <span class="num">{{ formatKw(status?.defenseKw) }}</span> <small>kW</small>
             </dd>
           </div>
-          <div>
-            <dt>남은 시간</dt>
-            <dd class="num">{{ formatRemaining(status?.remainingSeconds) }}</dd>
-          </div>
         </dl>
+      </div>
 
-        <div class="progress">
-          <p>
-            <span>구간 진행</span>
-            <span class="num">{{ formatRemaining(elapsedSeconds) }} / 15분</span>
-          </p>
-          <div class="track" aria-hidden="true">
-            <span class="bar" :style="{ width: `${elapsedPercent}%` }"></span>
-          </div>
-        </div>
+      <!-- 오른쪽: 15분 흐름 그래프 -->
+      <div class="right">
+        <Chart v-if="chartOption" :option="chartOption" :height="230" />
+        <p v-else class="empty">
+          {{ status ? '구간 흐름 값이 없습니다.' : '값을 기다리는 중입니다.' }}
+        </p>
       </div>
     </div>
   </section>
@@ -177,7 +247,7 @@ const elapsedPercent = computed(() =>
 .window {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   /* 단계에 따라 바뀌는 색 */
   --state: var(--ink-2);
 }
@@ -218,213 +288,88 @@ const elapsedPercent = computed(() =>
   display: flex;
   flex-direction: column;
   flex: none;
-  gap: 4px;
-  width: 290px;
+  width: 250px;
 }
-.caption {
+/* 단계 표시: 테두리만 둔 작은 표시 (큰 숫자보다 눈에 덜 띄게) */
+.chip {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border: 1px solid var(--state);
+  border-radius: 3px;
   font-size: 13px;
-  color: var(--mute);
+  font-weight: 700;
+  color: var(--state);
+  white-space: nowrap;
 }
 .big {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  font-size: 60px;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 56px;
   font-weight: 700;
-  line-height: 1.12;
+  line-height: 1.1;
   color: var(--state);
 }
 .unit {
-  font-size: 18px;
-  font-weight: 400;
-  color: var(--ink-2);
-}
-.verdict {
-  font-size: 15px;
-  font-weight: 700;
-  /* 줄이 바뀔 때 낱말 중간에서 끊기지 않게 */
-  word-break: keep-all;
-}
-.chip {
-  align-self: flex-start;
-  margin-top: 6px;
-  padding: 6px 12px;
-  background: var(--state);
-  font-weight: 700;
-  color: var(--card);
-}
-
-/* 오른쪽 */
-/* 옆의 ESS 추천 카드가 더 길어 이 카드가 늘어나도, 내용 사이가 벌어지지 않게 위로 모음 */
-.right {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  justify-content: flex-start;
-  gap: 14px;
-  min-width: 0;
-}
-.empty {
-  color: var(--mute);
-}
-
-/* 게이지 */
-.gauge {
-  position: relative;
-  padding-top: 26px;
-}
-.predicted-label {
-  position: absolute;
-  top: 0;
-  margin-left: 8px;
   font-size: 16px;
-  font-weight: 700;
-  color: var(--state);
-  white-space: nowrap;
-}
-.predicted-label.on-left {
-  margin-left: -8px;
-  transform: translateX(-100%);
-}
-.zones {
-  position: relative;
-  display: flex;
-  height: 44px;
-}
-.zone {
-  display: flex;
-  align-items: center;
-  overflow: hidden;
-  font-size: 14px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-/* 띠 색은 상태색을 옅게 깐 것 (global.css의 --ok, --warn, --crit와 같은 색) */
-.zone-ok {
-  padding-left: 12px;
-  background: rgba(47, 125, 79, 0.22);
-  color: var(--ok);
-}
-.zone-warn {
-  background: rgba(156, 95, 8, 0.45);
-}
-.zone-crit {
-  flex: 1;
-  justify-content: flex-end;
-  padding-right: 12px;
-  background: rgba(200, 55, 45, 0.22);
-  color: var(--crit);
-}
-.target-line {
-  position: absolute;
-  top: -4px;
-  bottom: -10px;
-  width: 2px;
-  margin-left: -1px;
-  background: var(--ink);
-}
-.predicted-line {
-  position: absolute;
-  top: -14px;
-  bottom: -14px;
-  width: 5px;
-  margin-left: -2.5px;
-  background: var(--state);
-  transition: left 0.4s ease;
-}
-.axis {
-  position: relative;
-  display: flex;
-  justify-content: space-between;
-  margin-top: 14px;
-  font-size: 12px;
+  font-weight: 400;
   color: var(--mute);
 }
-.axis-target {
-  position: absolute;
-  top: 0;
-  transform: translateX(-50%);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ink);
-  white-space: nowrap;
-}
-.warn-note {
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--warn);
-}
 
-/* 숫자 네 개 */
 .stats {
   display: flex;
-  gap: 16px;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 .stats div {
-  flex: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
 }
 .stats dt {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--mute);
   white-space: nowrap;
 }
 .stats dd {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   white-space: nowrap;
 }
-.stats dd.state {
-  color: var(--state);
-}
 .stats small {
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--ink-2);
-}
-
-/* 구간 진행 */
-.progress p {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 4px;
   font-size: 12px;
+  font-weight: 400;
   color: var(--mute);
 }
-.track {
-  height: 6px;
-  background: var(--line);
+
+/* 오른쪽 */
+.right {
+  flex: 1;
+  min-width: 0;
 }
-.bar {
-  display: block;
-  height: 100%;
-  background: var(--ink);
+.empty {
+  padding-top: 40px;
+  color: var(--mute);
 }
 
-/* 화면이 좁으면 왼쪽 숫자 칸과 글자를 줄여 게이지 자리를 남김 */
+/* 화면이 좁으면 왼쪽 칸과 큰 숫자를 줄여 그래프 자리를 남김 */
 @media (max-width: 1600px) {
   .body {
-    gap: 24px;
+    gap: 20px;
   }
   .left {
-    width: 230px;
+    width: 210px;
   }
   .big {
-    font-size: 52px;
-  }
-  /* 좁은 화면(1366 등)에서는 숫자 네 개가 한 줄에 다 안 들어가 카드 밖으로 넘치므로 2×2로 놓음 */
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px 16px;
+    font-size: 46px;
   }
   .stats dd {
-    font-size: 20px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .predicted-line {
-    transition: none;
+    font-size: 17px;
   }
 }
 </style>

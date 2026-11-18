@@ -20,9 +20,15 @@ const props = defineProps({
   lastYearLabel: { type: String, default: '작년 같은 달' },
 })
 
-// 이번 달과 비교: 이번 달은 월말 예상, 지난달·작년은 그 달 전체 요금
+// 카드의 큰 금액: 진행 중인 달은 월말 예상, 끝난 달은 그 달 전체 요금
+// (성적표 맨 위 "전기요금 추정" 카드도 같은 기준으로 보여 줌)
+const mainAmount = computed(() =>
+  props.inProgress ? props.bill.monthEndEstimate : props.bill.total,
+)
+
+// 이 달과 비교: 이 달은 위의 큰 금액, 전달·작년은 그 달 전체 요금
 const compareRows = computed(() => {
-  const current = props.bill.monthEndEstimate
+  const current = mainAmount.value
   const rows = [
     // 지난 달을 볼 때는 "이번 달"이 아니라 "이 달"(보고 있는 달)로 부름
     { label: props.inProgress ? '이번 달 (예상)' : '이 달', value: current, current: true },
@@ -66,7 +72,7 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
       <div class="main-amount">
         <p class="caption">{{ inProgress ? '이번 달 월말 예상' : '이 달 요금' }}</p>
         <p class="amount">
-          <span class="num">{{ formatManwon(bill.monthEndEstimate) }}</span>
+          <span class="num">{{ formatManwon(mainAmount) }}</span>
           <small>만원</small>
         </p>
         <p v-if="inProgress" class="sub num">오늘까지 {{ formatManwon(bill.total) }}만원</p>
@@ -132,12 +138,16 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
       </tbody>
     </table>
 
+    <!--
+      기본요금 계산 방식은 아직 팀에서 확인 필요.
+      화면에 "(확인 필요)"라고 적으면 인쇄물에도 찍히므로 여기 주석으로만 남김
+    -->
     <p class="foot">
       기본요금은 이 달 최대 피크로 계산했습니다.
       <template v-if="bill.baseChargeOverTarget > 0">
-        목표 피크를 지켰다면 {{ formatManwon(bill.baseChargeOverTarget) }}만원 적습니다.
+        목표 피크를 지켰다면 {{ formatManwon(bill.baseChargeOverTarget) }}만원 적었을 것으로
+        추정됩니다.
       </template>
-      (계산 방식은 확인 필요)
     </p>
   </section>
 </template>
@@ -232,11 +242,6 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
 }
 .table th {
   padding: 6px 8px;
-  border-bottom: 1px solid var(--line-strong);
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--mute);
-  text-align: left;
 }
 .table td {
   padding: 8px;
@@ -266,5 +271,23 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
 .foot {
   font-size: 12px;
   color: var(--mute);
+}
+
+/* 인쇄할 때: 종이에서는 전체가 0.8배로 줄어드므로 작은 글자를 키워 9pt 안팎이 되게 함 */
+@media print {
+  .note,
+  .caption,
+  .main-amount .sub,
+  .compare li,
+  .foot,
+  .table th {
+    font-size: 14px;
+  }
+  .table {
+    font-size: 15px;
+  }
+  .table .total td {
+    font-size: 16px;
+  }
 }
 </style>

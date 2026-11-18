@@ -1,7 +1,7 @@
 <!--
   모니터링 > 통합
   1줄: KPI 5개 (공장 소비전력 · 한전 구매전력 · 태양광 발전량 · ESS 충·방전 · 배터리 잔량)
-  2줄: 현재 15분 피크 구간(피크 게이지) · ESS 추천
+  2줄: 예상 피크(15분 흐름 그래프) · ESS 추천
   3줄: 오늘 공장 소비 / 오늘 한전 구매 그래프 · 이벤트 로그
 -->
 <script setup>
@@ -63,7 +63,6 @@ const COLOR = {
   ink2: '#3c444c', // --ink-2
   mute: '#646e77', // --mute
   line: '#dde1e5', // --line
-  crit: '#c8372d', // --crit
   grid: '#5b6472', // --src-grid
   solar: '#d19a00', // --src-solar
 }
@@ -113,11 +112,12 @@ function makeTrendOption(lines, withTarget) {
   if (withTarget && target) {
     markLines.push({
       yAxis: target,
-      lineStyle: { color: COLOR.crit, width: 2, type: 'solid' },
+      // 목표 피크선은 모든 그래프에서 같은 모양 (먹색 실선). 빨강은 상태 표시에만 씀
+      lineStyle: { color: COLOR.ink, width: 1.5, type: 'solid' },
       label: {
         formatter: `목표 피크 ${formatKw(target)}`,
         position: 'insideStartTop',
-        color: COLOR.crit,
+        color: COLOR.ink,
         fontWeight: 'bold',
       },
     })
@@ -200,7 +200,7 @@ const trendCards = computed(() => [
         <span class="num">{{ status.tariff.until }}</span>부터 {{ status.tariff.nextLabel }}
       </p>
       <!-- 자동 모드일 때 멀리서도 보이게 제목 줄에 크게 표시 (실제 제어가 아니라 시뮬레이션) -->
-      <p v-if="settingsStore.values.operationMode === 'AUTO'" class="mode-band">
+      <p v-if="settingsStore.values['operation.auto_mode'] === true" class="mode-band">
         <strong>자동 모드 (시뮬레이션)</strong>
         <span class="mode-sub">추천을 자동으로 적용 중</span>
       </p>
@@ -209,7 +209,7 @@ const trendCards = computed(() => [
     <!-- 서버 연결이 끊겼다는 알림은 공통 틀(MainLayout)이 모든 화면에 띄움 -->
 
     <!-- 1줄: KPI 5개 -->
-    <KpiCards :status="status" />
+    <KpiCards :status="status" :stale="!realtimeStore.connected" />
 
     <!-- 2줄: 15분 피크 + ESS 추천 -->
     <div class="row middle">
@@ -221,7 +221,7 @@ const trendCards = computed(() => [
           :decision="realtimeStore.decision"
           :busy="busy"
           :offline="!realtimeStore.connected"
-          :auto="settingsStore.values.operationMode === 'AUTO'"
+          :auto="settingsStore.values['operation.auto_mode'] === true"
           @apply="answerDecision('APPLIED')"
           @ignore="answerDecision('IGNORED')"
         />
@@ -241,7 +241,7 @@ const trendCards = computed(() => [
           <p v-else-if="realtimeStore.todayLoading" class="empty chart-empty">불러오는 중입니다.</p>
           <p v-else-if="realtimeStore.todayError" class="empty chart-empty" role="alert">
             그래프를 불러오지 못했습니다. ({{ realtimeStore.todayError }})
-            <button class="text-button" @click="realtimeStore.fetchToday()">다시 시도</button>
+            <button class="retry" @click="realtimeStore.fetchToday()">다시 시도</button>
           </p>
           <p v-else class="empty chart-empty">오늘 기록이 아직 없습니다.</p>
         </section>
@@ -262,7 +262,7 @@ const trendCards = computed(() => [
           </li>
         </ul>
         <p v-else class="empty">아직 기록된 이벤트가 없습니다.</p>
-        <RouterLink to="/logs" class="more">추천 이력 보기</RouterLink>
+        <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>
       </section>
     </div>
   </div>
@@ -316,14 +316,6 @@ const trendCards = computed(() => [
   margin-left: auto;
   font-size: 13px;
   color: var(--mute);
-}
-.text-button {
-  padding: 0;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--ink-2);
-  font-size: 13px;
-  color: var(--ink-2);
 }
 .empty {
   display: flex;
@@ -402,9 +394,6 @@ const trendCards = computed(() => [
 .more {
   align-self: flex-end;
   margin-top: auto;
-  border-bottom: 1px solid var(--ink-2);
-  font-size: 13px;
-  color: var(--ink-2);
 }
 
 /* 화면이 좁으면 오른쪽 카드 폭을 줄여 왼쪽 그래프와 게이지 자리를 남김 */
