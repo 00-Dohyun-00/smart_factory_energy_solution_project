@@ -97,8 +97,11 @@ public class ReportService {
         ReportEss ess = makeEss(essList, recommendations, resultPeaks, targetPeakKw);
         ReportSolar solar = makeSolar(powers);
 
+        // 15분이 다 찬 구간이 아직 없으면 피크 분석이 null을 주므로 빈 목록으로 바꿈 (화면은 "기록 없음" 표시)
         return new ReportResponse(month, true, periodStart, periodEnd, targetPeakKw, summary,
-                peak.dailyPeaks(), peak.heatmap(), bill, exceeded, ess, solar);
+                peak.hasData() ? peak.dailyPeaks() : List.of(),
+                peak.hasData() ? peak.heatmap() : List.of(),
+                bill, exceeded, ess, solar);
     }
 
     // ---------- 핵심 숫자 (summary) ----------
