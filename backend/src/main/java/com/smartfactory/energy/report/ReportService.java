@@ -109,16 +109,21 @@ public class ReportService {
     private ReportSummary makeSummary(List<Recommendation> recommendations, Map<LocalDateTime, Double> resultPeaks,
                                       Double targetPeakKw, PeakResponse peak) {
         // 피크 방어 추천 수와, 그중 실제 피크가 목표 이하로 끝난 수
+        // 판단 엔진은 1분마다 추천을 낼 수 있어서 같은 15분 구간에 추천이 여러 줄일 수 있음
+        // → 추천 줄 수가 아니라 "구간 1개 = 1회"로 셈. 아직 끝나지 않은 구간은 결과가 없어서 뺌
+        Map<LocalDateTime, Recommendation> defenseByWindow = latestByWindow(recommendations.stream()
+                .filter(r -> r.getReasonType() == RecommendationReasonType.PEAK_DEFENSE)
+                .toList());
         int defenseTotal = 0;
         int defenseSuccess = 0;
-        for (Recommendation r : recommendations) {
-            if (r.getReasonType() != RecommendationReasonType.PEAK_DEFENSE) {
+        for (Map.Entry<LocalDateTime, Recommendation> entry : defenseByWindow.entrySet()) {
+            Double result = resultPeaks.get(entry.getKey());
+            if (result == null) {
                 continue;
             }
             defenseTotal++;
-            Double result = resultPeaks.get(r.getIntervalStart());
-            Double target = r.getTargetPeakKw() != null ? r.getTargetPeakKw().doubleValue() : targetPeakKw;
-            if (result != null && target != null && result <= target) {
+            Double target = targetOf(entry.getValue(), targetPeakKw);
+            if (target != null && result <= target) {
                 defenseSuccess++;
             }
         }
@@ -237,12 +242,7 @@ public class ReportService {
         if (targetPeakKw == null) {
             return List.of();
         }
-        // 15분 구간 시작 시각 → 그 구간의 마지막 추천
-        Map<LocalDateTime, Recommendation> recByWindow = new HashMap<>();
-        for (Recommendation r : recommendations) {
-            recByWindow.merge(r.getIntervalStart(), r,
-                    (a, b) -> a.getRecommendedAt().isAfter(b.getRecommendedAt()) ? a : b);
-        }
+        Map<LocalDateTime, Recommendation> recByWindow = latestByWindow(recommendations);
 
         return intervals.stream()
                 .filter(d -> d.getActualAvgKw().doubleValue() > targetPeakKw)
@@ -289,12 +289,15 @@ public class ReportService {
             dailyDischarge.add(new ReportDailyDischarge(date, round1(dischargeByDate.get(date))));
         }
 
-        // 적용했는데도 실제 피크가 목표를 넘은 횟수
+        // 적용했는데도 실제 피크가 목표를 넘은 횟수 (같은 구간은 1회로 셈)
+        Map<LocalDateTime, Recommendation> appliedByWindow = latestByWindow(recommendations.stream()
+                .filter(r -> r.getStatus() == RecommendationStatus.APPLIED)
+                .toList());
         int blockedCount = 0;
-        for (Recommendation r : recommendations) {
-            Double result = resultPeaks.get(r.getIntervalStart());
-            Double target = r.getTargetPeakKw() != null ? r.getTargetPeakKw().doubleValue() : targetPeakKw;
-            if (r.getStatus() == RecommendationStatus.APPLIED && result != null && target != null && result > target) {
+        for (Map.Entry<LocalDateTime, Recommendation> entry : appliedByWindow.entrySet()) {
+            Double result = resultPeaks.get(entry.getKey());
+            Double target = targetOf(entry.getValue(), targetPeakKw);
+            if (result != null && target != null && result > target) {
                 blockedCount++;
             }
         }
@@ -343,6 +346,21 @@ public class ReportService {
         } catch (DateTimeParseException e) {
             throw new IllegalArgumentException("month 형식이 올바르지 않습니다. (예: 2026-11)");
         }
+    }
+
+    // 15분 구간 시작 시각 → 그 구간의 마지막 추천
+    private Map<LocalDateTime, Recommendation> latestByWindow(List<Recommendation> recommendations) {
+        Map<LocalDateTime, Recommendation> result = new HashMap<>();
+        for (Recommendation r : recommendations) {
+            result.merge(r.getIntervalStart(), r,
+                    (a, b) -> a.getRecommendedAt().isAfter(b.getRecommendedAt()) ? a : b);
+        }
+        return result;
+    }
+
+    // 추천에 적힌 목표 피크. 없으면 지금 설정값
+    private Double targetOf(Recommendation r, Double targetPeakKw) {
+        return r.getTargetPeakKw() != null ? r.getTargetPeakKw().doubleValue() : targetPeakKw;
     }
 
     // 15분이 다 찬 구간만 (진행 중인 구간은 아직 결과가 아님)
