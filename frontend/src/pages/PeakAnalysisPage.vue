@@ -23,6 +23,16 @@ const realtimeStore = useRealtimeStore()
 
 // 처리 상태는 색만으로 구분하지 않도록 도형을 함께 표시 (운영 로그 화면과 같은 표시)
 const STATUS_SHAPES = { APPLIED: '●', AUTO: '◇', IGNORED: '✕' }
+const TOP_COUNT = 8 // "피크가 높았던 구간"에 보여 줄 개수
+
+// 그 구간의 추천 처리를 한 줄 문구로 (명세 16번은 action·status 코드만 주므로 화면에서 글자로 바꿈)
+function windowNote(item) {
+  if (!item.action) return '방전 추천 없음'
+  if (item.status === 'IGNORED') return '추천을 넘김'
+  if (item.status === 'AUTO') return '자동 방전 (시뮬레이션)'
+  if (item.status === 'APPLIED') return '방전 적용'
+  return '추천 중'
+}
 
 // ---- 조회 조건 ----
 const preset = ref('month') // month(이번 달) | lastMonth(지난 달) | week(최근 7일) | custom(직접 입력)
@@ -65,6 +75,8 @@ function applyPreset(name) {
 function load(showLoading = true) {
   if (!fromDate.value || !toDate.value || dateError.value) return
   analysisStore.fetchPeak(fromDate.value, toDate.value, showLoading)
+  // "피크가 높았던 구간" 표는 명세 16번(demand-intervals)으로 따로 받음
+  analysisStore.fetchPeakWindows(fromDate.value, toDate.value, TOP_COUNT)
 }
 
 // "피크가 높았던 구간" 표에서 누른 구간의 시작 시각 (히트맵에 그 칸을 표시)
@@ -182,7 +194,7 @@ const dailyOption = computed(() => {
           symbol: 'none',
           lineStyle: { color: COLOR.ink, width: 1.5, type: 'solid' },
           label: {
-            formatter: `목표 ${formatKw(target)}`,
+            formatter: `목표 피크 ${formatKw(target)}`,
             position: 'insideStartTop',
             color: COLOR.ink,
             fontWeight: 'bold',
@@ -211,7 +223,9 @@ const heatOption = computed(() => {
   if (selectedStart.value) {
     const hour = Number(selectedStart.value.slice(11, 13))
     const row = dates.indexOf(selectedStart.value.slice(0, 10))
-    const picked = peak.value.topWindows.find((item) => item.windowStart === selectedStart.value)
+    const picked = analysisStore.peakWindows.find(
+      (item) => item.windowStart === selectedStart.value,
+    )
     if (row >= 0 && picked) {
       outlines.push({
         x0: hour,
@@ -335,13 +349,25 @@ const heatOption = computed(() => {
       <div class="field">
         <span class="field-label">기간</span>
         <div class="presets" role="group" aria-label="기간 빠른 선택">
-          <button :class="{ active: preset === 'month' }" @click="applyPreset('month')">
+          <button
+            :class="{ active: preset === 'month' }"
+            :aria-pressed="preset === 'month'"
+            @click="applyPreset('month')"
+          >
             이번 달
           </button>
-          <button :class="{ active: preset === 'lastMonth' }" @click="applyPreset('lastMonth')">
+          <button
+            :class="{ active: preset === 'lastMonth' }"
+            :aria-pressed="preset === 'lastMonth'"
+            @click="applyPreset('lastMonth')"
+          >
             지난 달
           </button>
-          <button :class="{ active: preset === 'week' }" @click="applyPreset('week')">
+          <button
+            :class="{ active: preset === 'week' }"
+            :aria-pressed="preset === 'week'"
+            @click="applyPreset('week')"
+          >
             최근 7일
           </button>
         </div>
@@ -463,7 +489,7 @@ const heatOption = computed(() => {
             </thead>
             <tbody>
               <tr
-                v-for="(item, index) in peak.topWindows"
+                v-for="(item, index) in analysisStore.peakWindows"
                 :key="item.windowStart"
                 class="window-row"
                 :class="{ active: selectedStart === item.windowStart }"
@@ -489,12 +515,18 @@ const heatOption = computed(() => {
                   <span v-if="item.status" aria-hidden="true">{{
                     STATUS_SHAPES[item.status]
                   }}</span>
-                  {{ item.note }}
+                  {{ windowNote(item) }}
                 </td>
               </tr>
             </tbody>
           </table>
-          <RouterLink to="/logs" class="more">추천 이력 보기</RouterLink>
+          <p v-if="analysisStore.peakWindowsError" class="windows-error" role="alert">
+            구간 순위를 불러오지 못했습니다. ({{ analysisStore.peakWindowsError }})
+          </p>
+          <p v-else-if="!analysisStore.peakWindows.length" class="windows-empty">
+            이 기간에는 구간 기록이 없습니다.
+          </p>
+          <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>
         </section>
       </div>
     </template>
@@ -539,30 +571,6 @@ const heatOption = computed(() => {
   border-radius: 4px;
   color: var(--ink);
 }
-.presets {
-  display: flex;
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.presets button {
-  height: 32px;
-  padding: 0 12px;
-  background: var(--card);
-  border: 0;
-  color: var(--ink-2);
-}
-.presets button + button {
-  border-left: 1px solid var(--line-strong);
-}
-.presets button:hover {
-  background: var(--bg);
-}
-.presets button.active {
-  background: var(--ink);
-  font-weight: 700;
-  color: var(--card);
-}
 .loading-note {
   margin-left: auto;
   font-size: 13px;
@@ -584,14 +592,6 @@ const heatOption = computed(() => {
 }
 .state.error {
   color: var(--crit);
-}
-.retry {
-  height: 34px;
-  padding: 0 14px;
-  background: var(--card);
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  color: var(--ink-2);
 }
 .over {
   color: var(--crit);
@@ -664,12 +664,6 @@ const heatOption = computed(() => {
 }
 .table th {
   padding: 6px 12px 6px 0;
-  border-bottom: 1px solid var(--ink);
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--mute);
-  text-align: left;
-  white-space: nowrap;
 }
 .table td {
   padding: 9px 12px 9px 0;
@@ -721,9 +715,6 @@ const heatOption = computed(() => {
   align-self: flex-end;
   margin-top: auto;
   padding-top: 10px;
-  font-size: 13px;
-  color: var(--ink-2);
-  text-decoration: underline;
 }
 
 /* 화면이 좁으면 오른쪽 표를 줄여 히트맵 자리를 남김 */

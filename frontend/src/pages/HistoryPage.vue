@@ -1,12 +1,14 @@
 <!-- 운영 이력: 추천 → 적용 여부 → 결과를 시간순 표로 보여 줍니다 -->
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useHistoryStore } from '@/stores/useHistoryStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { formatHourMinute, formatKw, formatMonthDayTime } from '@/utils/format'
 
 const historyStore = useHistoryStore()
 const realtimeStore = useRealtimeStore()
+const route = useRoute()
 
 const REFRESH_INTERVAL_MS = 5000 // 새 추천이 생기면 표에 나타나도록 자동으로 다시 받는 주기
 
@@ -53,6 +55,15 @@ function daysBefore(date, days) {
   return `${result.getFullYear()}-${pad(result.getMonth() + 1)}-${pad(result.getDate())}`
 }
 
+// 주소에 적힌 날짜가 '2026-11-14' 모양이고 실제로 있는 날짜인지 확인
+function isValidDate(text) {
+  if (typeof text !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return false
+  const [year, month, day] = text.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  // '2026-02-30'처럼 없는 날짜는 다음 달로 넘어가므로, 다시 비교해서 걸러냄
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+}
+
 function applyPreset(name) {
   preset.value = name
   if (!serverDate.value) return
@@ -85,7 +96,17 @@ watch([fromDate, toDate], () => {
   load()
 })
 
-// 서버 날짜를 처음 알게 되면 "오늘"로 조회 시작
+// 성적표의 "추천 이력 보기"처럼 주소에 기간이 있으면(/logs?from=2026-11-01&to=2026-11-17) 그 기간으로 시작.
+// 위의 감시(watch)가 기간이 바뀐 것을 보고 바로 조회함. 기간이 올바르지 않으면 무시하고 아래처럼 "오늘"로 시작
+const queryFrom = route.query.from
+const queryTo = route.query.to
+if (isValidDate(queryFrom) && isValidDate(queryTo) && queryFrom <= queryTo) {
+  preset.value = 'custom'
+  fromDate.value = queryFrom
+  toDate.value = queryTo
+}
+
+// 서버 날짜를 처음 알게 되면 "오늘"로 조회 시작 (주소에 기간이 있었으면 이미 날짜가 있어 건너뜀)
 watch(
   serverDate,
   (date) => {
@@ -105,6 +126,12 @@ onBeforeUnmount(() => {
   clearInterval(timer)
 })
 
+// 처리자 표시: 명세는 자동일 때 "자동 모드"를 보냄 → 실제 제어가 아니라는 뜻으로 "(시뮬레이션)"을 붙임
+function handlerText(appliedBy) {
+  if (!appliedBy) return '—'
+  return appliedBy === '자동 모드' ? '자동 모드 (시뮬레이션)' : appliedBy
+}
+
 // ---- 표에 보여 줄 목록 (행동, 상태, 검색어로 거름) ----
 const filtered = computed(() => {
   const word = keyword.value.trim()
@@ -113,7 +140,7 @@ const filtered = computed(() => {
     if (statusFilter.value !== 'ALL' && item.status !== statusFilter.value) return false
     if (ruleFilter.value !== 'ALL' && item.ruleLabel !== ruleFilter.value) return false
     if (word) {
-      const text = `${item.reason} ${item.ruleLabel} ${item.appliedBy ?? ''}`
+      const text = `${item.reason} ${item.ruleLabel} ${handlerText(item.appliedBy)}`
       if (!text.includes(word)) return false
     }
     return true
@@ -158,10 +185,18 @@ function toggle(id) {
       <div class="field">
         <span class="field-label">기간</span>
         <div class="presets" role="group" aria-label="기간 빠른 선택">
-          <button :class="{ active: preset === 'today' }" @click="applyPreset('today')">
+          <button
+            :class="{ active: preset === 'today' }"
+            :aria-pressed="preset === 'today'"
+            @click="applyPreset('today')"
+          >
             오늘
           </button>
-          <button :class="{ active: preset === 'week' }" @click="applyPreset('week')">
+          <button
+            :class="{ active: preset === 'week' }"
+            :aria-pressed="preset === 'week'"
+            @click="applyPreset('week')"
+          >
             최근 7일
           </button>
         </div>
@@ -228,7 +263,7 @@ function toggle(id) {
     <section class="card table-card">
       <p v-if="historyStore.errorMessage" class="notice" role="alert">
         이력을 불러오지 못했습니다. ({{ historyStore.errorMessage }})
-        <button class="reset" @click="load()">다시 시도</button>
+        <button class="retry" @click="load()">다시 시도</button>
       </p>
 
       <p v-if="historyStore.loading" class="empty">불러오는 중입니다.</p>
@@ -293,7 +328,7 @@ function toggle(id) {
                   <span aria-hidden="true">{{ STATUS_INFO[item.status].shape }}</span>
                   {{ STATUS_INFO[item.status].label }}
                 </td>
-                <td>{{ item.appliedBy ?? '—' }}</td>
+                <td>{{ handlerText(item.appliedBy) }}</td>
                 <td class="num">
                   {{ item.appliedAt ? formatHourMinute(item.appliedAt) : '—' }}
                 </td>
@@ -323,8 +358,9 @@ function toggle(id) {
                   <!-- 통합 화면의 ESS 추천 카드와 같은 이름(이유 / 판단 근거)으로 나눠 보여 줌 -->
                   <h4 class="detail-title">이유</h4>
                   <p class="reason">{{ item.reason }}</p>
-                  <h4 class="detail-title">판단 근거</h4>
-                  <dl class="used">
+                  <!-- 판단 근거(usedValues)는 명세에서 보류 중이라 없을 수 있음 → 없으면 제목째 숨김 -->
+                  <h4 v-if="item.usedValues?.length" class="detail-title">판단 근거</h4>
+                  <dl v-if="item.usedValues?.length" class="used">
                     <div v-for="used in item.usedValues" :key="used.label" class="used-item">
                       <dt>{{ used.label }}</dt>
                       <dd class="num">
@@ -412,30 +448,6 @@ function toggle(id) {
 select.input {
   max-width: 132px;
 }
-.presets {
-  display: flex;
-  border: 1px solid var(--line-strong);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.presets button {
-  height: 32px;
-  padding: 0 12px;
-  background: var(--card);
-  border: 0;
-  color: var(--ink-2);
-}
-.presets button + button {
-  border-left: 1px solid var(--line-strong);
-}
-.presets button:hover {
-  background: var(--bg);
-}
-.presets button.active {
-  background: var(--bg);
-  font-weight: 700;
-  color: var(--ink);
-}
 .reset {
   height: 34px;
   padding: 0 14px;
@@ -490,10 +502,6 @@ select.input {
   top: 0;
   padding: 10px 12px;
   background: var(--bg);
-  border-bottom: 1px solid var(--line-strong);
-  font-weight: 700;
-  color: var(--ink-2);
-  text-align: left;
 }
 .table td {
   padding: 10px 12px;

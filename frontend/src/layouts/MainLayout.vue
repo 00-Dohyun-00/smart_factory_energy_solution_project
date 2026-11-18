@@ -12,7 +12,7 @@ const route = useRoute()
 const settingsStore = useSettingsStore()
 
 // 폴링 주기(초). 환경 설정의 "화면 갱신 주기"를 쓰고, 아직 못 받았으면 5초
-const pollSeconds = computed(() => settingsStore.values.pollSeconds ?? 5)
+const pollSeconds = computed(() => settingsStore.values['operation.poll_seconds'] ?? 5)
 let timer = null
 
 // 주기에 맞춰 최신 상태를 반복해서 받음. 주기가 바뀌면 이전 반복을 멈추고 새로 시작함
@@ -36,7 +36,7 @@ onBeforeUnmount(() => {
 })
 
 // 자동 모드인지 (실제 제어가 아니라 시뮬레이션이라는 점을 함께 알림)
-const isAuto = computed(() => settingsStore.values.operationMode === 'AUTO')
+const isAuto = computed(() => settingsStore.values['operation.auto_mode'] === true)
 
 // 왼쪽 메뉴. 하위 화면은 만들 때마다 children에 한 줄씩 추가합니다.
 // 환경 설정은 자주 쓰지 않으므로 이 목록에서 빼고 메뉴 맨 아래에 따로 둡니다.
