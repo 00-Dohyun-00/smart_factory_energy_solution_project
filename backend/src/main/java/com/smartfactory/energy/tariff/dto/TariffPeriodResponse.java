@@ -3,6 +3,7 @@ package com.smartfactory.energy.tariff.dto;
 import com.smartfactory.energy.tariff.TariffPeriod;
 import com.smartfactory.energy.tariff.TariffPeriodType;
 import java.math.BigDecimal;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 
 /**
@@ -28,9 +29,17 @@ public record TariffPeriodResponse(
                 toPeriodCode(tariffPeriod.getPeriodType()),
                 toLabel(tariffPeriod.getPeriodType()),
                 tariffPeriod.getStartTime().format(HH_MM),
-                tariffPeriod.getEndTime().format(HH_MM),
+                toEndText(tariffPeriod.getEndTime()),
                 tariffPeriod.getUnitPrice()
         );
+    }
+
+    // 끝 시각 글자. 하루 끝(00:00 또는 23:59 이후)은 "24:00" (지금 상태 API의 요금표와 같은 표시)
+    private static String toEndText(LocalTime end) {
+        if (end.equals(LocalTime.MIDNIGHT) || !end.isBefore(LocalTime.of(23, 59))) {
+            return "24:00";
+        }
+        return end.format(HH_MM);
     }
 
     // DB 코드를 화면 코드로 바꿈 (OFF_PEAK → LIGHT, MID_PEAK → MID, ON_PEAK → PEAK)
