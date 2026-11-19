@@ -2,7 +2,7 @@
   모니터링 > 통합
   1줄: KPI 5개 (공장 소비전력 · 한전 구매전력 · 태양광 발전량 · ESS 충·방전 · 배터리 잔량)
   2줄: 예상 피크(15분 흐름 그래프) · ESS 추천
-  3줄: 오늘 공장 소비 / 오늘 한전 구매 그래프 · 이벤트 로그
+  3줄: 오늘 공장 소비 / 오늘 한전 구매 그래프 · 이벤트 로그(종류·단계 필터, 줄을 누르면 왼쪽 그래프에 표시)
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
@@ -52,13 +52,52 @@ async function answerDecision(newStatus) {
 }
 
 // ---- 이벤트 로그 ----
-// 단계는 색만으로 구분하지 않도록 도형을 함께 표시
+// 단계는 색만으로 구분하지 않도록 도형과 글자를 함께 표시
+// color: 그래프에 표시할 때 쓰는 색 이름 (테마 스토어 colors의 키)
 const EVENT_INFO = {
-  CRITICAL: { shape: '■', className: 'crit' },
-  WARNING: { shape: '▲', className: 'warn' },
-  NORMAL: { shape: '●', className: 'ok' },
-  INFO: { shape: '○', className: 'info' },
+  CRITICAL: { shape: '■', label: '경고', className: 'crit', color: 'crit' },
+  WARNING: { shape: '▲', label: '주의', className: 'warn', color: 'warn' },
+  NORMAL: { shape: '●', label: '정상', className: 'ok', color: 'ok' },
+  INFO: { shape: '○', label: '알림', className: 'info', color: 'ink2' },
 }
+// 이벤트 종류 (category는 가짜 백엔드에 임시로 넣은 값, 백엔드와 확정 필요)
+const EVENT_CATEGORIES = {
+  STAGE: '단계 변화',
+  RECOMMEND: '추천',
+  ACTION: '적용·넘김',
+  WINDOW: '구간 종료',
+  BATTERY: '배터리',
+  SETTING: '설정 변경',
+}
+
+// 필터: 받아 온 목록을 화면에서 거름 ('ALL'이면 거르지 않음)
+const eventCategory = ref('ALL')
+const eventLevel = ref('ALL')
+const filteredEvents = computed(() =>
+  realtimeStore.events.filter(
+    (event) =>
+      (eventCategory.value === 'ALL' || event.category === eventCategory.value) &&
+      (eventLevel.value === 'ALL' || event.level === eventLevel.value),
+  ),
+)
+
+// 고른 이벤트: 아래 오늘 그래프 두 개에 그 시각을 세로선으로 표시. 같은 줄을 다시 누르면 지움
+const selectedEventId = ref(null)
+const selectedEvent = computed(
+  () => realtimeStore.events.find((event) => event.id === selectedEventId.value) ?? null,
+)
+function toggleEvent(event) {
+  selectedEventId.value = selectedEventId.value === event.id ? null : event.id
+}
+
+// 이벤트 시각이 들어 있는 15분 칸 ('14:23' → '14:15'). 오늘이 아닌 이벤트는 그래프에 없으므로 null
+const selectedSlot = computed(() => {
+  const event = selectedEvent.value
+  const today = status.value?.recordedAt?.slice(0, 10)
+  if (!event || event.occurredAt.slice(0, 10) !== today) return null
+  const minute = Math.floor(Number(event.occurredAt.slice(14, 16)) / 15) * 15
+  return `${event.occurredAt.slice(11, 13)}:${String(minute).padStart(2, '0')}`
+})
 
 // ---- 오늘 전력 추이 ----
 // 그래프(ECharts)는 CSS 변수를 못 읽으므로, 테마 스토어가 global.css에서 읽어 둔 지금 테마 색을 씀
@@ -117,12 +156,12 @@ function makeTrendOption(lines, withTarget) {
   if (withTarget && target) {
     markLines.push({
       yAxis: target,
-      // 목표 피크선은 모든 그래프에서 같은 모양 (먹색 실선). 빨강은 상태 표시에만 씀
-      lineStyle: { color: COLOR.ink, width: 1.5, type: 'solid' },
+      // 목표 피크선: 데이터 선과 섞이지 않게 전용 자주색 실선 (2026-11-18). 빨강은 상태 표시에만 씀
+      lineStyle: { color: COLOR.target, width: 1.5, type: 'solid' },
       label: {
         formatter: `목표 피크 ${formatKw(target)}`,
         position: 'insideStartTop',
-        color: COLOR.ink,
+        color: COLOR.target,
         fontWeight: 'bold',
       },
     })
@@ -134,8 +173,37 @@ function makeTrendOption(lines, withTarget) {
       lineStyle: { color: COLOR.ink2, width: 1, type: 'solid' },
       label: {
         formatter: `지금 ${formatHourMinute(status.value?.recordedAt)}`,
+        // 선 위쪽 끝에 가로로 적음 (범례는 카드 제목 줄로 옮겨서 이 자리와 겹치지 않음, 2026-11-18)
         position: 'end',
+        // 하루 끝 무렵(21시 이후)에는 오른쪽 끝을 넘어 잘리므로 선 왼쪽에, 하루 시작 무렵(3시 전)에는
+        // 왼쪽 세로축 숫자에 걸리므로 선 오른쪽에 붙여 적음
+        align:
+          SLOTS.indexOf(lastTime) > 84 ? 'right' : SLOTS.indexOf(lastTime) < 12 ? 'left' : 'center',
+        // 이벤트 로그에서 고른 시점이 바로 옆(2시간 이내)이면 두 글자가 겹치므로 지금 글자는 잠시 숨김 (선은 그대로)
+        show: !(
+          selectedSlot.value &&
+          Math.abs(SLOTS.indexOf(selectedSlot.value) - SLOTS.indexOf(lastTime)) < 8
+        ),
+        backgroundColor: COLOR.card,
+        padding: [2, 4],
         color: COLOR.ink,
+      },
+    })
+  }
+  // 이벤트 로그에서 고른 이벤트: 단계 색 점선 + 시각과 도형
+  if (selectedSlot.value) {
+    const info = EVENT_INFO[selectedEvent.value.level]
+    markLines.push({
+      xAxis: selectedSlot.value,
+      lineStyle: { color: COLOR[info.color], width: 2, type: 'dashed' },
+      label: {
+        formatter: `${info.shape} ${formatHourMinute(selectedEvent.value.occurredAt)}`,
+        // 선 위쪽 끝에 가로로 적음
+        position: 'end',
+        color: COLOR[info.color],
+        fontWeight: 'bold',
+        backgroundColor: COLOR.card,
+        padding: [2, 4],
       },
     })
   }
@@ -144,13 +212,13 @@ function makeTrendOption(lines, withTarget) {
   return {
     animation: false,
     grid: { left: 52, right: 20, top: 28, bottom: 24 },
+    // 범례는 카드 제목 줄의 버튼으로 보여 줌 (그래프 위쪽의 "지금" 글자와 겹쳐 눌리지 않던 문제, 2026-11-18)
+    // 그래프 안 범례는 숨기고, 버튼으로 끄고 켠 상태만 넘김
     legend: {
-      right: 0,
-      top: 0,
-      icon: 'rect',
-      itemWidth: 10,
-      itemHeight: 10,
-      textStyle: { color: COLOR.ink2 },
+      show: false,
+      selected: Object.fromEntries(
+        lines.map((line) => [line.name, !hiddenSeries.value[line.name]]),
+      ),
     },
     tooltip: {
       ...tooltipColors(),
@@ -175,27 +243,36 @@ function makeTrendOption(lines, withTarget) {
   }
 }
 
+// 범례 버튼으로 끈 선 (선 이름 → true). 다시 누르면 켜짐
+const hiddenSeries = ref({})
+function toggleSeries(name) {
+  hiddenSeries.value = { ...hiddenSeries.value, [name]: !hiddenSeries.value[name] }
+}
+
 // 오늘 그래프 두 개 (위: 공장 소비 / 아래: 한전 구매)
-const trendCards = computed(() => [
-  {
-    key: 'load',
-    title: '오늘 공장 소비',
-    note: '15분 평균 (kW), 회색 띠는 요금 비싼 시간',
-    option: makeTrendOption(
-      [
-        { name: '공장 소비', field: 'loadKw', color: COLOR.ink },
-        { name: '태양광', field: 'solarKw', color: COLOR.solar, dashed: true },
-      ],
-      false,
-    ),
-  },
-  {
-    key: 'grid',
-    title: '오늘 한전 구매',
-    note: '15분 평균 (kW), 피크는 이 값으로 정해짐',
-    option: makeTrendOption([{ name: '한전 구매', field: 'gridKw', color: COLOR.grid }], true),
-  },
-])
+const trendCards = computed(() => {
+  const loadLines = [
+    { name: '공장 소비', field: 'loadKw', color: COLOR.ink },
+    { name: '태양광', field: 'solarKw', color: COLOR.solar, dashed: true },
+  ]
+  const gridLines = [{ name: '한전 구매', field: 'gridKw', color: COLOR.grid }]
+  return [
+    {
+      key: 'load',
+      title: '오늘 공장 소비',
+      note: '15분 평균 (kW), 회색 띠는 요금 비싼 시간',
+      lines: loadLines,
+      option: makeTrendOption(loadLines, false),
+    },
+    {
+      key: 'grid',
+      title: '오늘 한전 구매',
+      note: '15분 평균 (kW), 피크는 이 값으로 정해짐',
+      lines: gridLines,
+      option: makeTrendOption(gridLines, true),
+    },
+  ]
+})
 </script>
 
 <template>
@@ -253,6 +330,25 @@ const trendCards = computed(() => [
         <section v-for="card in trendCards" :key="card.key" class="card trend">
           <div class="card-head">
             <h2 class="card-title">{{ card.title }}</h2>
+            <!-- 범례: 누르면 그 선을 끄고 켬 (끈 선은 흐리게) -->
+            <div class="legend-buttons">
+              <button
+                v-for="line in card.lines"
+                :key="line.name"
+                class="legend-button"
+                :class="{ off: hiddenSeries[line.name] }"
+                :aria-pressed="!hiddenSeries[line.name]"
+                @click="toggleSeries(line.name)"
+              >
+                <span
+                  class="legend-swatch"
+                  :class="{ dashed: line.dashed }"
+                  :style="{ '--swatch': line.color }"
+                  aria-hidden="true"
+                ></span>
+                {{ line.name }}
+              </button>
+            </div>
             <span class="note">{{ card.note }}</span>
           </div>
           <Chart v-if="realtimeStore.todayStatuses.length" :option="card.option" :height="170" />
@@ -268,19 +364,72 @@ const trendCards = computed(() => [
       <section class="card events-card">
         <div class="card-head">
           <h2 class="card-title">이벤트 로그</h2>
-          <span class="note">단계 변화, 추천, 적용·넘김, 구간 종료</span>
+          <div class="event-filters">
+            <select v-model="eventCategory" class="filter" aria-label="종류">
+              <option value="ALL">종류 전체</option>
+              <option v-for="(label, key) in EVENT_CATEGORIES" :key="key" :value="key">
+                {{ label }}
+              </option>
+            </select>
+            <select v-model="eventLevel" class="filter" aria-label="단계">
+              <option value="ALL">단계 전체</option>
+              <option v-for="(info, key) in EVENT_INFO" :key="key" :value="key">
+                {{ info.shape }} {{ info.label }}
+              </option>
+            </select>
+          </div>
         </div>
-        <ul v-if="realtimeStore.events.length" class="events">
-          <li v-for="event in realtimeStore.events" :key="event.id">
-            <span class="event-time num">{{ formatHourMinute(event.occurredAt) }}</span>
-            <span class="event-text" :class="EVENT_INFO[event.level].className">
-              <span aria-hidden="true">{{ EVENT_INFO[event.level].shape }}</span>
-              {{ event.message }}
-            </span>
-          </li>
-        </ul>
-        <p v-else class="empty">아직 기록된 이벤트가 없습니다.</p>
-        <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>
+
+        <div v-if="filteredEvents.length" class="events-scroll">
+          <table class="events">
+            <thead>
+              <tr>
+                <th class="col-time">시각</th>
+                <th class="col-level">단계</th>
+                <th class="col-category">종류</th>
+                <th>내용</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- 줄을 누르면 아래 오늘 그래프에 그 시각을 표시 (다시 누르면 지움) -->
+              <tr
+                v-for="event in filteredEvents"
+                :key="event.id"
+                :class="{ selected: event.id === selectedEventId }"
+                tabindex="0"
+                :aria-pressed="event.id === selectedEventId"
+                @click="toggleEvent(event)"
+                @keydown.enter.prevent="toggleEvent(event)"
+                @keydown.space.prevent="toggleEvent(event)"
+              >
+                <td class="num event-time">{{ formatHourMinute(event.occurredAt) }}</td>
+                <td class="event-level" :class="EVENT_INFO[event.level].className">
+                  <span aria-hidden="true">{{ EVENT_INFO[event.level].shape }}</span>
+                  {{ EVENT_INFO[event.level].label }}
+                </td>
+                <td class="event-category">{{ EVENT_CATEGORIES[event.category] ?? '—' }}</td>
+                <td class="event-text">{{ event.message }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else class="empty events-empty">
+          {{
+            realtimeStore.events.length
+              ? '조건에 맞는 이벤트가 없습니다.'
+              : '아직 기록된 이벤트가 없습니다.'
+          }}
+        </p>
+
+        <div class="events-foot">
+          <p v-if="selectedEvent" class="select-hint">
+            <span class="num">{{ formatHourMinute(selectedEvent.occurredAt) }}</span>
+            {{ selectedSlot ? '시점을 그래프에 표시 중' : '이벤트는 오늘 그래프 밖입니다' }}
+            <button class="clear" @click="selectedEventId = null">지우기</button>
+          </p>
+          <p v-else class="select-hint">줄을 누르면 왼쪽 그래프에 그 시점을 표시합니다.</p>
+          <RouterLink to="/logs" class="more-link">추천 이력 보기</RouterLink>
+        </div>
       </section>
     </div>
   </div>
@@ -423,6 +572,42 @@ const trendCards = computed(() => [
   gap: 16px;
   min-width: 0;
 }
+/* 제목 줄의 범례 버튼 */
+.legend-buttons {
+  display: flex;
+  gap: 4px;
+}
+.legend-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.legend-button:hover {
+  border-color: var(--line-strong);
+}
+/* 끈 선: 흐리게 + 취소선 */
+.legend-button.off {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+.legend-button.off .legend-swatch {
+  opacity: 0.35;
+}
+/* 선 모양 견본: 실선은 굵은 줄, 점선은 끊긴 줄 (색은 그래프 선 색) */
+.legend-swatch {
+  width: 16px;
+  height: 0;
+  border-top: 3px solid var(--swatch);
+}
+.legend-swatch.dashed {
+  border-top-style: dashed;
+}
 .chart-empty {
   height: 170px;
 }
@@ -433,40 +618,113 @@ const trendCards = computed(() => [
   contain: size; /* 이벤트가 늘어나도 줄 높이를 밀어내지 않음 (그래프 두 개 높이에 맞춤, 넘치는 이벤트는 가려짐) */
   width: 600px;
 }
-.events {
+.event-filters {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.filter {
+  padding: 2px 6px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-size: 13px;
+  color: var(--ink);
+}
+/* 표: 칸 높이가 고정이라 넘치는 줄은 표 안에서 스크롤 */
+.events-scroll {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
 }
-.events li {
-  display: flex;
-  gap: 12px;
-  padding: 6px 0;
+.events {
+  width: 100%;
+  border-collapse: collapse;
+}
+.events th {
+  position: sticky;
+  top: 0;
+  padding: 4px 8px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line-strong);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--mute);
+  text-align: left;
+  white-space: nowrap;
+}
+.events td {
+  padding: 6px 8px;
   border-bottom: 1px solid var(--line);
+  vertical-align: top;
 }
-.events li:last-child {
-  border-bottom: 0;
+.events tbody tr {
+  cursor: pointer;
+}
+.events tbody tr:hover {
+  background: var(--bg);
+}
+/* 고른 줄: 왼쪽 굵은 줄 + 옅은 바탕 */
+.events tbody tr.selected {
+  background: var(--bg);
+  box-shadow: inset 3px 0 0 var(--ink);
+}
+.col-time,
+.col-level,
+.col-category {
+  width: 1%;
 }
 .event-time {
-  flex: none;
   font-weight: 700;
+  white-space: nowrap;
 }
-.event-text.crit {
-  color: var(--crit);
+.event-level,
+.event-category {
+  white-space: nowrap;
 }
-.event-text.warn {
-  color: var(--warn);
-}
-.event-text.ok {
-  color: var(--ok);
-}
-.event-text.info {
+.event-category {
   color: var(--ink-2);
 }
-/* 카드 맨 아래 오른쪽의 링크 */
-.more {
-  align-self: flex-end;
-  margin-top: auto;
+.event-level.crit {
+  color: var(--crit);
+}
+.event-level.warn {
+  color: var(--warn);
+}
+.event-level.ok {
+  color: var(--ok);
+}
+.event-level.info {
+  color: var(--ink-2);
+}
+.events-empty {
+  flex: 1;
+}
+.events-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+}
+.select-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--mute);
+}
+.clear {
+  padding: 1px 8px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--ink);
+}
+.events-foot .more-link {
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 /* 화면이 좁으면 오른쪽 카드 폭을 줄여 왼쪽 그래프와 게이지 자리를 남김 */

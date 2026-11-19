@@ -58,6 +58,21 @@ const windowText = computed(() => {
   return status ? `${range} / 남은 ${formatRemaining(status.remainingSeconds)}` : range
 })
 
+// ---- 남은 시간 스톱워치 아이콘 ----
+// 안쪽 부채꼴이 15분 구간 중 남은 비율만큼 차 있다가, 시간이 지나며 줄어듦
+// 남은 시간은 서버가 준 remainingSeconds를 그대로 씀 (브라우저 시계로 따로 세지 않음)
+const TIMER_R = 4.25 // 부채꼴 반지름 (아래 SVG 좌표 기준. 선 굵기 8.5와 합쳐 시계 테두리(반지름 8.5)까지 칠해짐)
+const TIMER_LENGTH = 2 * Math.PI * TIMER_R // 부채꼴을 굵은 선(stroke)으로 그릴 때 한 바퀴 길이
+const remainingRatio = computed(() => {
+  const seconds = props.status?.remainingSeconds
+  if (seconds == null) return 0
+  return Math.min(1, Math.max(0, seconds / (WINDOW_MINUTES * 60)))
+})
+// stroke-dasharray: 남은 비율만큼만 선을 그리고 나머지는 비움 → 부채꼴이 남은 시간만큼만 보임
+const timerDash = computed(
+  () => `${(remainingRatio.value * TIMER_LENGTH).toFixed(2)} ${TIMER_LENGTH.toFixed(2)}`,
+)
+
 // 구간 시작부터 지금까지 쌓인 값 (백엔드의 windowPoints, 0에서 시작해 15분 끝에 그 구간의 피크가 됨)
 const points = computed(() => props.status?.windowPoints ?? [])
 // 지금 시점의 누적값 = 마지막 점
@@ -94,11 +109,12 @@ const chartOption = computed(() => {
   const markLines = [
     {
       yAxis: target,
-      lineStyle: { color: COLORS.ink, width: 1.5, type: 'solid' },
+      // 목표 피크선: 지금까지 쌓인 값(먹색 실선)과 섞이지 않게 전용 자주색 (2026-11-18)
+      lineStyle: { color: COLORS.target, width: 1.5, type: 'solid' },
       label: {
         formatter: `목표 피크 ${formatKw(target)} kW`,
         position: 'insideStartTop',
-        color: COLORS.ink,
+        color: COLORS.target,
         fontWeight: 700,
         backgroundColor: COLORS.card,
         padding: [2, 4],
@@ -207,6 +223,30 @@ const chartOption = computed(() => {
     <div class="head">
       <h2 class="card-title">예상 피크</h2>
       <span class="range num">{{ windowText }}</span>
+      <!-- 스톱워치: 안쪽 부채꼴이 남은 시간만큼 차 있고 시간이 지나며 줄어듦 -->
+      <svg
+        v-if="status"
+        class="timer"
+        viewBox="0 0 24 24"
+        role="img"
+        :aria-label="`남은 시간 ${Math.round(remainingRatio * 100)}%`"
+      >
+        <!-- 위쪽 꼭지(버튼)와 오른쪽 위 작은 단추 -->
+        <rect class="timer-solid" x="10" y="1" width="4" height="2.5" rx="1" />
+        <line class="timer-line" x1="18.6" y1="6.4" x2="20.2" y2="4.8" />
+        <!-- 남은 시간 부채꼴: 반지름 4.25짜리 원을 굵기 8.5의 선으로 그리면 꽉 찬 원이 되고,
+             dasharray로 남은 비율만큼만 그려 부채꼴을 만듦. 12시 방향부터 시계 방향 -->
+        <circle
+          class="timer-pie"
+          cx="12"
+          cy="14"
+          :r="TIMER_R"
+          :stroke-dasharray="timerDash"
+          transform="rotate(-90 12 14)"
+        />
+        <!-- 시계 테두리: 부채꼴보다 나중에 그려 부채꼴 위에 오게 함 -->
+        <circle class="timer-line" cx="12" cy="14" r="8.5" />
+      </svg>
     </div>
 
     <div class="body">
@@ -290,6 +330,30 @@ const chartOption = computed(() => {
   margin-left: auto;
   font-size: 13px;
   color: var(--mute);
+}
+/* 스톱워치 아이콘: 테두리는 먹색, 남은 시간 부채꼴은 단계 색 */
+.timer {
+  flex: none;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+}
+.timer-line {
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.timer-solid {
+  fill: var(--ink-2);
+}
+.timer-pie {
+  fill: none;
+  stroke: var(--state);
+  stroke-width: 8.5;
+  /* 값이 바뀔 때 부채꼴이 부드럽게 줄어들게 함 */
+  transition: stroke-dasharray 1s linear;
 }
 .body {
   display: flex;

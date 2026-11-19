@@ -7,7 +7,7 @@
 -->
 <script setup>
 import { computed, ref, watch } from 'vue'
-import Chart from '@/components/Chart.vue'
+import FitChart from '@/components/FitChart.vue'
 import { useThemeStore } from '@/stores/useThemeStore'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
@@ -96,12 +96,27 @@ function load(showLoading = true) {
   analysisStore.fetchPeak(fromDate.value, toDate.value, showLoading)
 }
 
-// "피크가 높았던 구간" 표에서 누른 구간의 시작 시각 (히트맵에 그 칸을 표시)
+// "피크가 높았던 구간" 표에서 누른 줄 (히트맵에 그 칸을 표시)
+// 피크 높은 순이면 구간 시작 시각('2026-11-02T08:30:00'), 평균보다 높은 구간이면 줄 key('2026-11-02T08')
 const selectedStart = ref('')
 
 function toggleWindow(windowStart) {
   selectedStart.value = selectedStart.value === windowStart ? '' : windowStart
 }
+
+// "피크가 높았던 구간" 표의 보기 방식
+// - 'top': 피크 높은 순 (백엔드가 준 topWindows, 15분 구간)
+// - 'aboveAverage': 기간 평균보다 높은 구간 (히트맵의 시간별 피크 중 평균보다 높은 시각을, 같은 날 이어지는 시각끼리 묶음)
+// 평균 증감률이 큰 시간대, ESS를 주로 쓰는 시간, 이상치 같은 보기는 백엔드 데이터가 필요해서 나중에 추가
+const WINDOW_MODES = [
+  { value: 'top', label: '피크 높은 순' },
+  { value: 'aboveAverage', label: '평균보다 높은 구간' },
+]
+const windowMode = ref('top')
+// 보기 방식을 바꾸면 고른 줄은 풀어 둠 (두 보기의 줄 key가 다름)
+watch(windowMode, () => {
+  selectedStart.value = ''
+})
 
 // 기간이 바뀌면 고른 구간을 지우고 다시 조회
 watch([fromDate, toDate], () => {
@@ -244,8 +259,51 @@ const dailyOption = computed(() => {
 
 // ---- 피크가 몰리는 시간대 (날짜 × 시각 히트맵) ----
 // 날짜가 많아도 칸이 너무 납작해지지 않게 날짜 수에 맞춰 높이를 잡음
-// 날짜 한 줄 높이와 최소 높이 (80% 크기에 맞춘 값)
-const heatHeight = computed(() => Math.max(192, peak.value.dailyPeaks.length * 10.4 + 48))
+// 표 높이를 넘는 피크 구간은 표 내부에서 스크롤해 모두 확인함
+const shownWindows = computed(() => analysisStore.peakWindows)
+
+// ---- 평균보다 높은 구간 (표시용 계산: 백엔드가 준 히트맵 값의 평균과 비교해 거르기만 함) ----
+const heatCells = computed(() => peak.value?.heatmap ?? [])
+// 기간 평균: 히트맵 칸(날짜 × 시각) 피크의 평균
+const heatAverageKw = computed(() =>
+  heatCells.value.length
+    ? heatCells.value.reduce((sum, item) => sum + item.peakKw, 0) / heatCells.value.length
+    : null,
+)
+// 평균보다 높은 시각을 날짜별로 모아, 이어지는 시각(예: 8시·9시·10시)은 한 구간으로 묶음
+// 한 줄 모양: { key, date, startHour, endHour, peakKw(구간 안 최대), abovePercent(최대 피크가 평균보다 몇 % 높은지) }
+// 순서: 평균보다 많이 높은 구간부터
+const aboveAverageRanges = computed(() => {
+  const average = heatAverageKw.value
+  if (average === null) return []
+  const cells = heatCells.value
+    .filter((item) => item.peakKw > average)
+    .sort((a, b) => (a.date === b.date ? a.hour - b.hour : a.date < b.date ? -1 : 1))
+  const ranges = []
+  for (const cell of cells) {
+    const last = ranges[ranges.length - 1]
+    if (last && last.date === cell.date && last.endHour === cell.hour - 1) {
+      last.endHour = cell.hour
+      last.peakKw = Math.max(last.peakKw, cell.peakKw)
+    } else {
+      ranges.push({
+        date: cell.date,
+        startHour: cell.hour,
+        endHour: cell.hour,
+        peakKw: cell.peakKw,
+      })
+    }
+  }
+  return ranges
+    .map((range) => ({
+      ...range,
+      key: `${range.date}T${String(range.startHour).padStart(2, '0')}`,
+      abovePercent: ((range.peakKw - average) / average) * 100,
+    }))
+    .sort((a, b) => b.peakKw - a.peakKw)
+})
+// '8시 ~ 11시' 처럼 구간을 글자로 (끝 시각은 마지막 칸이 끝나는 시각)
+const hourRangeText = (range) => `${range.startHour}시~${range.endHour + 1}시`
 
 const heatOption = computed(() => {
   const target = targetKw.value
@@ -256,8 +314,28 @@ const heatOption = computed(() => {
   // 예: { x0: 8, x1: 8, y0: 1, y1: 1, lineWidth: 3, text: '11-02 08:30 · 1,841 kW', textAtTop: true }
   const outlines = []
 
-  // 표에서 누른 구간 한 칸 (그 날 그 시각)
-  if (selectedStart.value) {
+  // 평균보다 높은 구간 보기에서 누른 줄: 그 날의 이어진 시각 전체를 감쌈
+  const pickedRange =
+    windowMode.value === 'aboveAverage'
+      ? aboveAverageRanges.value.find((item) => item.key === selectedStart.value)
+      : null
+  if (pickedRange) {
+    const row = dates.indexOf(pickedRange.date)
+    if (row >= 0) {
+      outlines.push({
+        x0: pickedRange.startHour,
+        x1: pickedRange.endHour,
+        y0: row,
+        y1: row,
+        lineWidth: 3,
+        text: `${dayLabel(pickedRange.date)} ${hourRangeText(pickedRange)} · 최대 ${formatKw(pickedRange.peakKw)} kW`,
+        textAtTop: true,
+      })
+    }
+  }
+
+  // 피크 높은 순 보기에서 누른 구간 한 칸 (그 날 그 시각)
+  if (selectedStart.value && windowMode.value === 'top') {
     const hour = Number(selectedStart.value.slice(11, 13))
     const row = dates.indexOf(selectedStart.value.slice(0, 10))
     const picked = analysisStore.peakWindows.find(
@@ -318,7 +396,8 @@ const heatOption = computed(() => {
   return {
     animation: false,
     textStyle: { fontSize: 10 }, // 그래프 글자도 80% 크기로 (기본 12px)
-    grid: { left: 44, right: 12, top: 24, bottom: 18 },
+    // top: 위쪽 색 단계 버튼(누르면 그 단계 칸을 숨기거나 보임)과 그래프가 붙지 않게 띄움
+    grid: { left: 44, right: 12, top: 40, bottom: 18 },
     tooltip: {
       ...tooltipColors(),
       formatter: (params) =>
@@ -488,15 +567,15 @@ const heatOption = computed(() => {
         </div>
       </dl>
 
-      <!-- 일별 최대 피크와 저감량 -->
-      <section class="card">
+      <!-- 일별 최대 피크와 저감량 (남은 높이의 2/5) -->
+      <section class="card daily">
         <div class="card-head">
           <h2 class="card-title">일별 최대 피크와 저감량</h2>
           <span class="note">
             단위 kW · 빨강은 목표 초과 · 세로축은 {{ formatKw(peakAxisMin) }}부터
           </span>
         </div>
-        <Chart :option="dailyOption" :height="184" />
+        <FitChart :option="dailyOption" :min-height="90" />
       </section>
 
       <div class="bottom">
@@ -506,14 +585,9 @@ const heatOption = computed(() => {
             <h2 class="card-title">피크가 몰리는 시간대</h2>
             <span class="note"> 진할수록 높음 · 굵은 테두리 = 표에서 누른 구간 </span>
           </div>
-          <!-- key: 날짜 수가 바뀌면 그래프 높이도 바뀌므로 새로 만듦 -->
+          <!-- 남은 높이를 채움 (날짜가 많으면 한 줄 높이가 줄어듦) -->
           <!-- 목표 값이 없으면 색 단계(목표 대비 비율)를 나눌 수 없어서 그리지 않음 -->
-          <Chart
-            v-if="targetKw !== null"
-            :key="heatHeight"
-            :option="heatOption"
-            :height="heatHeight"
-          />
+          <FitChart v-if="targetKw !== null" :option="heatOption" :min-height="70" />
           <p v-else class="windows-empty">목표 피크 값이 없어 색 단계를 나눌 수 없습니다.</p>
         </section>
 
@@ -521,54 +595,124 @@ const heatOption = computed(() => {
         <section class="card top">
           <div class="card-head">
             <h2 class="card-title">피크가 높았던 구간</h2>
-            <span class="note">누르면 히트맵에 표시</span>
-          </div>
-          <table class="table">
-            <thead>
-              <tr>
-                <th class="rank-col">순위</th>
-                <th>대상 시간</th>
-                <th class="right-text">피크</th>
-                <th>그때의 추천 처리</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="(item, index) in analysisStore.peakWindows"
-                :key="item.windowStart"
-                class="window-row"
-                :class="{ active: selectedStart === item.windowStart }"
-                @click="toggleWindow(item.windowStart)"
+            <!-- 보기 방식 선택 -->
+            <div class="presets window-modes" role="group" aria-label="구간 보기 방식">
+              <button
+                v-for="mode in WINDOW_MODES"
+                :key="mode.value"
+                :class="{ active: windowMode === mode.value }"
+                :aria-pressed="windowMode === mode.value"
+                @click="windowMode = mode.value"
               >
-                <td class="rank-col num">{{ index + 1 }}</td>
-                <td class="num">
-                  <!-- 키보드로도 고를 수 있게 버튼으로 둠 (줄 어디를 눌러도 같은 동작) -->
-                  <button
-                    class="window-button"
-                    :aria-pressed="selectedStart === item.windowStart"
-                    @click.stop="toggleWindow(item.windowStart)"
-                  >
-                    {{ shortTime(item.windowStart) }}~{{ formatHourMinute(item.windowEnd) }}
-                  </button>
-                </td>
-                <td class="right-text num">
-                  <strong :class="{ over: isOverTarget(item.peakKw) }">
-                    {{ formatKw(item.peakKw) }} kW
-                  </strong>
-                </td>
-                <td>
-                  <span v-if="item.status" aria-hidden="true">{{
-                    STATUS_SHAPES[item.status]
-                  }}</span>
-                  {{ windowNote(item) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-if="!analysisStore.peakWindows.length" class="windows-empty">
+                {{ mode.label }}
+              </button>
+            </div>
+          </div>
+          <p class="mode-note">
+            <template v-if="windowMode === 'top'"
+              >15분 구간 피크가 높은 순 · 누르면 히트맵에 표시</template
+            >
+            <template v-else>
+              기간 평균 <span class="num">{{ formatKw(heatAverageKw) }}</span> kW보다 높은 시각
+              (이어진 시각은 한 구간) · 누르면 히트맵에 표시
+            </template>
+          </p>
+          <!-- 표 높이를 넘는 줄은 표 안에서 스크롤해 확인함 -->
+          <!-- 피크 높은 순 -->
+          <div v-if="windowMode === 'top'" class="table-box">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th class="rank-col">순위</th>
+                  <th>대상 시간</th>
+                  <th class="right-text">피크</th>
+                  <th>그때의 추천 처리</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="(item, index) in shownWindows"
+                  :key="item.windowStart"
+                  class="window-row"
+                  :class="{ active: selectedStart === item.windowStart }"
+                  @click="toggleWindow(item.windowStart)"
+                >
+                  <td class="rank-col num">{{ index + 1 }}</td>
+                  <td class="num">
+                    <!-- 키보드로도 고를 수 있게 버튼으로 둠 (줄 어디를 눌러도 같은 동작) -->
+                    <button
+                      class="window-button"
+                      :aria-pressed="selectedStart === item.windowStart"
+                      @click.stop="toggleWindow(item.windowStart)"
+                    >
+                      {{ shortTime(item.windowStart) }}~{{ formatHourMinute(item.windowEnd) }}
+                    </button>
+                  </td>
+                  <td class="right-text num">
+                    <strong :class="{ over: isOverTarget(item.peakKw) }">
+                      {{ formatKw(item.peakKw) }} kW
+                    </strong>
+                  </td>
+                  <td>
+                    <span v-if="item.status" aria-hidden="true">{{
+                      STATUS_SHAPES[item.status]
+                    }}</span>
+                    {{ windowNote(item) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- 평균보다 높은 구간 -->
+          <div v-else class="table-box">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th class="rank-col">순위</th>
+                  <th>대상 시간</th>
+                  <th class="right-text">최대 피크</th>
+                  <th class="right-text">평균 대비</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="(item, index) in aboveAverageRanges"
+                  :key="item.key"
+                  class="window-row"
+                  :class="{ active: selectedStart === item.key }"
+                  @click="toggleWindow(item.key)"
+                >
+                  <td class="rank-col num">{{ index + 1 }}</td>
+                  <td class="num">
+                    <button
+                      class="window-button"
+                      :aria-pressed="selectedStart === item.key"
+                      @click.stop="toggleWindow(item.key)"
+                    >
+                      {{ dayLabel(item.date) }} {{ hourRangeText(item) }}
+                    </button>
+                  </td>
+                  <td class="right-text num">
+                    <strong :class="{ over: isOverTarget(item.peakKw) }">
+                      {{ formatKw(item.peakKw) }} kW
+                    </strong>
+                  </td>
+                  <td class="right-text num">+{{ formatOneDecimal(item.abovePercent) }}%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p
+            v-if="
+              windowMode === 'top' ? !analysisStore.peakWindows.length : !aboveAverageRanges.length
+            "
+            class="windows-empty"
+          >
             이 기간에는 구간 기록이 없습니다.
           </p>
-          <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>
+          <div class="top-foot">
+            <RouterLink to="/logs" class="more more-link">추천 이력 보기</RouterLink>
+          </div>
         </section>
       </div>
     </div>
@@ -580,8 +724,9 @@ const heatOption = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: 100%;
+  height: 100%; /* 화면 높이에 고정: 아래 카드들이 남은 높이에 맞춰 줄어들어 스크롤이 생기지 않음 */
   padding: 20px;
+  overflow: hidden;
 }
 .crumb-note {
   margin-left: auto;
@@ -644,6 +789,7 @@ const heatOption = computed(() => {
   display: flex;
   flex: 1;
   flex-direction: column;
+  min-height: 0;
   gap: 13px;
   font-size: 11px; /* 기본 14px의 80% */
 }
@@ -709,30 +855,77 @@ const heatOption = computed(() => {
 }
 
 /* 아래 줄: 히트맵 + 구간 순위 */
+/* 요약 숫자 아래 남은 높이를 비율로 나눔: 일별 그래프 2 : 아래 줄(히트맵 · 구간 표) 3
+   (화면 높이가 달라도 같은 비율로 채워 스크롤이 생기지 않음, 노트북 1536×705 기준으로 맞춤) */
+.daily {
+  display: flex;
+  flex: 2;
+  flex-direction: column;
+  min-height: 0;
+}
 .bottom {
   display: flex;
-  flex: 1;
+  flex: 3;
   gap: 13px;
+  min-height: 0;
 }
 .heat {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 .top {
   display: flex;
   flex: none;
   flex-direction: column;
   width: 520px;
+  min-height: 0;
+}
+/* 표 상자: 남는 높이를 차지하고, 모든 구간을 내부에서 스크롤함 */
+.table-box {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-color: var(--line-strong) transparent;
+}
+/* 구간 보기 방식 버튼: 카드 제목 줄에 들어가게 작게 */
+.window-modes {
+  margin-left: auto;
+}
+.window-modes button {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.mode-note {
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  color: var(--mute);
+}
+.top-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hidden-note {
+  font-size: 10px;
+  color: var(--mute);
 }
 .table {
   width: 100%;
   border-collapse: collapse;
 }
 .table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
   padding: 5px 12px 5px 0;
 }
 .table td {
-  padding: 7px 12px 7px 0;
+  padding: 5px 12px 5px 0;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
@@ -778,8 +971,7 @@ const heatOption = computed(() => {
 }
 /* 카드 맨 아래 오른쪽의 링크 */
 .more {
-  align-self: flex-end;
-  margin-top: auto;
+  margin-left: auto;
   padding-top: 8px;
 }
 

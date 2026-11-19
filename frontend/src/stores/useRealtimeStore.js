@@ -31,7 +31,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
       const [latestStatus, latestDecision, latestEvents] = await Promise.all([
         getLatestBatteryStatus(),
         getLatestBatteryDecision(),
-        getRecentEvents(10),
+        getRecentEvents(30), // 이벤트 로그 필터용으로 30건 (화면에 보이는 건 칸 높이만큼)
       ])
       status.value = latestStatus
       decision.value = latestDecision

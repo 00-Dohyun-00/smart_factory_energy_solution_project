@@ -5,32 +5,53 @@
 // - 이 파일은 batteryStatusApi.js, batteryDecisionApi.js 에서만 불러옵니다. (Store, 화면에서 직접 쓰지 않음)
 // - 이 파일은 서버 역할이라 "서버 시각"을 직접 만듭니다(아래 simNow). 화면 코드에서는 new Date()를 쓰지 않습니다.
 // - 공장 전력과 태양광은 실제 데이터(fakeEnergyData.json)에서 가져옵니다. (아래 "실제 데이터로 만드는 전력" 참고)
+// - 하루 계획은 실제 데이터 대신 AI가 예측한 공장 부하(fakeLoadForecast.json)로 세웁니다.
+//   예측 파일은 ai/forecast/train_load_forecast.py 가 만듭니다.
+// - 추천 로직(하루 계획, 지금 무엇을 추천할지, 이유 문장)은 fakeRecommendation.js에 따로 있습니다.
+//   이 파일은 데이터를 모아 그 함수에 넘기고, 결과(지금 추천, 적용 중인 출력, 이벤트)를 관리합니다.
 
 import energyData from '@/api/fakeEnergyData.json'
+import loadForecast from '@/api/fakeLoadForecast.json'
+import {
+  ADVICE_RULES,
+  START_SOC_PERCENT,
+  correctedEssKw,
+  decideAdvice,
+  explainDecision,
+  neededDischargeKw,
+  peakRiskOf,
+  planBlockEndOf,
+  planDay,
+  planInputsOf,
+  ruleDay,
+  socChangeOf,
+} from '@/api/fakeRecommendation'
 
 // 아래 기준값들은 환경 설정 화면에서 바꾸면 applySettings()가 고쳐 씁니다. 그래서 const가 아니라 let입니다.
 let TARGET_PEAK_KW = 1800 // 목표 피크
 let WARN_KW = 1746 // 주의선 (목표의 97%, 기준은 확인 필요)
 let MAX_DISCHARGE_KW = 500 // ESS 최대 방전 출력
 
-// 공장 컨셉: 전기차 열관리 부품 공장 (가상). 설비 구성과 전력 비중은 임시로 정한 값입니다.
-// share = 평소 공장 전력에서 그 설비가 차지하는 비중 (합계 1.0)
+// 공장 컨셉: 전기차 열관리 부품 공장 (가상).
+// 설비 id · 이름 · 구역 · 정격 전력은 실제 DB equipment 표와 같게 맞춤 (2026-11-18, GET /api/equipment)
+// zoneId = 화면의 구역 id (DB zone_code. 유틸리티는 DB에서 U1이지만 화면은 U로 씀)
+// share = 평소 공장 전력에서 그 설비가 차지하는 비중 (합계 1.0, 임시로 정한 값)
 const EQUIPMENTS = [
-  { id: 'Z1-FIN', name: '핀 성형기', share: 0.05 },
-  { id: 'Z1-TUBE', name: '튜브 가공기', share: 0.04 },
-  { id: 'Z1-CORE', name: '코어 조립기', share: 0.03 },
-  { id: 'Z2-FURN', name: '브레이징로', share: 0.3 },
-  { id: 'Z2-DRY', name: '탈지·건조기', share: 0.06 },
-  { id: 'Z3-INJ1', name: '사출기 1호', share: 0.1 },
-  { id: 'Z3-INJ2', name: '사출기 2호', share: 0.1 },
-  { id: 'Z3-TEMP', name: '금형 온조기', share: 0.04 },
-  { id: 'Z4-MOTOR1', name: '1번 모터', share: 0 }, // 실측 설비 (조립 라인 컨베이어)
-  { id: 'Z4-ROBOT', name: '체결 로봇', share: 0.02 },
-  { id: 'Z5-LEAK', name: '기밀 검사기', share: 0.03 },
-  { id: 'Z5-EOL', name: '성능 시험기', share: 0.05 },
-  { id: 'U-COMP', name: '공기압축기', share: 0.08 },
-  { id: 'U-CHIL', name: '냉각 칠러', share: 0.06 },
-  { id: 'U-HVAC', name: '공조·조명', share: 0.04 },
+  { id: 'HEX-01', zoneId: 'Z1', name: 'CNC 가공기 1호', ratedKw: 120, share: 0.05 },
+  { id: 'HEX-02', zoneId: 'Z1', name: 'CNC 가공기 2호', ratedKw: 120, share: 0.04 },
+  { id: 'HEX-03', zoneId: 'Z1', name: '프레스', ratedKw: 100, share: 0.03 },
+  { id: 'BRZ-01', zoneId: 'Z2', name: '브레이징로', ratedKw: 600, share: 0.3 },
+  { id: 'BRZ-02', zoneId: 'Z2', name: '탈지·건조기', ratedKw: 180, share: 0.06 },
+  { id: 'INJ-01', zoneId: 'Z3', name: '사출기 1호', ratedKw: 220, share: 0.1 },
+  { id: 'INJ-02', zoneId: 'Z3', name: '사출기 2호', ratedKw: 220, share: 0.1 },
+  { id: 'INJ-03', zoneId: 'Z3', name: '사출기 3호', ratedKw: 220, share: 0.04 },
+  { id: 'MOD-01', zoneId: 'Z4', name: '조립 라인 1', ratedKw: 40, share: 0.01 },
+  { id: 'MOD-02', zoneId: 'Z4', name: '조립 라인 2', ratedKw: 40, share: 0.01 },
+  { id: 'INS-01', zoneId: 'Z5', name: '리크 테스터', ratedKw: 120, share: 0.05 },
+  { id: 'INS-02', zoneId: 'Z5', name: '비전 검사기', ratedKw: 80, share: 0.03 },
+  { id: 'UTL-01', zoneId: 'U', name: '공기압축기', ratedKw: 200, share: 0.08 }, // 실측 설비 (DB is_virtual = false)
+  { id: 'UTL-02', zoneId: 'U', name: '냉각탑', ratedKw: 150, share: 0.06 },
+  { id: 'UTL-03', zoneId: 'U', name: '공조기', ratedKw: 120, share: 0.04 },
 ]
 
 // 실패 상황을 화면에서 확인하기 위한 장치. 주소 뒤에 붙여서 씁니다.
@@ -67,12 +88,20 @@ let appliedEssKw = 0 // 적용 중인 ESS 전력 (+방전, −충전, kW)
 
 // ---- 최근 이벤트 (모니터링 화면의 "최근 이벤트" 목록용) ----
 // level: CRITICAL(경고) | WARNING(주의) | NORMAL(정상) | INFO(그 밖의 기록)
+// category: STAGE(단계 변화) | RECOMMEND(추천) | ACTION(적용·넘김) | WINDOW(구간 종료) | BATTERY(배터리) | SETTING(설정 변경)
+//   (category는 이벤트 로그의 "종류" 칼럼·필터용으로 임시로 넣은 값. 백엔드와 확정 필요)
 const events = []
 let nextEventId = 1
 let lastPeakStatus = null // 단계가 바뀌었는지 알기 위해 직전 단계를 기억
 
-function addEvent(level, message, date = simNow()) {
-  events.unshift({ id: nextEventId++, occurredAt: toLocalDateTime(date), level, message })
+function addEvent(level, category, message, date = simNow()) {
+  events.unshift({
+    id: nextEventId++,
+    occurredAt: toLocalDateTime(date),
+    level,
+    category,
+    message,
+  })
   if (events.length > 50) events.pop()
 }
 
@@ -82,11 +111,11 @@ function seedEventsOnce(now) {
   if (eventsSeeded) return
   eventsSeeded = true
   const ago = (minutes) => new Date(now.getTime() - minutes * 60000)
-  addEvent('INFO', '계획 방전 추천을 넘김 (운영자)', ago(47))
-  addEvent('WARNING', '주의 단계 진입', ago(31))
-  addEvent('CRITICAL', '목표 초과 예상, 방전 500 kW 추천', ago(30))
-  addEvent('INFO', '방전 500 kW 적용 (운영자)', ago(29))
-  addEvent('NORMAL', '정상 단계로 돌아옴', ago(17))
+  addEvent('INFO', 'ACTION', '계획 방전 추천을 넘김 (운영자)', ago(47))
+  addEvent('WARNING', 'STAGE', '주의 단계 진입', ago(31))
+  addEvent('CRITICAL', 'RECOMMEND', '목표 초과 예상, 방전 500 kW 추천', ago(30))
+  addEvent('INFO', 'ACTION', '방전 500 kW 적용 (운영자)', ago(29))
+  addEvent('NORMAL', 'STAGE', '정상 단계로 돌아옴', ago(17))
 }
 
 // 1분 평균: 그 시각 직전 1분을 10초 간격으로 여섯 번 재서 평균 냄 (그래프가 톱니처럼 튀지 않게)
@@ -193,10 +222,22 @@ function peakDayIndexOf() {
   return peakDayIndex
 }
 
+// 그 시각이 들어 있는 15분 칸이 데이터의 몇 번째 칸인지
+function loadSlotIndexOf(time) {
+  const day = isPeakScenarioDay(time) ? peakDayIndexOf() : loadDayIndexOf(time)
+  return day * 96 + time.getHours() * 4 + Math.floor(time.getMinutes() / 15)
+}
+
 // 그 시각이 들어 있는 15분 칸의 공장 전력 (kW)
 function loadKwOfTime(time) {
-  const day = isPeakScenarioDay(time) ? peakDayIndexOf() : loadDayIndexOf(time)
-  return loadKwOfSlot(day * 96 + time.getHours() * 4 + Math.floor(time.getMinutes() / 15))
+  return loadKwOfSlot(loadSlotIndexOf(time))
+}
+
+// AI가 예측한 그 칸의 공장 전력 (kW). 실제 값과 같은 식으로 우리 공장 크기로 바꿈
+//   mean: 평균 예측 (요금 계산용) / peak: 상위 90% 예측 (방어선 판단용, 피크를 낮게 보지 않게)
+function forecastLoadKwOfTime(time, kind) {
+  const values = kind === 'peak' ? loadForecast.peakLoadKwh : loadForecast.loadKwh
+  return BASE_LOAD_KW + LOAD_SCALE * values[loadSlotIndexOf(time)] * 4
 }
 
 // 그 시각이 들어 있는 1시간 칸의 태양광 (kW)
@@ -320,6 +361,7 @@ function updateWindow(nowMs, gridWithoutEss) {
       const to = toLocalDateTime(new Date(startMs)).slice(11, 16)
       addEvent(
         endedKw > TARGET_PEAK_KW ? 'CRITICAL' : 'NORMAL',
+        'WINDOW',
         `${from}–${to} 구간 ${endedKw.toLocaleString('ko-KR')} kW로 종료`,
         new Date(startMs),
       )
@@ -349,39 +391,39 @@ function addWindowPoint(ms, gridKw) {
 }
 
 // ---- 요금 시간대 (계절별) ----
-// 시간대 구분: 한전 계절별·시간대별 요금제의 구분 (Jang 외, Sustainability 2022, 표 5)
-// 단가: 같은 논문 표 2의 고압A 선택II 값을 반올림한 임시 값. 2021년 일반용 기준이라 현재 산업용 단가는 확인 필요
+// 한전 「2026년도 8월 1일 시행 전기요금표(종합)」 p.2, 산업용전력(을) 고압A 선택Ⅱ (2026.4.16 시행 개편안)
+//   - 시간대: 경부하는 모든 계절 22~08시. 봄·여름·가을 최대부하 15~21시, 겨울 최대부하 09~12시·16~19시
+//   - 토요일: 최대부하 시간대 사용량을 중간부하로 계량 (periodsOf)
+//   - 봄·가을 토·일요일 11~14시: 전력량요금 50% 할인 (priceAt)
+//   - 공휴일 규칙(최대수요전력·사용량을 경부하로 계량)은 공휴일 목록이 필요해 아직 넣지 않음
 // 환경 설정 화면의 단가 3칸은 "지금 계절"의 단가입니다. (applySettings 참고)
 const TARIFF_LABELS = { LIGHT: '경부하', MID: '중간부하', PEAK: '최대부하' }
 const SEASON_LABELS = { SUMMER: '여름', SPRING_FALL: '봄·가을', WINTER: '겨울' }
 const SUMMER_PERIODS = [
-  { from: '00:00', to: '09:00', period: 'LIGHT' },
-  { from: '09:00', to: '10:00', period: 'MID' },
-  { from: '10:00', to: '12:00', period: 'PEAK' },
-  { from: '12:00', to: '13:00', period: 'MID' },
-  { from: '13:00', to: '17:00', period: 'PEAK' },
-  { from: '17:00', to: '23:00', period: 'MID' },
-  { from: '23:00', to: '24:00', period: 'LIGHT' },
+  { from: '00:00', to: '08:00', period: 'LIGHT' },
+  { from: '08:00', to: '15:00', period: 'MID' },
+  { from: '15:00', to: '21:00', period: 'PEAK' },
+  { from: '21:00', to: '22:00', period: 'MID' },
+  { from: '22:00', to: '24:00', period: 'LIGHT' },
 ]
 const PERIODS_BY_SEASON = {
   SUMMER: SUMMER_PERIODS,
   SPRING_FALL: SUMMER_PERIODS, // 봄·가을은 여름과 시간대 구분이 같고 단가만 다름
   WINTER: [
-    { from: '00:00', to: '09:00', period: 'LIGHT' },
-    { from: '09:00', to: '10:00', period: 'MID' },
-    { from: '10:00', to: '12:00', period: 'PEAK' },
-    { from: '12:00', to: '17:00', period: 'MID' },
-    { from: '17:00', to: '20:00', period: 'PEAK' },
-    { from: '20:00', to: '22:00', period: 'MID' },
-    { from: '22:00', to: '23:00', period: 'PEAK' },
-    { from: '23:00', to: '24:00', period: 'LIGHT' },
+    { from: '00:00', to: '08:00', period: 'LIGHT' },
+    { from: '08:00', to: '09:00', period: 'MID' },
+    { from: '09:00', to: '12:00', period: 'PEAK' },
+    { from: '12:00', to: '16:00', period: 'MID' },
+    { from: '16:00', to: '19:00', period: 'PEAK' },
+    { from: '19:00', to: '22:00', period: 'MID' },
+    { from: '22:00', to: '24:00', period: 'LIGHT' },
   ],
 }
-// 전력량요금 단가 (원/kWh)
+// 전력량요금 단가 (원/kWh), 산업용전력(을) 고압A 선택Ⅱ
 const PRICES_BY_SEASON = {
-  SUMMER: { LIGHT: 52, MID: 104, PEAK: 126 },
-  SPRING_FALL: { LIGHT: 52, MID: 60, PEAK: 71 },
-  WINTER: { LIGHT: 61, MID: 92, PEAK: 106 },
+  SUMMER: { LIGHT: 116.0, MID: 163.8, PEAK: 229.0 },
+  SPRING_FALL: { LIGHT: 116.0, MID: 133.4, PEAK: 150.9 },
+  WINTER: { LIGHT: 123.0, MID: 164.0, PEAK: 204.6 },
 }
 
 // 여름 6~8월, 봄·가을 3~5월과 9~10월, 겨울 11~2월
@@ -392,8 +434,20 @@ function seasonOf(date) {
   return 'WINTER'
 }
 
+// 그날의 시간대 구분. 토요일은 최대부하 시간대를 중간부하로 계량함
 function periodsOf(date) {
-  return PERIODS_BY_SEASON[seasonOf(date)]
+  const periods = PERIODS_BY_SEASON[seasonOf(date)]
+  if (date.getDay() !== 6) return periods
+  return periods.map((item) => (item.period === 'PEAK' ? { ...item, period: 'MID' } : item))
+}
+
+// 그 시각의 전력량요금 단가 (원/kWh). 봄·가을 토·일요일 11~14시는 50% 할인
+function priceAt(date, period) {
+  const price = PRICES_BY_SEASON[seasonOf(date)][period]
+  const weekend = date.getDay() === 0 || date.getDay() === 6
+  const hour = date.getHours()
+  if (seasonOf(date) === 'SPRING_FALL' && weekend && hour >= 11 && hour < 14) return price * 0.5
+  return price
 }
 
 // 그 시각의 요금 시간대 ('LIGHT' | 'MID' | 'PEAK')
@@ -431,104 +485,45 @@ function specTariffOf(tariff) {
   return { period, label, until, nextLabel, periods }
 }
 
-// ---- 추천 판단 흉내 ----
-// 하루 계획(planDay)을 따르되, 실제 전력이 계획과 달라 방어선을 넘을 것 같으면 그 구간만 피크 방어를 추천합니다.
-//   피크 방어 · 안전 제한 : 그 15분 구간이 끝날 때까지 유지 (방전 → 대기 → 방전 깜빡임 방지)
-//   계획 방전 · 계획 충전 · 조치 없음 : 계획에서 같은 동작이 이어지는 동안 유지 (그동안은 다시 묻지 않음)
+// ---- 추천 ----
+// 추천을 정하는 계산(하루 계획, 지금 무엇을 추천할지, 이유 문장)은 fakeRecommendation.js에 있습니다.
+// 여기서는 그 결과로 "지금 추천"을 새로 낼지 유지할지 정하고, 적용 중인 출력과 이벤트를 관리합니다.
 // 적용한 뒤에는 그 추천이 끝날 때까지 출력을 계획·필요한 양에 맞춰 조절합니다 (시뮬레이션).
-const MIN_ADVICE_KW = 10 // 이보다 작은 충·방전은 추천하지 않음 (의미 없이 버튼만 늘어남)
-const ADVICE_RULES = {
-  SAFETY: { ruleNo: 1, ruleLabel: '안전 제한' },
-  PEAK: { ruleNo: 2, ruleLabel: '피크 방어' },
-  PLAN_CHARGE: { ruleNo: 4, ruleLabel: '계획 충전' },
-  PLAN_DISCHARGE: { ruleNo: 5, ruleLabel: '계획 방전' },
-  IDLE: { ruleNo: 6, ruleLabel: '조치 없음' },
-}
 const ACTION_TEXTS = { CHARGE: '충전', DISCHARGE: '방전', IDLE: '대기' }
 
-// 이번 구간 평균이 방어선을 넘을 것 같을 때, 남은 시간 동안 얼마나 방전해야 하는지 (kW)
-// 15분 평균을 X kW 낮추려면 X × 15분만큼의 전력량을 빼야 하고, 그걸 남은 시간에 나눠 냄
-// 방어선에 딱 맞추면 예측이 조금만 틀려도 살짝 넘어서, 주의선만큼(목표 − 주의선 = 54 kW) 더 낮춤 (안전 여유)
-// 예: 방어선 1,800, 예상 1,830, 10분 남음 → (1,830 − 1,746) × 15 ÷ 10 = 126 kW
-// marginKw: 방어선보다 얼마나 낮게 맞출지. 계획이 여유를 못 둔 날은 0 (여유까지 맞추려다 배터리가 모자라지 않게)
-function neededDischargeKw(
-  predictedKw,
-  remainingMinutes,
-  lineKw = TARGET_PEAK_KW,
-  marginKw = TARGET_PEAK_KW - WARN_KW,
-) {
-  if (predictedKw <= lineKw) return 0
-  return ((predictedKw - (lineKw - marginKw)) * 15) / Math.max(remainingMinutes, 0.5)
-}
-
-// 숫자의 부호: 충·방전이라고 볼 만큼 크면 +1(방전) / −1(충전), 아니면 0(대기)
-function directionOf(essKw) {
-  if (essKw >= MIN_ADVICE_KW) return 1
-  if (essKw <= -MIN_ADVICE_KW) return -1
-  return 0
-}
-
-// 계획에서 지금 칸과 같은 동작(방전·충전·대기)이 이어지다 끝나는 시각
-// 방전·충전 사이에 잠깐(1시간 미만) 쉬는 칸은 같은 동작으로 봄 (계획이 "충전 → 쉼 → 충전"으로
-// 잘게 오가도 운영자에게 매번 다시 묻지 않으려는 것). 반대 동작이 나오거나 1시간 넘게 쉬면 끝
-const PLAN_GAP_SLOTS = 4
-
-function planBlockEndOf(plan) {
-  const direction = directionOf(plan.essKw[0])
-  let count = 1
-  let idleRun = 0
-  while (count < plan.essKw.length) {
-    const next = directionOf(plan.essKw[count])
-    if (direction === 0 && next !== 0) break
-    if (direction !== 0 && next === -direction) break
-    idleRun = next === 0 ? idleRun + 1 : 0
-    if (direction !== 0 && idleRun >= PLAN_GAP_SLOTS) {
-      count -= idleRun - 1 // 쉬는 칸이 시작된 곳에서 끝냄
-      break
-    }
-    count++
+// 추천 계산에 넘기는 환경 설정 값 (환경 설정 화면에서 바꾸면 applySettings가 고친 값)
+function essLimits() {
+  return {
+    targetPeakKw: TARGET_PEAK_KW,
+    warnKw: WARN_KW,
+    maxPowerKw: MAX_DISCHARGE_KW,
+    capacityKwh: ESS_CAPACITY_KWH,
+    socLowPercent: SOC_LOW_LIMIT,
+    socHighPercent: SOC_HIGH_LIMIT,
+    efficiencyPercent: settings.efficiencyPercent,
   }
-  const end = new Date(`${plan.dateKey}T00:00:00`)
-  end.setMinutes((plan.startSlot + count) * 15)
-  return end
+}
+
+// 추천 이유 문장에 쓰는 지금 상황 (피크 위험, 요금)
+function explainContextOf(now, limits) {
+  const startSlot = now.getHours() * 4 + Math.floor(now.getMinutes() / 15)
+  const tariff = tariffAt(now)
+  return {
+    risk: peakRiskOf(planInputsOf(dayInputs(dateKeyOf(now)), startSlot), startSlot, limits),
+    tariffLabel: tariff.label,
+    price: priceAt(now, tariff.period),
+    peakPrice: PRICES_BY_SEASON[seasonOf(now)].PEAK,
+  }
 }
 
 // info: { soFarKw: 이번 구간에 지금까지 쌓인 평균, recentWithoutEss: 최근 4분 평균(ESS 없이),
 //         remainingMinutes: 구간 남은 분, socPercent: 지금 잔량 }
 function updateDecision(now, info) {
-  const { soFarKw, recentWithoutEss, remainingMinutes, socPercent } = info
+  const { socPercent } = info
+  const limits = essLimits()
   const plan = livePlanOf(now, socPercent)
   const planKw = plan.essKw[0] // 계획의 지금 칸 출력
-  const lineKw = plan.lineKw
-  const efficiency = settings.efficiencyPercent / 100
-
-  // 남은 구간 시간 동안 잔량으로 낼 수 있는 한계
-  const restHours = Math.max(remainingMinutes, 0.5) / 60
-  const usableKwh = Math.max(0, ((socPercent - SOC_LOW_LIMIT) / 100) * ESS_CAPACITY_KWH)
-  const emptyKwh = Math.max(0, ((SOC_HIGH_LIMIT - socPercent) / 100) * ESS_CAPACITY_KWH)
-  const dischargeLimitKw = Math.min(MAX_DISCHARGE_KW, usableKwh / restHours)
-  const chargeLimitKw = Math.min(MAX_DISCHARGE_KW, emptyKwh / efficiency / restHours)
-
-  // ESS를 essKw로 돌리면 이번 구간 평균이 얼마가 될지
-  const predictedOf = (essKw) => soFarKw + ((recentWithoutEss - essKw) * remainingMinutes) / 15
-  // 계획대로(충전은 빼고) 해도 방어선을 넘으면, 넘는 만큼 더 방전
-  const baseKw = Math.max(planKw, 0)
-  const needKw = neededDischargeKw(predictedOf(baseKw), remainingMinutes, lineKw, plan.marginKw)
-  let wantKw = needKw > 0 ? baseKw + needKw : planKw
-  if (wantKw < 0) {
-    // 충전 때문에 방어선 쪽으로 너무 올라가지 않게 충전을 줄임
-    const aimKw = lineKw - plan.marginKw
-    const roomKw = ((aimKw - predictedOf(0)) * 15) / Math.max(remainingMinutes, 0.5)
-    wantKw = -Math.min(-wantKw, Math.max(0, roomKw))
-  }
-  wantKw = Math.round(Math.max(-chargeLimitKw, Math.min(dischargeLimitKw, wantKw)))
-
-  let kind = 'IDLE'
-  if (needKw >= MIN_ADVICE_KW) kind = dischargeLimitKw >= MIN_ADVICE_KW ? 'PEAK' : 'SAFETY'
-  else if (directionOf(wantKw) === 1) kind = 'PLAN_DISCHARGE'
-  else if (directionOf(wantKw) === -1) kind = 'PLAN_CHARGE'
-  const action =
-    { PEAK: 'DISCHARGE', PLAN_DISCHARGE: 'DISCHARGE', PLAN_CHARGE: 'CHARGE' }[kind] ?? 'IDLE'
+  const { kind, action, wantKw, predictedOf } = decideAdvice(plan, info, limits)
 
   // 이 추천이 끝나는 시각: 피크 방어·안전 제한은 이번 구간 끝, 나머지는 계획에서 같은 동작이 끝날 때
   const windowStartMs = windowStartOf(now.getTime())
@@ -551,29 +546,40 @@ function updateDecision(now, info) {
   // 계획 충·방전 중간에 잠깐 쉬는 칸일 때 (그동안 출력은 0)
   const planKinds = ['PLAN_CHARGE', 'PLAN_DISCHARGE']
   const shortGap = kind === 'IDLE' && planKinds.includes(current?.kind)
+  // 이유 문장과 판단 근거는 매번(5초마다) 새로 계산함. 유지 중인 추천도 지금 상황에 맞게 고쳐 둠
+  // asIsKw는 지금 적용 중인 출력(appliedEssKw)을 반영한 값 = 예상 피크 카드와 같은 계산
+  const explain = (shownKind, shownKw, applied) => {
+    const sign = { PEAK: 1, PLAN_DISCHARGE: 1, PLAN_CHARGE: -1 }[shownKind] ?? 0
+    const values = {
+      asIsKw: predictedOf(appliedEssKw),
+      afterKw: predictedOf(sign * shownKw),
+      applied,
+      socPercent,
+    }
+    return explainDecision(shownKind, values, explainContextOf(now, limits), limits)
+  }
+
   if (active && (current.kind === kind || current.kind === 'PEAK' || shortGap)) {
     if (current.status === 'RECOMMENDED' && current.action === action && action !== 'IDLE') {
       current.powerKw = Math.abs(wantKw) // 아직 답하지 않았으면 지금 필요한 양으로 숫자를 고쳐 둠
     }
     if (current.kind === kind && kind !== 'PEAK' && kind !== 'SAFETY') current.windowEnd = endText
     appliedEssKw = followKw(current)
+    // 적용 중이면 카드에 지금 실제로 내는 출력을 보여 줌 (적용한 순간의 숫자에 멈춰 있지 않게)
+    if (current.status === 'APPLIED' || current.status === 'AUTO') {
+      current.powerKw = Math.round(Math.abs(appliedEssKw))
+    }
+    const applied = current.status === 'APPLIED' || current.status === 'AUTO'
+    Object.assign(current, explain(current.kind, current.powerKw, applied))
     return
   }
 
   // 새 추천
-  const tariff = tariffAt(now)
-  const price = PRICES_BY_SEASON[seasonOf(now)][tariff.period]
   const untilText = endText.slice(11, 16)
   const powerKw = Math.abs(wantKw)
-  const reasons = {
-    PEAK: `이번 15분 구간 예상 피크가 방어선(${lineKw.toLocaleString('ko-KR')} kW)을 넘을 것으로 보여, 남은 ${Math.ceil(remainingMinutes)}분 동안 ${powerKw.toLocaleString('ko-KR')} kW만 방전하면 안으로 들어옵니다.`,
-    SAFETY: `방어선을 넘을 것으로 보이지만, 배터리 잔량이 하한(${SOC_LOW_LIMIT}%)에 닿아 방전할 수 없습니다.`,
-    PLAN_DISCHARGE: `하루 계획에 따라 ${untilText}까지 방전합니다. 지금은 ${tariff.label}(${price}원/kWh)이라 배터리 전기를 쓰는 편이 싸고, 뒤에 올 피크에 쓸 잔량은 계획에 남겨 두었습니다.`,
-    PLAN_CHARGE: `하루 계획에 따라 ${untilText}까지 충전합니다. 지금(${tariff.label}, ${price}원/kWh) 채워 두었다가 뒤에 올 피크와 비싼 시간대에 씁니다.`,
-    IDLE: `방어선 안으로 들어올 것으로 보이고, 하루 계획상 ${untilText}까지는 충·방전해도 이득이 없습니다.`,
-  }
   // 계획 방전을 적용해 둔 채 피크 방어가 새로 나오면, 답하기 전까지는 계획 방전만큼은 계속함
   const keepKw = current && action === 'DISCHARGE' && appliedEssKw > 0 ? Math.max(0, planKw) : 0
+  appliedEssKw = keepKw
 
   currentDecision = {
     id: nextDecisionId++,
@@ -590,34 +596,17 @@ function updateDecision(now, info) {
     powerKw: action === 'IDLE' ? 0 : powerKw,
     durationMinutes:
       action === 'IDLE' ? null : Math.ceil((new Date(endText) - now.getTime()) / 60000),
-    reason: reasons[kind],
-    usedValues: [
-      { label: '예상 피크', value: Math.round(predictedOf(0)), unit: 'kW' },
-      { label: '방어선', value: lineKw, unit: 'kW' },
-      { label: '계획 출력', value: Math.round(planKw) || 0, unit: 'kW' }, // || 0: -0이 '-0.0'으로 보이지 않게
-      { label: '추가 방전', value: Math.round(needKw), unit: 'kW' },
-      { label: '남은 시간', value: Math.ceil(remainingMinutes), unit: '분' },
-      { label: 'SOC', value: round1(socPercent), unit: '%' },
-      { label: '요금 시간대', value: tariff.label, unit: '' },
-      { label: '최대 출력', value: MAX_DISCHARGE_KW, unit: 'kW' },
-      {
-        label: '배터리실 온도',
-        value: round1(24 + Math.sin(now.getTime() / 1000 / 200)),
-        unit: '℃',
-      },
-      { label: '날씨', value: weatherOf(now), unit: '' },
-      { label: '기온', value: Math.round(outsideTempAt(now)), unit: '℃' },
-    ],
+    ...explain(kind, powerKw, false),
     status: 'RECOMMENDED',
     appliedBy: null,
     appliedAt: null,
   }
-  appliedEssKw = keepKw
   // 운영 이력 화면에 보이도록 기록 (대기 추천은 너무 많아져서 뺌)
   if (action === 'IDLE') return
   sessionDecisions.push(currentDecision)
   addEvent(
     kind === 'PEAK' ? 'CRITICAL' : 'INFO',
+    'RECOMMEND',
     kind === 'PEAK'
       ? `방어선 초과 예상, 방전 ${powerKw} kW 추천`
       : `${ADVICE_RULES[kind].ruleLabel} ${powerKw} kW 추천 (${untilText}까지)`,
@@ -629,7 +618,7 @@ function updateDecision(now, info) {
     currentDecision.appliedBy = '자동 모드' // 명세 v0.2 값. 화면이 "(시뮬레이션)"을 붙여 보여 줌
     currentDecision.appliedAt = toLocalDateTime(now)
     appliedEssKw = followKw(currentDecision)
-    addEvent('INFO', `${ACTION_TEXTS[action]} ${powerKw} kW 자동 적용 (시뮬레이션)`, now)
+    addEvent('INFO', 'ACTION', `${ACTION_TEXTS[action]} ${powerKw} kW 자동 적용 (시뮬레이션)`, now)
   }
 }
 
@@ -830,163 +819,29 @@ export async function fakeGetDecisions(from, to) {
 function equipmentsAt(time) {
   const seconds = time.getTime() / 1000
   const baseKw = baseLoadAt(time)
-  const motorKw = 2.2 + 0.3 * Math.sin(seconds / 5) // 1번 모터만 실측이라고 가정
   const extraKw = {
-    'Z2-FURN': furnaceSwingAt(seconds),
-    'Z3-INJ1': injectionSwingAt(seconds) * 0.6,
-    'Z3-INJ2': injectionSwingAt(seconds) * 0.4,
-    'Z4-MOTOR1': motorKw,
-    'U-HVAC': -motorKw,
+    'BRZ-01': furnaceSwingAt(seconds),
+    'INJ-01': injectionSwingAt(seconds) * 0.6,
+    'INJ-02': injectionSwingAt(seconds) * 0.4,
   }
   return EQUIPMENTS.map((item) => ({
     id: item.id,
+    zoneId: item.zoneId,
     name: item.name,
+    ratedKw: item.ratedKw,
     loadKw: round1(baseKw * item.share + (extraKw[item.id] ?? 0)),
-    origin: item.id === 'Z4-MOTOR1' ? 'MEASURED' : 'SIMULATED',
+    origin: item.id === 'UTL-01' ? 'MEASURED' : 'SIMULATED',
     // 설비 상태. 브레이징로는 전력이 크게 오를 때 "가열 중"으로 표시 (필드는 확인 필요)
-    state: item.id === 'Z2-FURN' && furnaceSwingAt(seconds) > 100 ? 'HEATING' : 'RUNNING',
+    state: item.id === 'BRZ-01' && furnaceSwingAt(seconds) > 100 ? 'HEATING' : 'RUNNING',
   }))
-}
-
-// ---- 하루 계획 (Jang 외, Sustainability 2022 논문의 방식을 단순하게 옮긴 것) ----
-// 하루의 15분 칸마다 충전·방전·대기를 정해서, 아래 비용의 합이 가장 작은 계획을 찾습니다.
-//   비용 = 전력량요금 (한전에서 산 전기 × 그 시각 단가) + 배터리 마모 비용 (방전한 kWh × 마모 단가)
-//   지킬 것 = 모든 칸에서 한전 구매 ≤ 방어선, 잔량은 하한~상한, 충·방전은 최대 출력까지
-// 1) 피크 모드: 방어선은 목표 피크. 배터리로 그 선을 다 지킬 수 없는 날이면 지킬 수 있는 가장 낮은 선으로 올림
-//    (못 지킬 선을 고집하다 배터리를 일찍 다 쓰면, 더 큰 피크를 그대로 맞기 때문)
-// 2) 요금 모드: 방어선을 지키는 안에서, 남는 배터리로 싼 시간에 충전하고 비싼 시간에 방전
-// 푸는 방법은 표 채우기(동적 계획법)입니다. 가로 = 칸(시각), 세로 = 잔량(1% 단위).
-// 마지막 칸부터 거꾸로 "이 시각에 이 잔량이면 남은 하루를 가장 싸게 보내는 비용"을 채우고,
-// 다 채우면 지금 잔량에서 시작해 가장 싼 길을 따라가기만 하면 됩니다.
-const WEAR_COST_WON_PER_KWH = 20 // 1 kWh 방전할 때마다 배터리가 닳는 값 (임시값, 팀 확인 필요)
-
-// 한 칸에서 잔량을 바꿔 볼 후보 (%). 비용이 같으면 앞쪽(덜 움직이는 쪽)을 고르게 0부터 놓음
-function socChangeCandidates(maxDown, maxUp) {
-  const list = [0]
-  for (let step = 1; step <= Math.max(maxDown, maxUp); step++) {
-    if (step <= maxDown) list.push(-step)
-    if (step <= maxUp) list.push(step)
-  }
-  return list
-}
-
-// inputs: [{ netKw, price }] (칸마다 ESS 없이 사야 하는 전력과 단가), startSoc: 첫 칸 시작 잔량 (%)
-// 돌려주는 값: { lineKw: 방어선, marginKw: 방어선 아래로 둔 여유, essKw: [칸마다 ESS 전력 (+방전, −충전)] }
-function planDay(inputs, startSoc) {
-  const efficiency = settings.efficiencyPercent / 100
-  const kwhPerPercent = ESS_CAPACITY_KWH / 100
-  const low = Math.ceil(SOC_LOW_LIMIT)
-  const states = Math.floor(SOC_HIGH_LIMIT) - low + 1
-  const start = Math.min(states - 1, Math.max(0, Math.round(startSoc) - low))
-  // 한 칸(15분)에 잔량이 줄거나 늘 수 있는 최대 (%)
-  const maxDown = Math.floor((MAX_DISCHARGE_KW * 0.25) / kwhPerPercent)
-  const maxUp = Math.floor((MAX_DISCHARGE_KW * 0.25 * efficiency) / kwhPerPercent)
-  const changes = socChangeCandidates(maxDown, maxUp)
-  // 잔량 변화(%) → ESS 전력 (kW). 충전은 손실이 있어 잔량보다 더 많이 사야 함
-  const essKwOf = (change) =>
-    change < 0 ? (-change * kwhPerPercent) / 0.25 : -(change * kwhPerPercent) / efficiency / 0.25
-  // 하루 끝 잔량의 값: 모자란 만큼은 내일 경부하에 다시 채워야 하므로 그 돈으로 셈
-  const cheapest = Math.min(...inputs.map((item) => item.price))
-  const endCost = (state) =>
-    ((START_SOC_PERCENT - (low + state)) * kwhPerPercent * cheapest) / efficiency
-
-  // 방어선 lineKw를 지키는 가장 싼 계획. 지킬 수 없으면 null
-  const solve = (lineKw) => {
-    let after = Array.from({ length: states }, (_, state) => endCost(state))
-    const picks = []
-    for (let index = inputs.length - 1; index >= 0; index--) {
-      const { netKw, price } = inputs[index]
-      const best = new Array(states).fill(Infinity)
-      const pick = new Array(states).fill(0)
-      for (let state = 0; state < states; state++) {
-        for (const change of changes) {
-          const next = state + change
-          if (next < 0 || next >= states || after[next] === Infinity) continue
-          const essKw = essKwOf(change)
-          const gridKw = netKw - essKw
-          if (gridKw > lineKw || gridKw < 0) continue
-          const wear = essKw > 0 ? essKw * 0.25 * WEAR_COST_WON_PER_KWH : 0
-          const cost = gridKw * 0.25 * price + wear + after[next]
-          if (cost < best[state]) {
-            best[state] = cost
-            pick[state] = change
-          }
-        }
-      }
-      picks[index] = pick
-      after = best
-    }
-    if (after[start] === Infinity) return null
-    // 앞에서부터 고른 길을 따라가며 칸마다 ESS 전력을 꺼냄
-    const essKw = []
-    let state = start
-    for (let index = 0; index < inputs.length; index++) {
-      essKw.push(essKwOf(picks[index][state]))
-      state += picks[index][state]
-    }
-    return essKw
-  }
-
-  // 계획은 방어선보다 조금 낮게 잡음 (여유): 실제 전력은 계획과 조금씩 달라서, 방어선에 딱 맞춘 계획이면
-  // 살짝 넘는 구간이 생김. 주의선만큼(54 kW) → 20 kW → 0 순서로, 배터리가 버티는 가장 큰 여유를 고름
-  // (1년 중 가장 빠듯한 날도 20 kW 여유면 실시간에서 한 구간도 넘지 않았음)
-  let lineKw = TARGET_PEAK_KW
-  let usedMarginKw = 0
-  let essKw = null
-  for (const marginKw of [TARGET_PEAK_KW - WARN_KW, 20, 0]) {
-    essKw = solve(lineKw - marginKw)
-    usedMarginKw = marginKw
-    if (essKw) break
-  }
-  // 피크 모드: 목표 피크를 못 지키면, 지킬 수 있는 가장 낮은 선을 5 kW 차이까지 반씩 좁혀 찾음
-  if (!essKw) {
-    let canKeep = Math.ceil(Math.max(...inputs.map((item) => item.netKw))) // ESS 없이도 지켜지는 선
-    let cannotKeep = TARGET_PEAK_KW
-    while (canKeep - cannotKeep > 5) {
-      const middle = Math.round((canKeep + cannotKeep) / 2)
-      if (solve(middle)) canKeep = middle
-      else cannotKeep = middle
-    }
-    lineKw = canKeep
-    essKw = solve(lineKw)
-  }
-  return { lineKw, marginKw: usedMarginKw, essKw }
-}
-
-// 2단계 규칙 (비교용): 목표를 넘으면 넘는 만큼만 방전(최대 출력까지), 경부하에는 충전
-const NIGHT_CHARGE_KW = 250 // 경부하 시간대 충전 전력
-
-function ruleDay(inputs, startSoc) {
-  const efficiency = settings.efficiencyPercent / 100
-  let socPercent = startSoc
-  const essKw = inputs.map((item) => {
-    let kw = 0
-    if (item.netKw > TARGET_PEAK_KW) {
-      const usableKwh = ((socPercent - SOC_LOW_LIMIT) / 100) * ESS_CAPACITY_KWH
-      kw = Math.max(0, Math.min(MAX_DISCHARGE_KW, item.netKw - TARGET_PEAK_KW, usableKwh / 0.25))
-    } else if (item.period === 'LIGHT') {
-      const emptyKwh = ((SOC_HIGH_LIMIT - socPercent) / 100) * ESS_CAPACITY_KWH
-      // 충전하면 한전에서 더 사므로, 충전 때문에 목표 피크를 넘지 않게 함
-      const headroomKw = TARGET_PEAK_KW - item.netKw
-      kw = -Math.max(0, Math.min(NIGHT_CHARGE_KW, headroomKw, emptyKwh / 0.25 / efficiency))
-    }
-    socPercent += socChangeOf(kw)
-    return kw
-  })
-  return { lineKw: TARGET_PEAK_KW, essKw }
-}
-
-// ESS 전력(+방전, −충전)으로 15분 동안 바뀌는 잔량 (%). 충전할 때 손실(효율)을 반영
-function socChangeOf(essKw) {
-  if (essKw > 0) return -((essKw * 0.25) / ESS_CAPACITY_KWH) * 100
-  return ((-essKw * 0.25 * settings.efficiencyPercent) / 100 / ESS_CAPACITY_KWH) * 100
 }
 
 // ---- 하루 시뮬레이션 (15분 칸 96개) ----
 // 오늘 전력 추이와 추이 분석이 같은 하루를 보도록, 하루치를 한 번 계산해 두고 같이 씁니다.
-// method: 'PLAN' = 하루를 미리 보고 세운 계획 (기본) / 'RULE' = 2단계 규칙 (비교용)
-// 지금은 하루치 데이터를 미리 안다고 보고 계획합니다 (논문과 같은 가정, 예측 오차는 없음)
-const START_SOC_PERCENT = 50 // 하루 시작(0시) 잔량
+// method: 'PLAN' = AI 부하 예측으로 세운 하루 계획 (기본) / 'RULE' = 2단계 규칙 (비교용)
+// 'PLAN'은 실시간 화면과 같은 순서로 움직입니다.
+//   1) 칸이 바뀔 때마다 지금 잔량에서 남은 하루를 예측값으로 다시 계획 (예측이 빗나간 만큼 보정)
+//   2) 실제 전력으로 방어선을 넘으면 그 칸에서 더 방전 (실시간 피크 방어)
 const dayCache = new Map() // 같은 날·같은 설정이면 다시 계산하지 않음
 
 // 계획 결과를 바꾸는 설정값을 한 줄로 (이 값이 같으면 다시 계산하지 않음)
@@ -1010,18 +865,36 @@ function simulateDay(dateKey, method = 'PLAN') {
   const cacheKey = `${dateKey}|${method}|${planSettingsKey()}`
   if (dayCache.has(cacheKey)) return dayCache.get(cacheKey)
 
-  // 1) 칸마다 ESS가 없을 때의 값
+  // 1) 칸마다 ESS가 없을 때의 값 (실제 값과 AI 예측값)
   const inputs = dayInputs(dateKey)
+  const limits = essLimits()
+  const ruleKw = method === 'RULE' ? ruleDay(inputs, START_SOC_PERCENT, limits).essKw : null
 
-  // 2) ESS 운영 정하기
-  const result =
-    method === 'RULE' ? ruleDay(inputs, START_SOC_PERCENT) : planDay(inputs, START_SOC_PERCENT)
-
-  // 3) 칸마다 결과
+  // 2) 칸마다 ESS 운영 정하고 결과 계산
+  //    다시 계획하는 때: 하루 시작, 매시 정각, 직전 칸에서 실시간 보정이 일어난 뒤 (계산 시간을 줄이려고)
   let socPercent = START_SOC_PERCENT
+  let plan = null
+  let planInputs = null
+  let planStart = 0
+  let corrected = false
   const slots = inputs.map((item, slot) => {
-    const essKw = result.essKw[slot]
-    socPercent += socChangeOf(essKw)
+    let essKw = 0
+    let lineKw = TARGET_PEAK_KW
+    if (method === 'RULE') {
+      essKw = ruleKw[slot]
+    } else {
+      if (!plan || slot % 4 === 0 || corrected) {
+        planInputs = planInputsOf(inputs, slot)
+        plan = planDay(planInputs, socPercent, limits)
+        planStart = slot
+      }
+      const planKw = plan.essKw[slot - planStart]
+      const plannedPeakNetKw = planInputs[slot - planStart].peakNetKw
+      lineKw = plan.lineKw
+      essKw = correctedEssKw(planKw, item.netKw, plan, socPercent, plannedPeakNetKw, limits)
+      corrected = Math.abs(essKw - planKw) >= 1
+    }
+    socPercent += socChangeOf(essKw, limits)
     return {
       recordedAt: toLocalDateTime(item.start),
       hour: item.start.getHours(),
@@ -1031,7 +904,7 @@ function simulateDay(dateKey, method = 'PLAN') {
       essKw,
       gridKw: item.netKw - essKw, // 방전하면 덜 사고, 충전하면 더 삼
       socPercent,
-      lineKw: result.lineKw, // 그날의 방어선
+      lineKw, // 그 칸의 방어선
       price: item.price,
       roomTempC:
         23 +
@@ -1046,8 +919,8 @@ function simulateDay(dateKey, method = 'PLAN') {
 }
 
 // ---- 실시간 계획 ----
-// 15분 구간이 바뀔 때마다 지금 잔량에서 남은 하루를 다시 계획함.
-// 실제 전력이 계획과 달라 잔량이 어긋나도 다음 구간에 바로잡음 (내비게이션의 경로 재탐색과 같음)
+// 15분 구간이 바뀔 때마다 지금 잔량에서 남은 하루를 AI 예측값으로 다시 계획함.
+// 실제 전력이 예측과 달라 잔량이 어긋나도 다음 구간에 바로잡음 (내비게이션의 경로 재탐색과 같음)
 let livePlan = null // { key, dateKey, startSlot, lineKw, essKw: [지금 칸부터 하루 끝까지] }
 
 function livePlanOf(now, socPercent) {
@@ -1055,13 +928,15 @@ function livePlanOf(now, socPercent) {
   const startSlot = now.getHours() * 4 + Math.floor(now.getMinutes() / 15)
   const key = `${dateKey}|${startSlot}|${planSettingsKey()}`
   if (!livePlan || livePlan.key !== key) {
-    const result = planDay(dayInputs(dateKey).slice(startSlot), socPercent)
+    const result = planDay(planInputsOf(dayInputs(dateKey), startSlot), socPercent, essLimits())
     livePlan = { key, dateKey, startSlot, ...result }
   }
   return livePlan
 }
 
 // 하루 96칸 각각의 ESS 없이의 값 (공장, 태양광, 한전 구매, 요금 시간대, 단가)
+// 실제 값(netKw)은 결과 계산에, AI 예측값(planNetKw, planPeakNetKw)은 계획에 씀
+// 태양광은 아직 예보(Open-Meteo)를 연결하지 않아서 실제 값을 계획에도 씀
 function dayInputs(dateKey) {
   const inputs = []
   for (let slot = 0; slot < 96; slot++) {
@@ -1083,9 +958,11 @@ function dayInputs(dateKey) {
       middle,
       loadKw,
       solarKw,
-      netKw: loadKw - solarKw, // ESS가 없을 때의 한전 구매전력
+      netKw: loadKw - solarKw, // ESS가 없을 때의 한전 구매전력 (실제)
+      planNetKw: forecastLoadKwOfTime(start, 'mean') - solarKw, // AI 예측으로 본 값 (요금 계산용)
+      planPeakNetKw: forecastLoadKwOfTime(start, 'peak') - solarKw, // 상위 90% 예측 (방어선 판단용)
       period,
-      price: PRICES_BY_SEASON[seasonOf(middle)][period],
+      price: priceAt(middle, period),
     })
   }
   return inputs
@@ -1114,20 +991,20 @@ function updateLiveSoc(now) {
   // 지난번 조회부터 지금까지 적용 중이던 출력으로 바뀐 양 (충전은 손실만큼 덜 참)
   const hours = (now.getTime() - liveSocAtMs) / 3600000
   liveSocAtMs = now.getTime()
-  liveSocPercent += socChangeOf(appliedEssKw) * (hours / 0.25)
+  liveSocPercent += socChangeOf(appliedEssKw, essLimits()) * (hours / 0.25)
   if (liveSocPercent <= SOC_LOW_LIMIT) {
     liveSocPercent = SOC_LOW_LIMIT
     if (appliedEssKw > 0) {
       // 하한에 닿으면 배터리를 보호하려고 방전을 멈춤
       appliedEssKw = 0
-      addEvent('WARNING', `잔량 하한 ${SOC_LOW_LIMIT}% 도달, 방전 멈춤`, now)
+      addEvent('WARNING', 'BATTERY', `잔량 하한 ${SOC_LOW_LIMIT}% 도달, 방전 멈춤`, now)
     }
   }
   if (liveSocPercent >= SOC_HIGH_LIMIT) {
     liveSocPercent = SOC_HIGH_LIMIT
     if (appliedEssKw < 0) {
       appliedEssKw = 0
-      addEvent('INFO', `잔량 상한 ${SOC_HIGH_LIMIT}% 도달, 충전 멈춤`, now)
+      addEvent('INFO', 'BATTERY', `잔량 상한 ${SOC_HIGH_LIMIT}% 도달, 충전 멈춤`, now)
     }
   }
 }
@@ -1168,7 +1045,6 @@ export async function fakeGetLatestStatus() {
   const gridWithoutEss = gridWithoutEssAt(now)
   updateLiveSoc(now)
   const socPercent = liveSocPercent
-  const peakRecord = await peakRecordOf(now)
 
   // 현재 15분 구간 (예: 14:00~14:15)
   const windowStart = new Date(windowStartOf(now.getTime()))
@@ -1197,14 +1073,18 @@ export async function fakeGetLatestStatus() {
   const predictedKw = demandSoFar + ((recentWithoutEss - appliedEssKw) * remainingMinutes) / 15
   const lineKw = livePlan.lineKw // 오늘 방어선 (보통 목표 피크, 못 지키는 날만 더 높음)
 
+  // 12개월 최고 피크는 성적표 계산을 기다려야 해서(await) 맨 뒤에 둠.
+  // 이 앞에서 기다리면 같은 순간에 요청한 추천 조회가 먼저 끝나 한 번 전의 추천을 받게 됨
+  const peakRecord = await peakRecordOf(now)
+
   let peakStatus = 'NORMAL'
   if (predictedKw > TARGET_PEAK_KW) peakStatus = 'CRITICAL'
   else if (predictedKw >= WARN_KW) peakStatus = 'WARNING'
 
   // 단계가 바뀌면 이벤트로 남김 (경고는 추천 이벤트와 겹치므로 주의·정상만)
   if (lastPeakStatus && lastPeakStatus !== peakStatus) {
-    if (peakStatus === 'WARNING') addEvent('WARNING', '주의 단계 진입', now)
-    if (peakStatus === 'NORMAL') addEvent('NORMAL', '정상 단계로 돌아옴', now)
+    if (peakStatus === 'WARNING') addEvent('WARNING', 'STAGE', '주의 단계 진입', now)
+    if (peakStatus === 'NORMAL') addEvent('NORMAL', 'STAGE', '정상 단계로 돌아옴', now)
   }
   lastPeakStatus = peakStatus
 
@@ -1291,11 +1171,12 @@ export async function fakeUpdateDecision(id, status) {
     appliedEssKw = sign * currentDecision.powerKw
     addEvent(
       'INFO',
+      'ACTION',
       `${ACTION_TEXTS[currentDecision.action]} ${currentDecision.powerKw} kW 적용 (운영자)`,
     )
   } else {
     appliedEssKw = 0
-    addEvent('INFO', `${currentDecision.ruleLabel} 추천을 넘김 (운영자)`)
+    addEvent('INFO', 'ACTION', `${currentDecision.ruleLabel} 추천을 넘김 (운영자)`)
   }
   return { ...currentDecision }
 }
@@ -1314,7 +1195,7 @@ export async function fakeGetZoneRecent(zoneId) {
   // 어떤 시각에 그 구역이 쓴 전력 (그 구역 설비들의 합)
   const zoneKwAt = (time) =>
     equipmentsAt(time)
-      .filter((item) => item.id.startsWith(`${zoneId}-`))
+      .filter((item) => item.zoneId === zoneId)
       .reduce((sum, item) => sum + item.loadKw, 0)
 
   const points = []
@@ -1936,7 +1817,12 @@ export async function fakeUpdateSettings(changes) {
       newValue: change.value,
       changedBy: '운영자',
     })
-    addEvent('INFO', `설정 변경: ${item.label} ${oldValue} → ${change.value} (운영자)`, now)
+    addEvent(
+      'INFO',
+      'SETTING',
+      `설정 변경: ${item.label} ${oldValue} → ${change.value} (운영자)`,
+      now,
+    )
   }
   applySettings()
 
