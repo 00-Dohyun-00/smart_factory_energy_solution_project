@@ -93,7 +93,10 @@ public class RecommendationService {
         Long latestId = recommendationRepository.findFirstByOrderByRecommendedAtDescRecommendationIdDesc()
                 .map(Recommendation::getRecommendationId)
                 .orElse(null);
-        if (!recommendation.getRecommendationId().equals(latestId)) {
+        // 가장 최근 추천이어도 대상 15분 구간이 이미 끝났으면 지난 추천임 (판단 엔진이 멈춘 경우 등)
+        LocalDateTime now = LocalDateTime.now().withNano(0); // 초 단위까지만
+        boolean windowEnded = !now.isBefore(recommendation.getIntervalStart().plusMinutes(15));
+        if (!recommendation.getRecommendationId().equals(latestId) || windowEnded) {
             throw new IllegalArgumentException("이미 지난 추천입니다. 최신 추천을 확인해 주세요.");
         }
         if (recommendation.getStatus() != RecommendationStatus.PENDING) {
@@ -101,7 +104,6 @@ public class RecommendationService {
         }
 
         // 3. 처리 결과 저장 + 이벤트 1줄 + (적용이면) ESS에 명령
-        LocalDateTime now = LocalDateTime.now().withNano(0); // 초 단위까지만
         recommendation.handle(newStatus, OPERATOR, now);
         if (newStatus == RecommendationStatus.APPLIED) {
             applyToEss(recommendation, now);

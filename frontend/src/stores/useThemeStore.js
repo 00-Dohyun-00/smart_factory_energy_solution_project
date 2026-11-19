@@ -41,7 +41,7 @@ const COLOR_VARS = {
   zoneZ3: '--zone-z3',
   zoneZ4: '--zone-z4',
   zoneZ5: '--zone-z5',
-  zoneU: '--zone-u',
+  zoneZ6: '--zone-z6', // 유틸리티 (백엔드 구역 코드 Z6)
 }
 
 function readSaved() {

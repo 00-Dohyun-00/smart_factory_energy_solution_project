@@ -7,7 +7,7 @@ import java.util.List;
  * 지금 상태 1건 (모니터링 > 통합, 설비 모니터링). 5초마다 불림.
  */
 public record SitePowerLatestResponse(
-        LocalDateTime recordedAt,     // 서버 시각
+        LocalDateTime recordedAt,     // 기록 시각 (site_power_minute 최신 1줄의 ts)
         Double loadKw,                // 공장 전체 사용 전력
         Double solarKw,               // 태양광 발전
         Double chargeKw,              // 배터리 충전 전력 (충전 중이 아니면 0)
@@ -60,7 +60,8 @@ public record SitePowerLatestResponse(
     public record TodayEnergy(Double gridKwh, Double solarKwh, Double dischargeKwh, Double chargeKwh) {
     }
 
-    // 설비 1개의 최신 1분 전력
-    public record EquipmentPower(String id, String name, Double loadKw, String origin, String state) {
+    // 설비 1개의 최신 1분 전력. zoneId = equipment.zone_code (예: Z2), ratedKw = 정격 전력
+    public record EquipmentPower(String id, String zoneId, String name, Double ratedKw, Double loadKw,
+                                 String origin, String state) {
     }
 }

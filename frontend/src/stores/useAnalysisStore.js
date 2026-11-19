@@ -25,10 +25,20 @@ export const useAnalysisStore = defineStore('analysis', () => {
       if (requestId !== latestTrendRequest) return
       trend.value = result
       errorMessage.value = ''
+      // 1시간 간격 결과는 사용 패턴 카드가 쓰는 데이터와 똑같으므로 같이 넣어 둠
+      // (예전에는 같은 요청을 두 번 보냈음 — 이슈 #25). 기간이 같으면 다시 넣지 않음:
+      // 자동 갱신 때마다 바꾸면 카드에서 좌우로 옮겨 보던 위치가 처음으로 돌아감
+      if (interval === 'HOUR' && (pattern.value?.from !== from || pattern.value?.to !== to)) {
+        latestPatternRequest++ // 이전 기간의 패턴 요청이 늦게 와도 덮어쓰지 않게
+        pattern.value = result
+        patternError.value = ''
+        patternLoading.value = false
+      }
     } catch (error) {
       if (requestId !== latestTrendRequest) return
       // 실패해도 이미 받아 둔 결과는 지우지 않음
       errorMessage.value = error.message
+      if (interval === 'HOUR' && showLoading) patternError.value = error.message
     } finally {
       // "불러오는 중" 표시도 가장 최근 요청이 끝났을 때만 끔
       if (requestId === latestTrendRequest) {

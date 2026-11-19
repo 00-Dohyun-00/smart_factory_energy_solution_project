@@ -10,11 +10,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
+import com.smartfactory.energy.equipment.Equipment;
 import com.smartfactory.energy.equipment.EquipmentRepository;
+import com.smartfactory.energy.equipment.EquipmentRole;
 import com.smartfactory.energy.ess.EssStatusMinute;
 import com.smartfactory.energy.ess.EssStatusMinuteRepository;
 import com.smartfactory.energy.global.exception.NotFoundException;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
+import com.smartfactory.energy.power.PowerMinute;
 import com.smartfactory.energy.power.PowerMinuteRepository;
 import com.smartfactory.energy.power.SitePowerMinute;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
@@ -23,6 +26,7 @@ import com.smartfactory.energy.sitepower.dto.SitePowerLatestResponse;
 import com.smartfactory.energy.sitepower.dto.SitePowerQuarterResponse;
 import com.smartfactory.energy.tariff.TariffPeriodRepository;
 import com.smartfactory.energy.weather.WeatherRepository;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -144,6 +148,57 @@ class SitePowerServiceTest {
         assertThat(latest.tariff().periods()).hasSize(7);
         assertThat(latest.tariff().periods().get(6).to()).isEqualTo("24:00");
         assertThat(latest.tariff().nextLabel()).isNotEqualTo(latest.tariff().label());
+    }
+
+    @Test
+    void 공급원_비율은_충전_중이거나_태양광이_남아도_합이_100() {
+        LocalDateTime lastMinute = LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES).minusMinutes(1);
+        // 공장 1000, 태양광 300, 배터리 200 충전 → 한전 900 (공장 700 + 충전 200)
+        powerTable.add(power(lastMinute, 900, 300, -200, 1000));
+
+        SitePowerLatestResponse charging = sitePowerService.getLatest();
+
+        assertThat(charging.sourceRatio().gridPercent()).isEqualTo(70.0);
+        assertThat(charging.sourceRatio().solarPercent()).isEqualTo(30.0);
+        assertThat(charging.sourceRatio().essPercent()).isEqualTo(0.0);
+
+        // 공장 800, 태양광 1000 → 태양광이 다 채움 (100%를 넘지 않음)
+        powerTable.add(power(lastMinute.plusSeconds(1), 0, 1000, 0, 800));
+
+        SitePowerLatestResponse surplus = sitePowerService.getLatest();
+
+        assertThat(surplus.sourceRatio().solarPercent()).isEqualTo(100.0);
+        assertThat(surplus.sourceRatio().gridPercent()).isEqualTo(0.0);
+    }
+
+    @Test
+    void 기록_시각은_서버_시각이_아니라_마지막_기록의_시각() {
+        LocalDateTime old = LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES).minusDays(1); // 시뮬레이터가 어제 멈춤
+        powerTable.add(power(old, 43, 0, 0, 43));
+
+        SitePowerLatestResponse latest = sitePowerService.getLatest();
+
+        assertThat(latest.recordedAt()).isEqualTo(old);
+    }
+
+    @Test
+    void 설비마다_구역_코드와_정격_전력을_줌() {
+        LocalDateTime lastMinute = LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES).minusMinutes(1);
+        powerTable.add(power(lastMinute, 1000, 0, 0, 1000));
+        when(equipmentRepository.findByEquipmentRole(EquipmentRole.LOAD)).thenReturn(List.of(
+                new Equipment("BRZ-01", "Z2", "브레이징로", EquipmentRole.LOAD, new BigDecimal("600"))
+        ));
+        when(powerMinuteRepository.findByTs(lastMinute)).thenReturn(List.of(
+                new PowerMinute("BRZ-01", lastMinute, new BigDecimal("512.34"), (short) 1)
+        ));
+
+        SitePowerLatestResponse latest = sitePowerService.getLatest();
+
+        assertThat(latest.equipments()).hasSize(1);
+        assertThat(latest.equipments().get(0).zoneId()).isEqualTo("Z2");
+        assertThat(latest.equipments().get(0).ratedKw()).isEqualTo(600.0);
+        assertThat(latest.equipments().get(0).loadKw()).isEqualTo(512.3);
+        assertThat(latest.equipments().get(0).state()).isEqualTo("RUNNING");
     }
 
     @Test

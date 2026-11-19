@@ -19,6 +19,15 @@ const reportStore = useReportStore()
 const realtimeStore = useRealtimeStore()
 
 const STATUS_LABELS = { RECOMMENDED: '추천 중', APPLIED: '적용', IGNORED: '넘김', AUTO: '자동' }
+const ACTION_LABELS = { CHARGE: '충전', DISCHARGE: '방전', IDLE: '대기' }
+
+// "목표를 넘은 구간" 표의 추천 칸. 백엔드는 그 구간에 추천이 없으면 action을 null로 줌.
+// 예전에는 늘 "방전 N kW"로 적어서, 추천이 없거나 충전 추천이어도 "방전"으로 보였음 (이슈 #25)
+function exceededAction(item) {
+  if (!item.action) return '추천 없음'
+  if (item.action === 'IDLE') return ACTION_LABELS.IDLE // 대기는 kW가 의미 없어 뺌
+  return `${ACTION_LABELS[item.action] ?? item.action} ${formatKw(item.powerKw)} kW`
+}
 
 // 그래프(ECharts)는 CSS 변수를 못 읽으므로, 테마 스토어가 global.css에서 읽어 둔 지금 테마 색을 씀
 // (라이트·다크를 바꾸면 이 색이 바뀌고 그래프도 다시 그려짐)
@@ -128,7 +137,11 @@ const kpis = computed(() => {
   const bill = report.value.bill
   const peakOver = isOverTarget(summary.monthPeakKw)
   // 목표 값이 없으면 달성/초과를 말할 수 없으므로 판정 글자를 뺌
-  const verdict = target === null ? '' : `${peakOver ? '■ 목표 초과' : '● 목표 달성'} · `
+  // 목표 값이나 최대 피크 값이 없으면 달성/초과를 말할 수 없으므로 판정 글자를 뺌 (이슈 #25)
+  const verdict =
+    target === null || summary.monthPeakKw == null
+      ? ''
+      : `${peakOver ? '■ 목표 초과' : '● 목표 달성'} · `
   // 전기요금은 아래 전기요금 카드의 큰 금액과 같은 기준으로 보여 줌
   // 진행 중인 달: 월말 예상 + "오늘까지" 금액 / 끝난 달: 그 달 전체 요금
   const billKpi = isLatestMonth.value
@@ -468,8 +481,8 @@ const essOption = computed(() => ({
                   <strong>{{ formatKw(item.resultPeakKw) }} kW</strong>
                 </td>
                 <td class="right num over">+{{ formatKw(item.overKw) }}</td>
-                <td class="num">방전 {{ formatKw(item.powerKw) }} kW</td>
-                <td>{{ STATUS_LABELS[item.status] }}</td>
+                <td class="num">{{ exceededAction(item) }}</td>
+                <td>{{ STATUS_LABELS[item.status] ?? '—' }}</td>
                 <td class="cause">{{ item.cause }}</td>
               </tr>
             </tbody>

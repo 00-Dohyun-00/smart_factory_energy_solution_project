@@ -10,6 +10,7 @@ import com.smartfactory.energy.power.DemandInterval15mRepository;
 import com.smartfactory.energy.recommendation.Recommendation;
 import com.smartfactory.energy.recommendation.RecommendationAction;
 import com.smartfactory.energy.recommendation.RecommendationRepository;
+import com.smartfactory.energy.recommendation.RecommendationStatus;
 import com.smartfactory.energy.setting.SettingRepository;
 import com.smartfactory.energy.tariff.TariffPeriod;
 import com.smartfactory.energy.tariff.TariffPeriodRepository;
@@ -125,12 +126,11 @@ public class PeakAnalysisService {
 
     // 날마다 가장 높았던 15분 구간을 고르고, 그중 높은 순으로 8개. 그때의 방전 추천 처리를 같이 붙임
     private List<PeakWindow> makeTopWindows(List<DemandInterval15m> intervals, LocalDateTime start, LocalDateTime end) {
-        // 15분 구간 시작 시각 → 그 구간의 방전 추천 (같은 구간에 여러 개면 마지막 것)
+        // 15분 구간 시작 시각 → 그 구간의 대표 방전 추천 (같은 구간에 여러 개면 적용 > 자동 > 넘김 > 대기중)
         Map<LocalDateTime, Recommendation> dischargeByWindow = new HashMap<>();
         for (Recommendation r : recommendationRepository.findInPeriod(start, end)) {
             if (r.getAction() == RecommendationAction.DISCHARGE) {
-                dischargeByWindow.merge(r.getIntervalStart(), r,
-                        (a, b) -> a.getRecommendedAt().isAfter(b.getRecommendedAt()) ? a : b);
+                dischargeByWindow.merge(r.getIntervalStart(), r, this::pickRepresentative);
             }
         }
 
@@ -212,6 +212,27 @@ public class PeakAnalysisService {
         return settingRepository.findById(key)
                 .map(setting -> Double.valueOf(setting.getValue()))
                 .orElse(null);
+    }
+
+    // 같은 구간의 추천 2개 중 대표 1개 (적용 > 자동 > 넘김·만료 > 대기중, 같으면 나중 추천)
+    // 추이 분석(AnalysisService)과 같은 순서라 화면마다 그 구간의 처리 상태가 같게 나옴
+    private Recommendation pickRepresentative(Recommendation a, Recommendation b) {
+        int rankA = statusRank(a.getStatus());
+        int rankB = statusRank(b.getStatus());
+        if (rankA != rankB) {
+            return rankA < rankB ? a : b;
+        }
+        return a.getRecommendedAt().isAfter(b.getRecommendedAt()) ? a : b;
+    }
+
+    // 대표 추천을 고를 때의 순서 (작을수록 먼저)
+    private int statusRank(RecommendationStatus status) {
+        return switch (status) {
+            case APPLIED -> 0;
+            case AUTO -> 1;
+            case SKIPPED, EXPIRED -> 2;
+            case PENDING -> 3;
+        };
     }
 
     // 추천 처리 상태를 화면 코드로 바꿈 (DB의 SKIPPED·EXPIRED → 화면의 IGNORED, PENDING → RECOMMENDED)

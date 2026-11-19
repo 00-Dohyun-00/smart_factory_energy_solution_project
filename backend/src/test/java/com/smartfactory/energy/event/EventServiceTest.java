@@ -43,6 +43,8 @@ class EventServiceTest {
 
         assertThat(events).extracting(EventResponse::level).containsExactly("CRITICAL", "WARNING", "NORMAL", "INFO");
         assertThat(events.get(3).eventType()).isEqualTo("HANDLE");
+        // 화면의 종류 칸 코드: 단계 변화 STAGE, 적용·넘김 ACTION
+        assertThat(events).extracting(EventResponse::category).containsExactly("STAGE", "STAGE", "STAGE", "ACTION");
         assertThat(events.get(3).recommendationId()).isEqualTo(12L);
     }
 }

@@ -124,7 +124,7 @@ public class SitePowerService {
         Double monthPeakKw = maxPeak(monthIntervals);
 
         return new SitePowerLatestResponse(
-                now,
+                latest.getTs(), // 값과 같은 줄의 기록 시각 (시뮬레이터가 멈추면 이 시각에서 멈춰 있어 오래된 값임을 알 수 있음)
                 round1(loadKw),
                 round1(solarKw),
                 round1(chargeKw),
@@ -148,7 +148,7 @@ public class SitePowerService {
                 todayPeakKw,
                 monthPeakKw,
                 tariffAt(now),
-                new SourceRatio(percent(gridKw, loadKw), percent(solarKw, loadKw), percent(dischargeKw, loadKw)),
+                sourceRatio(loadKw, solarKw, dischargeKw),
                 todayEnergy(today),
                 equipments(latest.getTs())
         );
@@ -214,7 +214,9 @@ public class SitePowerService {
                     PowerMinute p = powerById.get(e.getEquipmentId());
                     return new EquipmentPower(
                             e.getEquipmentId(),
+                            e.getZoneCode(),
                             e.getName(),
+                            e.getRatedKw() != null ? round1(toDouble(e.getRatedKw())) : null,
                             p != null ? round1(toDouble(p.getAvgKw())) : null,
                             // 1번 모터(Z4-MOTOR1)만 실측, 나머지 생산 설비는 시뮬레이션
                             "Z4-MOTOR1".equals(e.getEquipmentId()) ? "MEASURED" : "SIMULATED",
@@ -323,10 +325,12 @@ public class SitePowerService {
                 .orElse(null);
     }
 
-    // 그 시각이 요금 시간대 안에 있는지. 끝 시각 00:00은 하루 끝(24시)으로 봄
+    // 그 시각이 요금 시간대 안에 있는지. 끝 시각 00:00이나 23:59 이후는 하루 끝(24시)으로 봄
+    // (DB는 하루 끝을 23:59:59로 저장해서, 그대로 비교하면 23:59:59에는 맞는 시간대가 없음)
     private boolean isInPeriod(TariffPeriod period, LocalTime time) {
-        boolean endsAtMidnight = period.getEndTime().equals(LocalTime.MIDNIGHT);
-        return !time.isBefore(period.getStartTime()) && (endsAtMidnight || time.isBefore(period.getEndTime()));
+        LocalTime end = period.getEndTime();
+        boolean endsAtDayEnd = end.equals(LocalTime.MIDNIGHT) || !end.isBefore(LocalTime.of(23, 59));
+        return !time.isBefore(period.getStartTime()) && (endsAtDayEnd || time.isBefore(end));
     }
 
     // 끝 시각 글자. 하루 끝(00:00 또는 23:59 이후)은 "24:00"
@@ -367,9 +371,19 @@ public class SitePowerService {
         };
     }
 
-    // part가 whole의 몇 %인지 (whole이 0이면 0)
-    private Double percent(double part, double whole) {
-        return whole == 0 ? 0.0 : round1(part * 100 / whole);
+    // 공장 전력(loadKw)을 무엇으로 채웠는지 비율. 세 칸의 합은 100 (공장 전력이 0이면 모두 0)
+    // 태양광 → 배터리 방전 → 한전 순으로 채움. grid_kw로 바로 나누면 충전 중일 때
+    // 충전 전력까지 들어가고, 태양광이 남을 때는 100%를 넘어서 합이 100이 안 됨
+    private SourceRatio sourceRatio(double loadKw, double solarKw, double dischargeKw) {
+        if (loadKw <= 0) {
+            return new SourceRatio(0.0, 0.0, 0.0);
+        }
+        double solarUsed = Math.min(solarKw, loadKw);
+        double essUsed = Math.min(dischargeKw, loadKw - solarUsed);
+        double solarPercent = round1(solarUsed * 100 / loadKw);
+        double essPercent = round1(essUsed * 100 / loadKw);
+        // 한전은 100에서 나머지를 뺌 (반올림 때문에 합이 99.9나 100.1이 되지 않게)
+        return new SourceRatio(round1(100 - solarPercent - essPercent), solarPercent, essPercent);
     }
 
     private double toDouble(BigDecimal value) {

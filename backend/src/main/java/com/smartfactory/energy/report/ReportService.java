@@ -242,7 +242,12 @@ public class ReportService {
         if (targetPeakKw == null) {
             return List.of();
         }
-        Map<LocalDateTime, Recommendation> recByWindow = latestByWindow(recommendations);
+        // 그 구간의 대표 추천 (적용 > 자동 > 넘김 > 대기중). "마지막 추천"으로 고르면 적용한 구간이
+        // 나중에 나온 다른 추천 때문에 넘김·대기로 보일 수 있음
+        Map<LocalDateTime, Recommendation> recByWindow = new HashMap<>();
+        for (Recommendation r : recommendations) {
+            recByWindow.merge(r.getIntervalStart(), r, this::pickRepresentative);
+        }
 
         return intervals.stream()
                 .filter(d -> d.getActualAvgKw().doubleValue() > targetPeakKw)
@@ -361,6 +366,27 @@ public class ReportService {
                     (a, b) -> a.getRecommendedAt().isAfter(b.getRecommendedAt()) ? a : b);
         }
         return result;
+    }
+
+    // 같은 구간의 추천 2개 중 대표 1개 (적용 > 자동 > 넘김·만료 > 대기중, 같으면 나중 추천)
+    // 추이 분석(AnalysisService)과 같은 순서라 화면마다 그 구간의 처리 상태가 같게 나옴
+    private Recommendation pickRepresentative(Recommendation a, Recommendation b) {
+        int rankA = statusRank(a.getStatus());
+        int rankB = statusRank(b.getStatus());
+        if (rankA != rankB) {
+            return rankA < rankB ? a : b;
+        }
+        return a.getRecommendedAt().isAfter(b.getRecommendedAt()) ? a : b;
+    }
+
+    // 대표 추천을 고를 때의 순서 (작을수록 먼저)
+    private int statusRank(RecommendationStatus status) {
+        return switch (status) {
+            case APPLIED -> 0;
+            case AUTO -> 1;
+            case SKIPPED, EXPIRED -> 2;
+            case PENDING -> 3;
+        };
     }
 
     // 추천에 적힌 목표 피크. 없으면 지금 설정값
