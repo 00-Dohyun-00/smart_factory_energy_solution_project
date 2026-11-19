@@ -2,6 +2,7 @@ package com.smartfactory.energy.analysis;
 
 import static com.smartfactory.energy.TestData.dayTariffs;
 import static com.smartfactory.energy.TestData.interval;
+import static com.smartfactory.energy.TestData.recommendation;
 import static com.smartfactory.energy.TestData.setting;
 import static com.smartfactory.energy.TestData.tariff;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -11,7 +12,10 @@ import static org.mockito.Mockito.when;
 
 import com.smartfactory.energy.analysis.dto.PeakResponse;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
+import com.smartfactory.energy.recommendation.RecommendationAction;
+import com.smartfactory.energy.recommendation.RecommendationReasonType;
 import com.smartfactory.energy.recommendation.RecommendationRepository;
+import com.smartfactory.energy.recommendation.RecommendationStatus;
 import com.smartfactory.energy.setting.SettingRepository;
 import com.smartfactory.energy.tariff.TariffPeriodRepository;
 import com.smartfactory.energy.tariff.TariffPeriodType;
@@ -83,6 +87,23 @@ class PeakAnalysisServiceTest {
         assertThat(peak.dailyPeaks().get(0).expectedKw()).isEqualTo(1950.0);
         assertThat(peak.topWindows()).hasSize(1); // 하루에 1개
         assertThat(peak.topWindows().get(0).status()).isNull(); // 방전 추천 없음
+    }
+
+    @Test
+    void 피크_구간의_처리_상태는_나중_추천보다_적용을_먼저_봄() {
+        LocalDateTime w = DAY.atTime(9, 0);
+        when(demandInterval15mRepository.findInPeriod(any(), any()))
+                .thenReturn(List.of(interval(w, 1850, 1950, 15)));
+        when(recommendationRepository.findInPeriod(any(), any())).thenReturn(List.of(
+                recommendation(1, w.plusMinutes(1), w, RecommendationAction.DISCHARGE,
+                        RecommendationReasonType.PEAK_DEFENSE, RecommendationStatus.APPLIED, 1800),
+                recommendation(2, w.plusMinutes(5), w, RecommendationAction.DISCHARGE,
+                        RecommendationReasonType.PEAK_DEFENSE, RecommendationStatus.EXPIRED, 1800)
+        ));
+
+        PeakResponse peak = peakAnalysisService.getPeak(DAY, DAY);
+
+        assertThat(peak.topWindows().get(0).status()).isEqualTo("APPLIED");
     }
 
     @Test

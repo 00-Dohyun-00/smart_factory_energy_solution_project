@@ -179,6 +179,7 @@ class ApiControllerTest {
                 .andExpect(jsonPath("$[0].level").value("CRITICAL"))
                 .andExpect(jsonPath("$[0].message").value("경고 단계"))
                 .andExpect(jsonPath("$[0].eventType").value("STAGE_CHANGE"))
+                .andExpect(jsonPath("$[0].category").value("STAGE"))
                 .andExpect(jsonPath("$[0].recommendationId").hasJsonPath());
     }
 

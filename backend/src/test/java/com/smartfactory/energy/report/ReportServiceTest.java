@@ -116,6 +116,26 @@ class ReportServiceTest {
     }
 
     @Test
+    void 목표를_넘은_구간의_처리_상태는_나중_추천보다_적용을_먼저_봄() {
+        givenMonthData();
+        when(settingRepository.findById("peak.target_kw")).thenReturn(Optional.of(setting("peak.target_kw", "목표 피크", "1100")));
+        LocalDateTime w1300 = DAY.atTime(13, 0);
+        when(recommendationRepository.findInPeriod(any(), any())).thenReturn(List.of(
+                defense(1, w1300.plusMinutes(1), RecommendationStatus.APPLIED),
+                recommendation(2, w1300.plusMinutes(6), w1300, RecommendationAction.IDLE,
+                        RecommendationReasonType.IDLE, RecommendationStatus.PENDING, 1100)
+        ));
+
+        ReportResponse report = reportService.getReport(MONTH.toString());
+
+        // 13:15 구간(추천 없음), 13:00 구간(적용) 순 (최신 순)
+        assertThat(report.exceeded()).hasSize(2);
+        assertThat(report.exceeded().get(1).windowStart()).isEqualTo(w1300);
+        assertThat(report.exceeded().get(1).status()).isEqualTo("APPLIED");
+        assertThat(report.exceeded().get(1).action()).isEqualTo("DISCHARGE");
+    }
+
+    @Test
     void 요금_시간대별_금액의_합은_전력량요금과_같고_비중의_합은_100() {
         givenMonthData();
 
