@@ -79,12 +79,27 @@ function load(showLoading = true) {
   analysisStore.fetchPeak(fromDate.value, toDate.value, showLoading)
 }
 
-// "피크가 높았던 구간" 표에서 누른 구간의 시작 시각 (히트맵에 그 칸을 표시)
+// "피크가 높았던 구간" 표에서 누른 줄 (히트맵에 그 칸을 표시)
+// 피크 높은 순이면 구간 시작 시각('2026-11-02T08:30:00'), 평균보다 높은 구간이면 줄 key('2026-11-02T08')
 const selectedStart = ref('')
 
 function toggleWindow(windowStart) {
   selectedStart.value = selectedStart.value === windowStart ? '' : windowStart
 }
+
+// "피크가 높았던 구간" 표의 보기 방식
+// - 'top': 피크 높은 순 (백엔드가 준 topWindows, 15분 구간)
+// - 'aboveAverage': 기간 평균보다 높은 구간 (히트맵의 시간별 피크 중 평균보다 높은 시각을, 같은 날 이어지는 시각끼리 묶음)
+// 평균 증감률이 큰 시간대, ESS를 주로 쓰는 시간, 이상치 같은 보기는 백엔드 데이터가 필요해서 나중에 추가
+const WINDOW_MODES = [
+  { value: 'top', label: '피크 높은 순' },
+  { value: 'aboveAverage', label: '평균보다 높은 구간' },
+]
+const windowMode = ref('top')
+// 보기 방식을 바꾸면 고른 줄은 풀어 둠 (두 보기의 줄 key가 다름)
+watch(windowMode, () => {
+  selectedStart.value = ''
+})
 
 // 기간이 바뀌면 고른 구간을 지우고 다시 조회
 watch([fromDate, toDate], () => {
@@ -229,6 +244,49 @@ const dailyOption = computed(() => {
 // 표 높이를 넘는 피크 구간은 표 내부에서 스크롤해 모두 확인함
 const shownWindows = computed(() => analysisStore.peakWindows)
 
+// ---- 평균보다 높은 구간 (표시용 계산: 백엔드가 준 히트맵 값의 평균과 비교해 거르기만 함) ----
+const heatCells = computed(() => peak.value?.heatmap ?? [])
+// 기간 평균: 히트맵 칸(날짜 × 시각) 피크의 평균
+const heatAverageKw = computed(() =>
+  heatCells.value.length
+    ? heatCells.value.reduce((sum, item) => sum + item.peakKw, 0) / heatCells.value.length
+    : null,
+)
+// 평균보다 높은 시각을 날짜별로 모아, 이어지는 시각(예: 8시·9시·10시)은 한 구간으로 묶음
+// 한 줄 모양: { key, date, startHour, endHour, peakKw(구간 안 최대), abovePercent(최대 피크가 평균보다 몇 % 높은지) }
+// 순서: 평균보다 많이 높은 구간부터
+const aboveAverageRanges = computed(() => {
+  const average = heatAverageKw.value
+  if (average === null) return []
+  const cells = heatCells.value
+    .filter((item) => item.peakKw > average)
+    .sort((a, b) => (a.date === b.date ? a.hour - b.hour : a.date < b.date ? -1 : 1))
+  const ranges = []
+  for (const cell of cells) {
+    const last = ranges[ranges.length - 1]
+    if (last && last.date === cell.date && last.endHour === cell.hour - 1) {
+      last.endHour = cell.hour
+      last.peakKw = Math.max(last.peakKw, cell.peakKw)
+    } else {
+      ranges.push({
+        date: cell.date,
+        startHour: cell.hour,
+        endHour: cell.hour,
+        peakKw: cell.peakKw,
+      })
+    }
+  }
+  return ranges
+    .map((range) => ({
+      ...range,
+      key: `${range.date}T${String(range.startHour).padStart(2, '0')}`,
+      abovePercent: ((range.peakKw - average) / average) * 100,
+    }))
+    .sort((a, b) => b.peakKw - a.peakKw)
+})
+// '8시 ~ 11시' 처럼 구간을 글자로 (끝 시각은 마지막 칸이 끝나는 시각)
+const hourRangeText = (range) => `${range.startHour}시~${range.endHour + 1}시`
+
 const heatOption = computed(() => {
   const target = targetKw.value
   const dates = peak.value.dailyPeaks.map((item) => item.date)
@@ -238,8 +296,28 @@ const heatOption = computed(() => {
   // 예: { x0: 8, x1: 8, y0: 1, y1: 1, lineWidth: 3, text: '11-02 08:30 · 1,841 kW', textAtTop: true }
   const outlines = []
 
-  // 표에서 누른 구간 한 칸 (그 날 그 시각)
-  if (selectedStart.value) {
+  // 평균보다 높은 구간 보기에서 누른 줄: 그 날의 이어진 시각 전체를 감쌈
+  const pickedRange =
+    windowMode.value === 'aboveAverage'
+      ? aboveAverageRanges.value.find((item) => item.key === selectedStart.value)
+      : null
+  if (pickedRange) {
+    const row = dates.indexOf(pickedRange.date)
+    if (row >= 0) {
+      outlines.push({
+        x0: pickedRange.startHour,
+        x1: pickedRange.endHour,
+        y0: row,
+        y1: row,
+        lineWidth: 3,
+        text: `${dayLabel(pickedRange.date)} ${hourRangeText(pickedRange)} · 최대 ${formatKw(pickedRange.peakKw)} kW`,
+        textAtTop: true,
+      })
+    }
+  }
+
+  // 피크 높은 순 보기에서 누른 구간 한 칸 (그 날 그 시각)
+  if (selectedStart.value && windowMode.value === 'top') {
     const hour = Number(selectedStart.value.slice(11, 13))
     const row = dates.indexOf(selectedStart.value.slice(0, 10))
     const picked = analysisStore.peakWindows.find(
@@ -300,7 +378,8 @@ const heatOption = computed(() => {
   return {
     animation: false,
     textStyle: { fontSize: 10 }, // 그래프 글자도 80% 크기로 (기본 12px)
-    grid: { left: 44, right: 12, top: 24, bottom: 18 },
+    // top: 위쪽 색 단계 버튼(누르면 그 단계 칸을 숨기거나 보임)과 그래프가 붙지 않게 띄움
+    grid: { left: 44, right: 12, top: 40, bottom: 18 },
     tooltip: {
       ...tooltipColors(),
       formatter: (params) =>
@@ -498,10 +577,31 @@ const heatOption = computed(() => {
         <section class="card top">
           <div class="card-head">
             <h2 class="card-title">피크가 높았던 구간</h2>
-            <span class="note">누르면 히트맵에 표시</span>
+            <!-- 보기 방식 선택 -->
+            <div class="presets window-modes" role="group" aria-label="구간 보기 방식">
+              <button
+                v-for="mode in WINDOW_MODES"
+                :key="mode.value"
+                :class="{ active: windowMode === mode.value }"
+                :aria-pressed="windowMode === mode.value"
+                @click="windowMode = mode.value"
+              >
+                {{ mode.label }}
+              </button>
+            </div>
           </div>
+          <p class="mode-note">
+            <template v-if="windowMode === 'top'"
+              >15분 구간 피크가 높은 순 · 누르면 히트맵에 표시</template
+            >
+            <template v-else>
+              기간 평균 <span class="num">{{ formatKw(heatAverageKw) }}</span> kW보다 높은 시각
+              (이어진 시각은 한 구간) · 누르면 히트맵에 표시
+            </template>
+          </p>
           <!-- 표 높이를 넘는 줄은 표 안에서 스크롤해 확인함 -->
-          <div class="table-box">
+          <!-- 피크 높은 순 -->
+          <div v-if="windowMode === 'top'" class="table-box">
             <table class="table">
               <thead>
                 <tr>
@@ -545,7 +645,51 @@ const heatOption = computed(() => {
               </tbody>
             </table>
           </div>
-          <p v-if="!analysisStore.peakWindows.length" class="windows-empty">
+          <!-- 평균보다 높은 구간 -->
+          <div v-else class="table-box">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th class="rank-col">순위</th>
+                  <th>대상 시간</th>
+                  <th class="right-text">최대 피크</th>
+                  <th class="right-text">평균 대비</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="(item, index) in aboveAverageRanges"
+                  :key="item.key"
+                  class="window-row"
+                  :class="{ active: selectedStart === item.key }"
+                  @click="toggleWindow(item.key)"
+                >
+                  <td class="rank-col num">{{ index + 1 }}</td>
+                  <td class="num">
+                    <button
+                      class="window-button"
+                      :aria-pressed="selectedStart === item.key"
+                      @click.stop="toggleWindow(item.key)"
+                    >
+                      {{ dayLabel(item.date) }} {{ hourRangeText(item) }}
+                    </button>
+                  </td>
+                  <td class="right-text num">
+                    <strong :class="{ over: isOverTarget(item.peakKw) }">
+                      {{ formatKw(item.peakKw) }} kW
+                    </strong>
+                  </td>
+                  <td class="right-text num">+{{ formatOneDecimal(item.abovePercent) }}%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p
+            v-if="
+              windowMode === 'top' ? !analysisStore.peakWindows.length : !aboveAverageRanges.length
+            "
+            class="windows-empty"
+          >
             이 기간에는 구간 기록이 없습니다.
           </p>
           <div class="top-foot">
@@ -727,6 +871,20 @@ const heatOption = computed(() => {
   min-height: 0;
   overflow-y: auto;
   scrollbar-color: var(--line-strong) transparent;
+}
+/* 구간 보기 방식 버튼: 카드 제목 줄에 들어가게 작게 */
+.window-modes {
+  margin-left: auto;
+}
+.window-modes button {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.mode-note {
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  color: var(--mute);
 }
 .top-foot {
   display: flex;
