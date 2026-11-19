@@ -23,7 +23,8 @@ const analysisStore = useAnalysisStore()
 const realtimeStore = useRealtimeStore()
 
 // 처리 상태는 색만으로 구분하지 않도록 도형을 함께 표시 (운영 로그 화면과 같은 표시)
-const STATUS_SHAPES = { APPLIED: '●', AUTO: '◇', IGNORED: '✕' }
+// RECOMMENDED(추천 중)도 추천 이력 화면처럼 ○로 표시 (빠져 있으면 글자만 보였음 — 이슈 #25)
+const STATUS_SHAPES = { RECOMMENDED: '○', APPLIED: '●', AUTO: '◇', IGNORED: '✕' }
 
 // 그 구간의 추천 처리를 한 줄 문구로 (status 코드를 화면에서 글자로 바꿈)
 // 백엔드 note는 추천 이유 문장이라 표 칸에 넣기엔 길어서 쓰지 않음
@@ -43,11 +44,27 @@ const toDate = ref('')
 // "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
 const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) ?? '')
 
-const dateError = computed(() =>
-  fromDate.value && toDate.value && fromDate.value > toDate.value
-    ? '시작일이 종료일보다 늦습니다.'
-    : '',
-)
+// 백엔드가 한 번에 조회해 주는 최대 기간 (넘으면 400을 줌)
+const MAX_DAYS = 62
+
+// '2026-11-01' ~ '2026-11-18' → 18 (시작일과 종료일을 모두 셈)
+function dayCount(from, to) {
+  const toTime = (date) => {
+    const [year, month, day] = date.split('-').map(Number)
+    return new Date(year, month - 1, day).getTime()
+  }
+  return Math.round((toTime(to) - toTime(from)) / 86400000) + 1
+}
+
+const dateError = computed(() => {
+  if (!fromDate.value || !toDate.value) return ''
+  if (fromDate.value > toDate.value) return '시작일이 종료일보다 늦습니다.'
+  // 요청을 보내기 전에 막음 (보내면 400이 나고 [다시 시도]를 눌러도 계속 실패함 — 이슈 #25)
+  if (dayCount(fromDate.value, toDate.value) > MAX_DAYS) {
+    return `기간은 최대 ${MAX_DAYS}일까지 조회할 수 있습니다.`
+  }
+  return ''
+})
 
 // 날짜를 '2026-11-14' 모양의 글자로
 function dateText(date) {
@@ -132,7 +149,8 @@ const targetKw = computed(() => peak.value?.targetPeakKw ?? null)
 const isOverTarget = (kw) => targetKw.value !== null && kw > targetKw.value
 // 최대 피크 아래 줄의 판정. 목표 값이 없으면 판정 없이 시각만 보여 줌
 const maxPeakVerdict = computed(() => {
-  if (targetKw.value === null || !summary.value) return ''
+  // 최대 피크 값이 없을 때도 판정하지 않음 (null은 목표보다 작다고 계산되어 "목표 달성"으로 보였음 — 이슈 #25)
+  if (targetKw.value === null || summary.value?.maxPeakKw == null) return ''
   return isOverTarget(summary.value.maxPeakKw) ? ', 목표 초과' : ', 목표 달성'
 })
 

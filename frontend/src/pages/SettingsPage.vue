@@ -132,11 +132,23 @@ watch(
   { immediate: true },
 )
 
-// 값을 처음 받으면 고치는 칸에 채워 넣음
+// 저장된 값을 (다시) 받으면 고치는 칸에 채워 넣음.
+// 처음에는 모든 묶음을 채우고, 그 뒤에는 사용자가 고치지 않은 묶음만 새 값으로 바꿈.
+// 예전에는 처음 한 번만 채워서, 다른 팀원이 바꾼 새 값이 와도 칸에는 옛 값이 남아
+// "바뀐 값"으로 보이고 그대로 저장하면 팀원의 값을 되돌렸음 (공용 DB — 이슈 #25)
 watch(
-  () => settingsStore.items.length,
-  (count) => {
-    if (count && !Object.keys(draft.value).length) allGroups.value.forEach(resetGroup)
+  saved,
+  (now, before) => {
+    if (!settingsStore.items.length) return
+    const firstTime = !Object.keys(draft.value).length
+    // 피크 · ESS · 운영에 설비 임계치 묶음까지 포함한 전체 묶음
+    for (const group of allGroups.value) {
+      // 이 묶음의 칸이 모두 이전에 저장된 값 그대로면 = 사용자가 손대지 않은 묶음
+      const untouched = editableFields(group).every(
+        (field) => draft.value[field.key] === before?.[field.key],
+      )
+      if (firstTime || untouched) resetGroup(group)
+    }
   },
   { immediate: true },
 )
