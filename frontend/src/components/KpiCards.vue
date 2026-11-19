@@ -1,5 +1,6 @@
 <!--
-  KPI 카드 5개: 공장 소비전력 · 한전 구매전력 · 태양광 발전량 · ESS 충·방전 · 배터리 잔량
+  KPI 카드 4개: 공장 소비전력 · 한전 구매전력 · 태양광 발전량 · ESS 충·방전(잔량 · 배터리실 온도 포함)
+  (배터리 잔량 카드는 ESS 건전지와 겹쳐서 뺐음, 2026-11-19)
   왼쪽부터 "공장 소비 = 한전 + 태양광 + ESS" 순서로 읽히게 놓았습니다.
   멀리서도 한눈에 보이도록 숫자 위에 반원 계기판(바늘)을 그립니다.
   모니터링의 통합 화면과 설비 모니터링 화면이 같이 씁니다.
@@ -82,8 +83,6 @@ const kpis = computed(() => {
   const charging = s?.pcsStatus === 'CHARGING'
   const essKw = s ? (charging ? s.chargeKw : s.dischargeKw) : null
   const maxPowerKw = settingsStore.values['ess.max_power_kw']
-  const socLow = settingsStore.values['ess.soc_low']
-  const socHigh = settingsStore.values['ess.soc_high']
 
   // 공장 소비전력: 눈금 끝까지 중 지금 위치를 공급원 비율대로 나눠 칠함
   const loadMax = target ? target * LOAD_SCALE : null
@@ -96,18 +95,6 @@ const kpis = computed(() => {
   const warnAt = s && gridMax ? (s.warnKw / gridMax) * 100 : 0
   const targetAt = s && gridMax ? (target / gridMax) * 100 : 0
 
-  // 잔량 하한·상한(환경 설정 값)을 아직 못 받았으면 위험 범위 띠를 그리지 않고 안내만 보여 줌
-  // (없는 값을 0~100%로 대신 쓰면 띠 전체가 초록이 되어 "어느 잔량이든 정상"처럼 보이기 때문)
-  const socRangeReady = typeof socLow === 'number' && typeof socHigh === 'number'
-  // 배터리 잔량이 있는 구간 (하한 아래 경고 · 상한 위 주의 · 그 사이 정상). 기준을 모르면 색을 정하지 않음
-  const socClass =
-    !s || !socRangeReady
-      ? ''
-      : s.socPercent < socLow
-        ? 'fill-crit'
-        : s.socPercent > socHigh
-          ? 'fill-warn'
-          : 'fill-ok'
   // 한전 구매전력이 있는 구간
   const gridClass = s ? zoneClass(s.gridKw, s.warnKw, target) : ''
 
@@ -210,6 +197,8 @@ const kpis = computed(() => {
         : s.pcsStatus === 'STANDBY' || !maxPowerKw
           ? `최대 출력 ${maxPowerKw ? formatKw(maxPowerKw) : '—'} kW`
           : `최대 ${formatKw(maxPowerKw)} kW의 ${formatOneDecimal((essKw / maxPowerKw) * 100)}%`,
+      // 아랫줄 둘째 줄: 배터리실 온도 (배터리 잔량 카드를 없애면서 여기로 옮김, 2026-11-19)
+      roomTemp: s ? `${formatOneDecimal(s.batteryTempC)}℃` : '',
       // 반원 계기판 대신 건전지 (2026-11-19): 안의 막대 = 지금 잔량(SOC), 옆 화살표 = 충전 ↑ / 방전 ↓
       battery: s
         ? {
@@ -219,35 +208,6 @@ const kpis = computed(() => {
         : null,
       segments: [],
       needle: null,
-    },
-    {
-      key: 'soc',
-      dot: socClass, // 지금 구간 색
-      name: '배터리 잔량 (SOC)',
-      value: formatOneDecimal(s?.socPercent),
-      unit: '%',
-      sub: s ? `${formatOneDecimal(s.batteryTempC)}℃` : '',
-      // 아랫줄: "배터리실" → 온도계 아이콘 → 온도 순서로 보여 줌
-      subLabel: '배터리실',
-      thermometer: true,
-      min: '0',
-      max: '100',
-      // 잔량 기준을 못 받았을 때 아랫줄 안내 (배터리실 온도 대신)
-      waiting: socRangeReady ? '' : '잔량 기준(하한·상한)을 기다리는 중입니다',
-      // 바깥 가는 테: 하한 아래 경고 · 하한~상한 정상 · 상한 위 주의 (설정값). 기준을 모르면 띠 없음
-      // 안쪽: 잔량만큼 차오르는 게이지 (색은 지금 구간 색, 기준을 모르면 회색 바탕만)
-      segments: [
-        ...(socRangeReady
-          ? [
-              segment(0, socLow, 'ring-crit', true),
-              segment(socLow, socHigh, 'ring-ok', true),
-              segment(socHigh, 100, 'ring-warn', true),
-            ]
-          : []),
-        segment(0, 100, 'track'),
-        ...(s && socRangeReady ? [segment(0, s.socPercent, socClass)] : []),
-      ],
-      needle: s ? needle(s.socPercent / 100) : null,
     },
   ]
 })
@@ -292,7 +252,7 @@ const kpis = computed(() => {
           />
           <!-- 잔량 % (건전지 왼쪽) -->
           <text v-if="kpi.battery" class="battery-soc" x="38" y="43" text-anchor="end">
-            {{ Math.round(kpi.battery.soc) }}%
+            {{ formatOneDecimal(kpi.battery.soc) }}%
           </text>
           <!-- 충전 중: 위 화살표 / 방전 중: 아래 화살표 (건전지 오른쪽) -->
           <path
@@ -357,22 +317,19 @@ const kpis = computed(() => {
           <span class="side-bar" aria-hidden="true">|</span>
           <span class="side-right">{{ kpi.sides[1] }}</span>
         </p>
-        <!-- 기준값을 기다리는 중 안내 (배터리 잔량: 하한·상한을 아직 못 받음) -->
-        <p v-else-if="kpi.waiting" class="kpi-sub waiting" role="status">{{ kpi.waiting }}</p>
         <p v-else class="kpi-sub num" :class="{ over: kpi.over }">
-          <template v-if="kpi.subLabel && kpi.sub">{{ kpi.subLabel }}</template>
-          <!-- 온도계 아이콘 (SVG 직접 그림) -->
-          <svg
-            v-if="kpi.thermometer && kpi.sub"
-            class="thermo"
-            viewBox="0 0 16 24"
-            aria-hidden="true"
-          >
-            <path d="M6 3.5 a2 2 0 0 1 4 0 V14.5 a4 4 0 1 1 -4 0 Z" />
-            <circle class="thermo-fill" cx="8" cy="17.5" r="2.2" />
-            <line class="thermo-fill-line" x1="8" y1="8" x2="8" y2="16" />
-          </svg>
           {{ kpi.sub }}
+          <!-- ESS: 둘째 줄에 "배터리실 → 온도계 아이콘 → 온도" -->
+          <span v-if="kpi.roomTemp" class="room-temp">
+            배터리실
+            <!-- 온도계 아이콘 (SVG 직접 그림) -->
+            <svg class="thermo" viewBox="0 0 16 24" aria-hidden="true">
+              <path d="M6 3.5 a2 2 0 0 1 4 0 V14.5 a4 4 0 1 1 -4 0 Z" />
+              <circle class="thermo-fill" cx="8" cy="17.5" r="2.2" />
+              <line class="thermo-fill-line" x1="8" y1="8" x2="8" y2="16" />
+            </svg>
+            {{ kpi.roomTemp }}
+          </span>
         </p>
       </section>
     </div>
@@ -561,8 +518,16 @@ const kpis = computed(() => {
   font-weight: 400;
   color: var(--ink-2);
 }
-.kpi-sub.waiting {
-  color: var(--faint);
+/* 배터리실 온도: 아랫줄의 둘째 줄 */
+.room-temp {
+  display: block;
+}
+/* 두 줄 칸(높이 고정)에 들어가게 온도계를 글자 높이로 줄임 */
+.room-temp .thermo {
+  width: 7px;
+  height: 10px;
+  margin: 0 1px 0 2px;
+  vertical-align: -1px;
 }
 .kpi-sub {
   align-self: stretch;
@@ -570,6 +535,7 @@ const kpis = computed(() => {
   height: 20.8px;
   overflow: hidden;
   font-size: 8.8px;
+  line-height: 10.4px; /* 두 줄(예: ESS 출력 비율 + 배터리실 온도)이 높이 20.8px에 딱 들어가게 */
   color: var(--mute);
   text-align: center;
   /* 좁은 화면에서는 잘라 내지 않고 두 줄로 내려 씀 (공급원 비율이 길어서) */
