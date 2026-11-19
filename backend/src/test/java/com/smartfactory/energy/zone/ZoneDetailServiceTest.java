@@ -26,7 +26,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
-import org.springframework.test.util.ReflectionTestUtils;
 
 // 구역 상세: 없는 구역 404, 대소문자, 구역 코드가 빈 줄, 1분 합계와 오늘 요약
 @ExtendWith(MockitoExtension.class)
@@ -42,16 +41,13 @@ class ZoneDetailServiceTest {
 
     @BeforeEach
     void setUp() {
-        Zone noCode = new Zone("이름만", 0, null); // 구역 코드가 빈 줄이 있어도 오류가 나면 안 됨
-        Zone z2 = new Zone("브레이징", 2, "Z2");
-        ReflectionTestUtils.setField(noCode, "zoneId", 1L);
-        ReflectionTestUtils.setField(z2, "zoneId", 2L);
+        Zone noCode = new Zone(null, "이름만"); // 구역 코드가 빈 줄이 있어도 오류가 나면 안 됨
+        Zone z2 = new Zone("Z2", "브레이징");
         when(zoneRepository.findAll()).thenReturn(List.of(noCode, z2));
         when(equipmentRepository.findAll()).thenReturn(List.of(
-                equipment("Z2-FURN", 2L, EquipmentRole.LOAD, true),
-                equipment("Z2-PUMP", 2L, EquipmentRole.LOAD, true),
-                equipment("Z2-OLD", 2L, EquipmentRole.LOAD, false),   // 사용 안 함
-                equipment("Z1-PRESS", 1L, EquipmentRole.LOAD, true)  // 다른 구역
+                equipment("Z2-FURN", "Z2", EquipmentRole.LOAD),
+                equipment("Z2-PUMP", "Z2", EquipmentRole.LOAD),
+                equipment("Z1-PRESS", "Z1", EquipmentRole.LOAD)  // 다른 구역
         ));
         when(powerMinuteRepository.findInPeriod(anyList(), any(), any())).thenAnswer(call -> {
             List<String> ids = call.getArgument(0);
@@ -70,13 +66,12 @@ class ZoneDetailServiceTest {
     }
 
     @Test
-    void 구역_코드는_대소문자를_가리지_않고_사용_중인_그_구역_설비만_더함() {
+    void 구역_코드는_대소문자를_가리지_않고_그_구역_설비만_더함() {
         LocalDateTime now = LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES);
         LocalDateTime t = now.minusMinutes(1).isBefore(now.toLocalDate().atStartOfDay()) ? now : now.minusMinutes(1);
-        powerTable.add(power("Z2-FURN", t, 600, 10));
-        powerTable.add(power("Z2-PUMP", t, 40, 0.7));
-        powerTable.add(power("Z2-OLD", t, 999, 99));
-        powerTable.add(power("Z1-PRESS", t, 999, 99));
+        powerTable.add(power("Z2-FURN", t, 600));
+        powerTable.add(power("Z2-PUMP", t, 40));
+        powerTable.add(power("Z1-PRESS", t, 999));
 
         ZoneDetailResponse detail = zoneDetailService.getDetail("z2");
 
@@ -97,11 +92,11 @@ class ZoneDetailServiceTest {
         assertThat(detail.todayKwh()).isEqualTo(0.0);
     }
 
-    private static Equipment equipment(String id, Long zoneId, EquipmentRole role, boolean active) {
-        return new Equipment(id, zoneId, id, role, TestData.bd(100), true, null, null, active, null);
+    private static Equipment equipment(String id, String zoneCode, EquipmentRole role) {
+        return new Equipment(id, zoneCode, id, role, TestData.bd(100));
     }
 
-    private static PowerMinute power(String id, LocalDateTime ts, double kw, double kwh) {
-        return new PowerMinute(id, ts, TestData.bd(kw), null, null, TestData.bd(kwh), null, null, null, (short) 1);
+    private static PowerMinute power(String id, LocalDateTime ts, double kw) {
+        return new PowerMinute(id, ts, TestData.bd(kw), (short) 1);
     }
 }

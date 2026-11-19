@@ -94,7 +94,7 @@ public class ReportService {
         Double monthPeakKw = peak.hasData() ? peak.summary().maxPeakKw() : null;
         ReportBill bill = makeBill(yearMonth, powers, monthPeakKw, targetPeakKw);
         List<ReportExceeded> exceeded = makeExceeded(intervals, recommendations, targetPeakKw);
-        ReportEss ess = makeEss(essList, recommendations, resultPeaks, targetPeakKw);
+        ReportEss ess = makeEss(powers, essList, recommendations, resultPeaks, targetPeakKw);
         ReportSolar solar = makeSolar(powers);
 
         // 15분이 다 찬 구간이 아직 없으면 피크 분석이 null을 주므로 빈 목록으로 바꿈 (화면은 "기록 없음" 표시)
@@ -266,19 +266,24 @@ public class ReportService {
 
     // ---------- ESS 운용 (ess) ----------
 
-    private ReportEss makeEss(List<EssStatusMinute> essList, List<Recommendation> recommendations,
+    private ReportEss makeEss(List<SitePowerMinute> powers, List<EssStatusMinute> essList,
+                              List<Recommendation> recommendations,
                               Map<LocalDateTime, Double> resultPeaks, Double targetPeakKw) {
-        // 날짜별 방전량
+        // 날짜별 방전량. 충·방전량은 site_power_minute.ess_kw(+ 방전/- 충전)에서 계산 (효율 적용 전 값)
         Map<LocalDate, Double> dischargeByDate = new TreeMap<>();
         double dischargeKwh = 0;
         double chargeKwh = 0;
+        for (SitePowerMinute p : powers) {
+            double discharge = p.getEssKw().max(BigDecimal.ZERO).doubleValue() / 60;
+            double charge = p.getEssKw().negate().max(BigDecimal.ZERO).doubleValue() / 60;
+            dischargeByDate.merge(p.getTs().toLocalDate(), discharge, Double::sum);
+            dischargeKwh += discharge;
+            chargeKwh += charge;
+        }
+
         double socSum = 0;
         Double socMin = null;
         for (EssStatusMinute e : essList) {
-            double discharge = e.getDischargeKwh().doubleValue();
-            dischargeByDate.merge(e.getTs().toLocalDate(), discharge, Double::sum);
-            dischargeKwh += discharge;
-            chargeKwh += e.getChargeKwh().doubleValue();
             double soc = e.getSoc().doubleValue();
             socSum += soc;
             socMin = socMin == null ? soc : Math.min(socMin, soc);

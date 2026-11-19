@@ -163,9 +163,9 @@ public class AnalysisService {
         double loadKwh = sum(powers, SitePowerMinute::getLoadKw) / 60;
         Double solarPercent = loadKwh > 0 ? round1(solarKwh / loadKwh * 100) : null;
 
-        // ④ ESS 충·방전량과 효율 (방전량 ÷ 충전량)
-        double dischargeKwh = sum(essList, EssStatusMinute::getDischargeKwh);
-        double chargeKwh = sum(essList, EssStatusMinute::getChargeKwh);
+        // ④ ESS 충·방전량과 효율 (방전량 ÷ 충전량). site_power_minute.ess_kw(+ 방전/- 충전)에서 계산 (효율 적용 전 값)
+        double dischargeKwh = sum(powers, p -> p.getEssKw().max(BigDecimal.ZERO)) / 60;
+        double chargeKwh = sum(powers, p -> p.getEssKw().negate().max(BigDecimal.ZERO)) / 60;
         Double efficiency = chargeKwh > 0 ? round1(dischargeKwh / chargeKwh * 100) : null;
 
         // ⑤ 배터리 잔량 최저·최고

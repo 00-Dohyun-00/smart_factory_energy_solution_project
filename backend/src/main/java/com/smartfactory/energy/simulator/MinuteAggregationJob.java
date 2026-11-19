@@ -3,7 +3,6 @@ package com.smartfactory.energy.simulator;
 import com.smartfactory.energy.equipment.Equipment;
 import com.smartfactory.energy.equipment.EquipmentRepository;
 import com.smartfactory.energy.equipment.EquipmentRole;
-import com.smartfactory.energy.ess.EssStatus;
 import com.smartfactory.energy.ess.EssStatusMinute;
 import com.smartfactory.energy.ess.EssStatusMinuteRepository;
 import com.smartfactory.energy.power.PowerMinute;
@@ -15,6 +14,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +23,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-// 1분(60초)간 MinuteBuffer에 모인 값을 평균/최대/최소/kWh로 집계해서 실시간 테이블에 저장합니다.
+// 1분(60초)간 MinuteBuffer에 모인 값을 평균으로 집계해서 실시간 테이블에 저장합니다.
 // 팀 공용 DB라서 시뮬레이터는 한 명(SIMULATOR_ENABLED=true)만 돌립니다.
 @Slf4j
 @Component
@@ -32,7 +32,9 @@ import org.springframework.stereotype.Component;
 public class MinuteAggregationJob {
 
     private static final int KW_SCALE = 2;
-    private static final int KWH_SCALE = 4;
+
+    // power_minute 15대 합을 load_kw에 정확히 맞출 때, 반올림 차이를 더해 넣을 설비
+    private static final String ROUNDING_ADJUST_EQUIPMENT_ID = "BRZ-01";
 
     private final SimClock simClock;
     private final MinuteBuffer minuteBuffer;
@@ -40,6 +42,7 @@ public class MinuteAggregationJob {
     private final PowerMinuteRepository powerMinuteRepository;
     private final SitePowerMinuteRepository sitePowerMinuteRepository;
     private final EssStatusMinuteRepository essStatusMinuteRepository;
+    private final EssSocState essSocState;
 
     private List<String> loadEquipmentIds;
 
@@ -50,83 +53,70 @@ public class MinuteAggregationJob {
         }
         LocalDateTime ts = simClock.now().truncatedTo(ChronoUnit.MINUTES);
 
-        saveSitePowerMinute(ts);
-        savePowerMinute(ts);
+        // 공장 소비 = 이번 1분간 재생한 raw_factory_load.factory_kw 60개의 평균
+        BigDecimal loadKw = avgOf(minuteBuffer.samplesOf(PowerSimulator.FACTORY_LOAD_KEY));
+        BigDecimal solarKw = avgOf(minuteBuffer.samplesOf(PowerSimulator.SOLAR_EQUIPMENT_ID));
+        BigDecimal essKw = avgOf(minuteBuffer.samplesOf(PowerSimulator.ESS_EQUIPMENT_ID));
+        // 한전 구매 = 소비 - 태양광 - ESS(+ 방전 / - 충전). 태양광/ESS가 소비보다 많으면 한전 구매는 0
+        BigDecimal gridKw = loadKw.subtract(solarKw).subtract(essKw);
+        if (gridKw.compareTo(BigDecimal.ZERO) < 0) {
+            gridKw = BigDecimal.ZERO;
+        }
+
+        saveSitePowerMinute(ts, gridKw, solarKw, essKw, loadKw);
+        savePowerMinute(ts, loadKw);
         saveEssStatusMinute(ts);
 
         minuteBuffer.clear();
     }
 
-    private void saveSitePowerMinute(LocalDateTime ts) {
+    private void saveSitePowerMinute(LocalDateTime ts, BigDecimal gridKw, BigDecimal solarKw, BigDecimal essKw,
+                                      BigDecimal loadKw) {
         if (sitePowerMinuteRepository.existsById(ts)) {
             log.debug("site_power_minute {} 이미 있어서 건너뜀", ts);
             return;
         }
-        BigDecimal gridKw = avgOf(minuteBuffer.samplesOf(PowerSimulator.GRID_EQUIPMENT_ID));
-        BigDecimal solarKw = avgOf(minuteBuffer.samplesOf(PowerSimulator.SOLAR_EQUIPMENT_ID));
-        BigDecimal essKw = avgOf(minuteBuffer.samplesOf(PowerSimulator.ESS_EQUIPMENT_ID));
-        BigDecimal loadKw = loadEquipmentIds().stream()
-                .map(id -> avgOf(minuteBuffer.samplesOf(id)))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
         sitePowerMinuteRepository.save(new SitePowerMinute(ts, gridKw, solarKw, essKw, loadKw));
     }
 
-    private void savePowerMinute(LocalDateTime ts) {
-        BigDecimal siteGridKwh = energyKwh(avgOf(minuteBuffer.samplesOf(PowerSimulator.GRID_EQUIPMENT_ID)));
-        BigDecimal siteSolarKwh = energyKwh(avgOf(minuteBuffer.samplesOf(PowerSimulator.SOLAR_EQUIPMENT_ID)));
-        BigDecimal siteEssKwh = energyKwh(avgOf(minuteBuffer.samplesOf(PowerSimulator.ESS_EQUIPMENT_ID)));
-
-        record LoadResult(String equipmentId, BigDecimal avg, BigDecimal max, BigDecimal min, BigDecimal energyKwh) {
+    private void savePowerMinute(LocalDateTime ts, BigDecimal loadKw) {
+        record LoadResult(String equipmentId, BigDecimal avg) {
         }
 
-        List<LoadResult> loadResults = loadEquipmentIds().stream()
-                .map(id -> {
-                    List<BigDecimal> s = minuteBuffer.samplesOf(id);
-                    BigDecimal avg = avgOf(s);
-                    return new LoadResult(id, avg, maxOf(s), minOf(s), energyKwh(avg));
-                })
-                .toList();
+        List<LoadResult> loadResults = new ArrayList<>(loadEquipmentIds().stream()
+                .map(id -> new LoadResult(id, avgOf(minuteBuffer.samplesOf(id))))
+                .toList());
 
-        BigDecimal totalLoadEnergyKwh = loadResults.stream()
-                .map(LoadResult::energyKwh)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        // 15대를 각각 반올림(avgOf가 이미 소수 2자리로 반올림)한 뒤 합이 load_kw보다 남거나 모자라면,
+        // 그 차이를 BRZ-01에 더해서 합이 load_kw와 0.00까지 정확히 같아지게 맞춥니다.
+        BigDecimal sumOfAvg = loadResults.stream().map(LoadResult::avg).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal diff = loadKw.subtract(sumOfAvg);
+        if (diff.compareTo(BigDecimal.ZERO) != 0) {
+            boolean adjusted = false;
+            for (int i = 0; i < loadResults.size(); i++) {
+                LoadResult r = loadResults.get(i);
+                if (r.equipmentId().equals(ROUNDING_ADJUST_EQUIPMENT_ID)) {
+                    loadResults.set(i, new LoadResult(r.equipmentId(), r.avg().add(diff)));
+                    adjusted = true;
+                    break;
+                }
+            }
+            if (!adjusted) {
+                log.warn("[POWER-MINUTE] {} 설비를 찾지 못해 load_kw 반올림 차이({})를 맞추지 못함",
+                        ROUNDING_ADJUST_EQUIPMENT_ID, diff);
+            }
+        }
 
         for (LoadResult r : loadResults) {
             PowerMinuteId id = new PowerMinuteId(r.equipmentId(), ts);
             if (powerMinuteRepository.existsById(id)) {
                 continue;
             }
-            // 이 설비가 그 1분간 전체 LOAD 소비 에너지에서 차지하는 비율만큼, 사이트 전체 에너지원을 나눠서 배분
-            BigDecimal share = totalLoadEnergyKwh.compareTo(BigDecimal.ZERO) == 0
-                    ? BigDecimal.ZERO
-                    : r.energyKwh().divide(totalLoadEnergyKwh, 8, RoundingMode.HALF_UP);
             PowerMinute powerMinute = new PowerMinute(
-                    r.equipmentId(), ts, r.avg(), r.max(), r.min(), r.energyKwh(),
-                    siteGridKwh.multiply(share).setScale(KWH_SCALE, RoundingMode.HALF_UP),
-                    siteSolarKwh.multiply(share).setScale(KWH_SCALE, RoundingMode.HALF_UP),
-                    siteEssKwh.multiply(share).setScale(KWH_SCALE, RoundingMode.HALF_UP),
+                    r.equipmentId(), ts, r.avg(),
                     r.avg().compareTo(BigDecimal.ZERO) > 0 ? (short) 1 : (short) 0);
             powerMinuteRepository.save(powerMinute);
         }
-
-        saveChannelEquipmentPowerMinute(ts, PowerSimulator.GRID_EQUIPMENT_ID);
-        saveChannelEquipmentPowerMinute(ts, PowerSimulator.SOLAR_EQUIPMENT_ID);
-        saveChannelEquipmentPowerMinute(ts, PowerSimulator.ESS_EQUIPMENT_ID);
-    }
-
-    // GRID-01/SOLAR-01/ESS-01은 그 자체가 하나의 에너지 채널이라 grid/solar/ess_kwh 배분 대상이 아니므로 null로 둡니다.
-    private void saveChannelEquipmentPowerMinute(LocalDateTime ts, String equipmentId) {
-        PowerMinuteId id = new PowerMinuteId(equipmentId, ts);
-        if (powerMinuteRepository.existsById(id)) {
-            return;
-        }
-        List<BigDecimal> samples = minuteBuffer.samplesOf(equipmentId);
-        BigDecimal avg = avgOf(samples);
-        PowerMinute powerMinute = new PowerMinute(
-                equipmentId, ts, avg, maxOf(samples), minOf(samples), energyKwh(avg),
-                null, null, null,
-                avg.compareTo(BigDecimal.ZERO) > 0 ? (short) 1 : (short) 0);
-        powerMinuteRepository.save(powerMinute);
     }
 
     private void saveEssStatusMinute(LocalDateTime ts) {
@@ -137,15 +127,7 @@ public class MinuteAggregationJob {
         BigDecimal batteryTemp = BigDecimal.valueOf(23)
                 .add(BigDecimal.valueOf(ThreadLocalRandom.current().nextDouble(-0.5, 0.5)))
                 .setScale(2, RoundingMode.HALF_UP);
-        EssStatusMinute status = new EssStatusMinute(
-                ts,
-                BigDecimal.ZERO.setScale(KW_SCALE, RoundingMode.HALF_UP),
-                BigDecimal.ZERO.setScale(KWH_SCALE, RoundingMode.HALF_UP),
-                BigDecimal.ZERO.setScale(KWH_SCALE, RoundingMode.HALF_UP),
-                BigDecimal.valueOf(60).setScale(2, RoundingMode.HALF_UP),
-                batteryTemp,
-                EssStatus.IDLE);
-        essStatusMinuteRepository.save(status);
+        essStatusMinuteRepository.save(new EssStatusMinute(ts, essSocState.get(), batteryTemp));
     }
 
     private List<String> loadEquipmentIds() {
@@ -157,23 +139,11 @@ public class MinuteAggregationJob {
         return loadEquipmentIds;
     }
 
-    private BigDecimal energyKwh(BigDecimal avgKw) {
-        return avgKw.divide(BigDecimal.valueOf(60), KWH_SCALE, RoundingMode.HALF_UP);
-    }
-
     private BigDecimal avgOf(List<BigDecimal> values) {
         if (values.isEmpty()) {
             return BigDecimal.ZERO.setScale(KW_SCALE, RoundingMode.HALF_UP);
         }
         BigDecimal sum = values.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
         return sum.divide(BigDecimal.valueOf(values.size()), KW_SCALE, RoundingMode.HALF_UP);
-    }
-
-    private BigDecimal maxOf(List<BigDecimal> values) {
-        return values.stream().max(BigDecimal::compareTo).orElse(BigDecimal.ZERO).setScale(KW_SCALE, RoundingMode.HALF_UP);
-    }
-
-    private BigDecimal minOf(List<BigDecimal> values) {
-        return values.stream().min(BigDecimal::compareTo).orElse(BigDecimal.ZERO).setScale(KW_SCALE, RoundingMode.HALF_UP);
     }
 }

@@ -132,7 +132,7 @@ public class SitePowerService {
                 round1(gridKw),
                 ess != null ? round1(toDouble(ess.getSoc())) : null,
                 ess != null && ess.getBatteryTemp() != null ? round1(toDouble(ess.getBatteryTemp())) : null,
-                ess != null ? pcsStatus(ess) : "STANDBY",
+                pcsStatus(essKw),
                 settingNumber("ess.soh_percent"),
                 weatherNow(now),
                 1,
@@ -194,12 +194,11 @@ public class SitePowerService {
         LocalDateTime start = today.atStartOfDay();
         LocalDateTime end = today.plusDays(1).atStartOfDay();
         List<SitePowerMinute> rows = sitePowerMinuteRepository.findInPeriod(start, end);
-        List<EssStatusMinute> essRows = essStatusMinuteRepository.findInPeriod(start, end);
         return new TodayEnergy(
                 round1(rows.stream().mapToDouble(r -> toDouble(r.getGridKw())).sum() / 60),
                 round1(rows.stream().mapToDouble(r -> toDouble(r.getSolarKw())).sum() / 60),
-                round1(essRows.stream().mapToDouble(e -> toDouble(e.getDischargeKwh())).sum()),
-                round1(essRows.stream().mapToDouble(e -> toDouble(e.getChargeKwh())).sum())
+                round1(rows.stream().mapToDouble(r -> Math.max(toDouble(r.getEssKw()), 0)).sum() / 60),
+                round1(rows.stream().mapToDouble(r -> Math.max(-toDouble(r.getEssKw()), 0)).sum() / 60)
         );
     }
 
@@ -210,7 +209,6 @@ public class SitePowerService {
             powerById.put(p.getEquipmentId(), p);
         }
         return equipmentRepository.findByEquipmentRole(EquipmentRole.LOAD).stream()
-                .filter(Equipment::getIsActive)
                 .sorted(Comparator.comparing(Equipment::getEquipmentId))
                 .map(e -> {
                     PowerMinute p = powerById.get(e.getEquipmentId());
@@ -218,7 +216,8 @@ public class SitePowerService {
                             e.getEquipmentId(),
                             e.getName(),
                             p != null ? round1(toDouble(p.getAvgKw())) : null,
-                            Boolean.TRUE.equals(e.getIsVirtual()) ? "SIMULATED" : "MEASURED",
+                            // 1번 모터(Z4-MOTOR1)만 실측, 나머지 생산 설비는 시뮬레이션
+                            "Z4-MOTOR1".equals(e.getEquipmentId()) ? "MEASURED" : "SIMULATED",
                             p == null ? null : (p.getIsRunning() != null && p.getIsRunning() == 1 ? "RUNNING" : "STOPPED")
                     );
                 })
@@ -283,13 +282,15 @@ public class SitePowerService {
         };
     }
 
-    // ESS 상태를 화면 코드로 바꿈
-    private String pcsStatus(EssStatusMinute ess) {
-        return switch (ess.getStatus()) {
-            case CHARGE -> "CHARGING";
-            case DISCHARGE -> "DISCHARGING";
-            case IDLE -> "STANDBY";
-        };
+    // ESS 상태를 ess_kw 부호로 구함 (+ 방전 / − 충전 / 0 대기)
+    private String pcsStatus(double essKw) {
+        if (essKw > 0) {
+            return "DISCHARGING";
+        }
+        if (essKw < 0) {
+            return "CHARGING";
+        }
+        return "STANDBY";
     }
 
     // 15분이 다 찬 구간만 (진행 중인 구간은 아직 결과가 아님)

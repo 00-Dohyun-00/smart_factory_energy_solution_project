@@ -1,5 +1,8 @@
 package com.smartfactory.energy.recommendation;
 
+import com.smartfactory.energy.ess.EssCommand;
+import com.smartfactory.energy.ess.EssCommandHolder;
+import com.smartfactory.energy.ess.EssStatus;
 import com.smartfactory.energy.event.EventLog;
 import com.smartfactory.energy.event.EventLogRepository;
 import com.smartfactory.energy.event.EventType;
@@ -7,6 +10,7 @@ import com.smartfactory.energy.global.exception.NotFoundException;
 import com.smartfactory.energy.power.DemandInterval15m;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
 import com.smartfactory.energy.recommendation.dto.RecommendationResponse;
+import com.smartfactory.energy.setting.SettingRepository;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -27,12 +31,14 @@ public class RecommendationService {
     // 한 번에 조회할 수 있는 최대 기간 (일)
     private static final int MAX_DAYS = 62;
 
+    // 로그인이 없어서 화면에서 적용/넘기면 처리자는 항상 "운영자"
+    private static final String OPERATOR = "운영자";
+
     private final RecommendationRepository recommendationRepository;
     private final DemandInterval15mRepository demandInterval15mRepository;
     private final EventLogRepository eventLogRepository;
-
-    // 로그인이 없어서 화면에서 처리하면 처리자는 항상 "운영자"
-    private static final String OPERATOR = "운영자";
+    private final SettingRepository settingRepository;
+    private final EssCommandHolder essCommandHolder;
 
     // 기간 안의 추천 이력 (최신 순)
     public List<RecommendationResponse> findInPeriod(LocalDate from, LocalDate to) {
@@ -94,13 +100,38 @@ public class RecommendationService {
             throw new IllegalArgumentException("이미 처리한 추천입니다.");
         }
 
-        // 3. 처리 결과 저장 + 이벤트 1줄
+        // 3. 처리 결과 저장 + 이벤트 1줄 + (적용이면) ESS에 명령
         LocalDateTime now = LocalDateTime.now().withNano(0); // 초 단위까지만
         recommendation.handle(newStatus, OPERATOR, now);
+        if (newStatus == RecommendationStatus.APPLIED) {
+            applyToEss(recommendation, now);
+        }
         eventLogRepository.save(new EventLog(now, EventType.HANDLE, null, handleMessage(recommendation),
                 recommendation.getRecommendationId()));
 
         return RecommendationResponse.from(recommendation, resultPeakOf(recommendation.getIntervalStart()));
+    }
+
+    // 추천의 action(충전/방전)과 power_kw로 ESS에 명령을 내림. 유지 시간은 decision_valid_minutes와
+    // 그 추천의 15분 구간이 끝나는 시각 중 더 빨리 오는 쪽까지
+    private void applyToEss(Recommendation recommendation, LocalDateTime now) {
+        if (recommendation.getAction() == RecommendationAction.IDLE) {
+            return;
+        }
+        LocalDateTime windowEnd = recommendation.getIntervalStart().plusMinutes(15);
+        LocalDateTime validUntil = now.plusMinutes(decisionValidMinutes());
+        if (validUntil.isAfter(windowEnd)) {
+            validUntil = windowEnd;
+        }
+        EssStatus essStatus = EssStatus.valueOf(recommendation.getAction().name());
+        essCommandHolder.set(new EssCommand(essStatus, recommendation.getPowerKw()), validUntil);
+    }
+
+    // 추천 적용을 ESS에 유지하는 시간(분). setting에 없으면 15분
+    private int decisionValidMinutes() {
+        return settingRepository.findById("operation.decision_valid_minutes")
+                .map(setting -> (int) Double.parseDouble(setting.getValue()))
+                .orElse(15);
     }
 
     // 이벤트 문장. 예: "방전 500 kW 적용 (운영자)", "피크 방어 추천을 넘김 (운영자)"
