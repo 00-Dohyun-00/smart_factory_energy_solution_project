@@ -933,6 +933,10 @@ const equipmentShareOption = computed(() => {
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
+/* 세 칸 각각 안에서 가운데 정렬. 숫자 칸 폭이 고정이라 값이 바뀌어도 단위 위치는 그대로 */
+.today > div {
+  text-align: center;
+}
 .today dt {
   font-size: 11px;
   color: var(--mute);
