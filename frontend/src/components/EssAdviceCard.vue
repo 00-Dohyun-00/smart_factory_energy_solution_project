@@ -43,6 +43,23 @@ const stateBadge = computed(() => {
   if (decision.status === 'IGNORED') return { text: '넘김', on: false }
   return null
 })
+
+// ---- 빈 곳 채움 아이콘 ----
+// 처리할 추천([적용]/[넘기기] 버튼)이 없으면 카드 아래가 비어 보이므로, 빈 곳에 배터리 아이콘과 안내를 연하게 보여 줌.
+// 새 충·방전 추천이 들어와 버튼이 나오면 사라지고 버튼이 그 자리를 씀
+const showFill = computed(() => !needsAnswer.value)
+// 그릴 모양: 적용 중(운영자·자동)인 충전·방전이면 그 동작, 그 밖(추천 없음·대기·넘김)은 멈춤
+const fillKind = computed(() => {
+  const decision = props.decision
+  const running = decision?.status === 'APPLIED' || decision?.status === 'AUTO'
+  if (running && decision.action === 'CHARGE') return 'CHARGE'
+  if (running && decision.action === 'DISCHARGE') return 'DISCHARGE'
+  return 'IDLE'
+})
+// 아직 처리 전인 대기 추천일 때만 "할 일 없음" 문장을 붙임
+const isIdleNow = computed(
+  () => props.decision?.action === 'IDLE' && props.decision?.status === 'RECOMMENDED',
+)
 </script>
 
 <template>
@@ -104,6 +121,39 @@ const stateBadge = computed(() => {
         <p v-else class="note">적용해도 실제 설비를 제어하지는 않습니다 (시뮬레이션).</p>
       </div>
     </template>
+
+    <!-- 빈 곳 채움: 배터리 아이콘 + 안내 (처리할 추천이 오면 사라짐, 남는 높이가 작으면 CSS에서 숨김) -->
+    <div v-if="showFill" class="idle-fill">
+      <div class="idle-inner" :class="fillKind.toLowerCase()">
+        <svg class="idle-icon" viewBox="0 0 52 30" aria-hidden="true">
+          <!-- 배터리 몸통과 꼭지 -->
+          <rect class="outline" x="1.5" y="1.5" width="43" height="27" rx="4" />
+          <rect class="solid" x="46" y="10" width="4.5" height="10" rx="1.5" />
+          <!-- 대기: 멈춤 표시 (‖) -->
+          <template v-if="fillKind === 'IDLE'">
+            <rect class="solid" x="17" y="8.5" width="4" height="13" rx="1" />
+            <rect class="solid" x="25" y="8.5" width="4" height="13" rx="1" />
+          </template>
+          <!-- 충전 중: 안쪽이 반쯤 차 있고 번개 (전기가 들어감) -->
+          <template v-else-if="fillKind === 'CHARGE'">
+            <rect class="level" x="5" y="5" width="18" height="20" rx="1.5" />
+            <path class="solid" d="M27 4 L18 17 H24 L21 26 L31 12 H25 Z" />
+          </template>
+          <!-- 방전 중: 안쪽이 반쯤 차 있고 오른쪽(밖)으로 나가는 화살표 (전기를 내보냄) -->
+          <template v-else>
+            <rect class="level" x="5" y="5" width="18" height="20" rx="1.5" />
+            <path class="arrow" d="M26 15 H39 M34 10 L39 15 L34 20" />
+          </template>
+        </svg>
+        <template v-if="fillKind === 'IDLE'">
+          <p v-if="isIdleNow" class="idle-title">지금은 할 일이 없습니다</p>
+          <p class="idle-sub">새 추천이 오면 여기에 표시됩니다</p>
+        </template>
+        <p v-else class="idle-sub">
+          배터리를 {{ fillKind === 'CHARGE' ? '충전' : '방전' }}하는 중입니다 (시뮬레이션)
+        </p>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -223,6 +273,75 @@ const stateBadge = computed(() => {
   font-size: 16px;
   line-height: 1.5;
   color: var(--ink);
+}
+
+/* 빈 곳 채움: 남은 높이를 차지하고 가운데에 연한 색으로 */
+.idle-fill {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  container-type: size; /* 아래 @container로 남은 높이를 재서, 작으면 글이나 아이콘을 숨김 */
+}
+.idle-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 100%;
+  color: var(--faint);
+  text-align: center;
+}
+/* 충전 중·방전 중 아이콘은 계기판의 충전(파랑)·방전(주황) 색을 옅게 씀 */
+.idle-inner.charge {
+  color: color-mix(in srgb, var(--gauge-charge) 75%, var(--card));
+}
+.idle-inner.discharge {
+  color: color-mix(in srgb, var(--gauge-discharge) 75%, var(--card));
+}
+/* 잘린 채 보이지 않도록: 높이가 모자라면 글을 먼저 숨기고, 아이콘도 안 들어가면 통째로 숨김 */
+@container (max-height: 84px) {
+  .idle-title,
+  .idle-sub {
+    display: none;
+  }
+}
+@container (max-height: 40px) {
+  .idle-inner {
+    display: none;
+  }
+}
+.idle-icon {
+  width: 52px;
+  height: 30px;
+  margin-bottom: 2px;
+}
+.idle-icon .outline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+}
+.idle-icon .solid {
+  fill: currentColor;
+}
+.idle-icon .level {
+  fill: currentColor;
+  opacity: 0.35;
+}
+.idle-icon .arrow {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.idle-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--mute);
+}
+.idle-sub {
+  font-size: 12px;
 }
 
 /* 버튼은 카드 맨 아래에 붙임 */

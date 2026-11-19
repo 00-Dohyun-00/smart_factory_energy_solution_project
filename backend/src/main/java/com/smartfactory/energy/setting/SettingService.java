@@ -35,6 +35,11 @@ public class SettingService {
     // 화면에서 바꿀 수 있는 true/false 키
     private static final String AUTO_MODE_KEY = "operation.auto_mode";
 
+    // 설비별 전력 임계치 키 (예: equipment.BRZ-01.max_kw). 설비마다 키가 있어서 앞뒤 글자로 알아봄
+    private static final String EQUIPMENT_KEY_PREFIX = "equipment.";
+    private static final String EQUIPMENT_KEY_SUFFIX = ".max_kw";
+    private static final double[] EQUIPMENT_RANGE = {1, 100000};
+
     private final SettingRepository settingRepository;
     private final SettingHistoryRepository settingHistoryRepository;
 
@@ -119,6 +124,9 @@ public class SettingService {
         }
 
         double[] range = NUMBER_RANGES.get(key);
+        if (range == null && key.startsWith(EQUIPMENT_KEY_PREFIX) && key.endsWith(EQUIPMENT_KEY_SUFFIX)) {
+            range = EQUIPMENT_RANGE;
+        }
         if (range == null) {
             throw new IllegalArgumentException(setting.getLabel() + "은(는) 화면에서 바꿀 수 없는 값입니다.");
         }

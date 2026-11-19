@@ -282,11 +282,11 @@ const peakMark = computed(() => {
         <p v-if="realtimeStore.status?.simulationSpeed > 1" class="speed">
           시뮬레이션 <span class="num">{{ realtimeStore.status.simulationSpeed }}</span>배속
         </p>
-        <!-- 날씨: 아이콘 + 기온 + 날씨 글자 (글자도 함께 적어 아이콘을 모르는 사람도 알 수 있게) -->
+        <!-- 날씨: 아이콘 + 날씨 글자 + 기온 (글자도 함께 적어 아이콘을 모르는 사람도 알 수 있게) -->
         <p v-if="realtimeStore.status" class="weather">
           <WeatherIcon :text="realtimeStore.status.weather.text" :size="26" />
-          <span class="weather-temp num">{{ realtimeStore.status.weather.tempC }}℃</span>
           <span class="weather-text">{{ realtimeStore.status.weather.text }}</span>
+          <span class="weather-temp num">{{ realtimeStore.status.weather.tempC }}℃</span>
         </p>
         <p v-if="realtimeStore.connected" class="connection on">
           <span aria-hidden="true">●</span> 연결됨
