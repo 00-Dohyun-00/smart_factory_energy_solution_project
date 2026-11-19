@@ -224,8 +224,11 @@ const zoneBottomY = 128
 const equipmentBottomY = 126
 
 // 숫자 글자 수에 따라 "kW"를 놓을 x 위치를 대략 잡음
+// 값이 없을 때 쓰는 줄표(—)는 숫자보다 두 배쯤 넓어서 한 글자로 세면 뒤의 "kW"와 겹침 (서버 연결이 끊겼을 때 등)
+// → 줄표는 숫자 두 글자 폭으로 셈
 function unitX(left, text, charWidth) {
-  return left + text.length * charWidth + 8
+  const width = [...text].reduce((sum, char) => sum + (char === '—' ? 2 : 1), 0)
+  return left + width * charWidth + 8
 }
 </script>
 

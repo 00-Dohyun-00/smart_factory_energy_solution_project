@@ -251,6 +251,7 @@ function sliceIndexAt(event, values) {
 
 // 구역 원그래프에서 조각을 누르면 그 구역을 고름 (계통도에서 구역을 누른 것과 같음)
 function onZoneDonutClick(event) {
+  if (donutOffline.value) return // 연결이 끊긴 회색 고리는 누를 조각이 없음
   const values = zoneShareOption.value.series[0].data.map((item) => item.value)
   const index = sliceIndexAt(event, values)
   if (index >= 0) selectedZone.value = ZONE_ORDER[index]
@@ -258,6 +259,7 @@ function onZoneDonutClick(event) {
 
 // 설비 원그래프에서 조각을 누르면 그 설비 버튼을 누른 것과 같음 (다시 누르면 풀림)
 function onEquipmentDonutClick(event) {
+  if (donutOffline.value) return // 연결이 끊긴 회색 고리는 누를 조각이 없음
   const index = sliceIndexAt(
     event,
     equipmentRows.value.map((item) => item.loadKw),
@@ -268,6 +270,25 @@ function onEquipmentDonutClick(event) {
 // ---- 원그래프 두 개 (공장 안 구역 비율, 구역 안 설비 비율) ----
 // 고른 조각은 진한 색으로 칠하고 바깥으로 조금 빼서(selected) 강조하고, 나머지는 옅게 그림
 const ZONE_ORDER = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'Z6']
+
+// 서버 연결이 끊겼거나 아직 값을 못 받았으면 원그래프 두 개를 통째로 회색 고리로 그림
+// (끊긴 뒤의 옛 비율을 계속 보여 주면 지금 값처럼 보이기 때문. 구역·설비 색에는 회색을 쓰지 않아 헷갈리지 않음)
+const donutOffline = computed(() => !realtimeStore.connected || !status.value)
+function offlineDonutOption() {
+  return {
+    animation: false,
+    tooltip: { show: false },
+    series: [
+      {
+        type: 'pie',
+        radius: ['50%', '86%'],
+        silent: true,
+        label: { show: false },
+        data: [{ value: 1, name: '연결 끊김', itemStyle: { color: COLOR.lost, opacity: 0.45 } }],
+      },
+    ],
+  }
+}
 
 function donutOption(items, unitLabel) {
   return {
@@ -294,6 +315,7 @@ function donutOption(items, unitLabel) {
 
 // 공장 전체 전력에서 각 구역이 차지하는 비율 (고른 구역 강조)
 const zoneShareOption = computed(() => {
+  if (donutOffline.value) return offlineDonutOption()
   const equipments = status.value?.equipments ?? []
   const items = ZONE_ORDER.map((zoneId) => {
     const isSelected = zoneId === selectedZone.value
@@ -318,6 +340,7 @@ const zoneShareOption = computed(() => {
 // 이 구역 전력에서 각 설비가 차지하는 비율
 // 색은 구역 색, 설비마다 진하기만 다름 (계통도 설비 상자와 같은 색). 설비를 고르면 그 조각만 테두리 + 나머지 옅게
 const equipmentShareOption = computed(() => {
+  if (donutOffline.value) return offlineDonutOption()
   const color = COLOR[zoneColorKey(selectedZone.value)]
   const items = equipmentRows.value.map((item) => {
     const isSelected = item.id === selectedEquipment.value
@@ -449,8 +472,7 @@ const equipmentShareOption = computed(() => {
             >
               <!-- key: 고른 구역이 바뀌면 그래프를 새로 그림 (아래 설비 원그래프 설명 참고) -->
               <Chart
-                v-if="status"
-                :key="`zone-${selectedZone}`"
+                :key="`zone-${selectedZone}-${donutOffline}`"
                 :option="zoneShareOption"
                 :height="124"
               />
@@ -564,8 +586,8 @@ const equipmentShareOption = computed(() => {
                    공통 차트(Chart.vue)는 이전 설정에 새 설정을 덮어쓰는데, 원그래프의 "선택된 조각"은
                    다른 조각으로 바꿀 때 이전 조각의 선택이 풀리지 않아 두 조각이 함께 튀어나와 보였음 -->
               <Chart
-                v-if="equipmentRows.length"
-                :key="`equipment-${selectedZone}-${selectedEquipment}`"
+                v-if="equipmentRows.length || donutOffline"
+                :key="`equipment-${selectedZone}-${selectedEquipment}-${donutOffline}`"
                 :option="equipmentShareOption"
                 :height="124"
               />
