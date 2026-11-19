@@ -27,6 +27,8 @@ const COLOR_VARS = {
   ess: '--src-ess',
   band: '--band',
   target: '--target-line',
+  load: '--load-line',
+  gridLine: '--grid-line',
   labelBg: '--label-bg',
   legendText: '--legend-text',
   heat1: '--heat-1',

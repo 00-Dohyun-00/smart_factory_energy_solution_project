@@ -1147,6 +1147,7 @@ export async function fakeGetTodayStatuses() {
       loadKw: Math.round(item.loadKw),
       solarKw: Math.round(item.solarKw),
       gridKw: Math.round(item.gridKw),
+      essKw: Math.round(item.essKw), // ESS 충·방전 (방전 +, 충전 −). 명세에 없는 필드라 백엔드와 확정 필요
       socPercent: round1(item.socPercent),
     }))
 }
