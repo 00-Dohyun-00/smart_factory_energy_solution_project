@@ -15,7 +15,12 @@ const settingsStore = useSettingsStore()
 const themeStore = useThemeStore() // 라이트 / 다크 테마 (아래쪽 버튼으로 바꿈)
 
 // 폴링 주기(초). 환경 설정의 "화면 갱신 주기"를 쓰고, 아직 못 받았으면 5초
-const pollSeconds = computed(() => settingsStore.values['operation.poll_seconds'] ?? 5)
+// 설정 값이 숫자가 아니거나(예: 'NaN', '5f') 1보다 작으면 기본 5초를 씀.
+// 그대로 쓰면 setInterval(…, NaN)이 되어 쉬지 않고 요청을 보내게 됨 (이슈 #24, #25)
+const pollSeconds = computed(() => {
+  const value = settingsStore.values['operation.poll_seconds']
+  return Number.isFinite(value) && value >= 1 ? value : 5
+})
 let timer = null
 
 // 주기에 맞춰 최신 상태를 반복해서 받음. 주기가 바뀌면 이전 반복을 멈추고 새로 시작함
@@ -190,8 +195,9 @@ const peakMark = computed(() => {
           {{ realtimeStore.connected ? '●' : '◆' }}
         </span>
         <!-- 접었을 때도 날씨는 아이콘으로 보여 줌 (마우스를 올리면 글자와 기온) -->
+        <!-- 날씨 기록이 없으면 백엔드가 weather를 null로 줌 → 그때는 날씨 칸을 숨김 (안 숨기면 화면 전체가 오류로 멈춤) -->
         <span
-          v-if="realtimeStore.status"
+          v-if="realtimeStore.status?.weather"
           class="rail-weather"
           :title="`${realtimeStore.status.weather.text} ${realtimeStore.status.weather.tempC}℃`"
         >
@@ -283,7 +289,7 @@ const peakMark = computed(() => {
           시뮬레이션 <span class="num">{{ realtimeStore.status.simulationSpeed }}</span>배속
         </p>
         <!-- 날씨: 아이콘 + 날씨 글자 + 기온 (글자도 함께 적어 아이콘을 모르는 사람도 알 수 있게) -->
-        <p v-if="realtimeStore.status" class="weather">
+        <p v-if="realtimeStore.status?.weather" class="weather">
           <WeatherIcon :text="realtimeStore.status.weather.text" :size="26" />
           <span class="weather-text">{{ realtimeStore.status.weather.text }}</span>
           <span class="weather-temp num">{{ realtimeStore.status.weather.tempC }}℃</span>

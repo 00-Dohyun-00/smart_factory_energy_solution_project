@@ -67,11 +67,27 @@ const showPins = ref(true) // 전력 그래프 위에 추천 기호를 보일지
 // "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
 const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) ?? '')
 
-const dateError = computed(() =>
-  fromDate.value && toDate.value && fromDate.value > toDate.value
-    ? '시작일이 종료일보다 늦습니다.'
-    : '',
-)
+// 백엔드가 한 번에 조회해 주는 최대 기간 (넘으면 400을 줌)
+const MAX_DAYS = 62
+
+// '2026-11-01' ~ '2026-11-18' → 18 (시작일과 종료일을 모두 셈)
+function dayCount(from, to) {
+  const toTime = (date) => {
+    const [year, month, day] = date.split('-').map(Number)
+    return new Date(year, month - 1, day).getTime()
+  }
+  return Math.round((toTime(to) - toTime(from)) / 86400000) + 1
+}
+
+const dateError = computed(() => {
+  if (!fromDate.value || !toDate.value) return ''
+  if (fromDate.value > toDate.value) return '시작일이 종료일보다 늦습니다.'
+  // 요청을 보내기 전에 막음 (보내면 400이 나고 [다시 시도]를 눌러도 계속 실패함 — 이슈 #25)
+  if (dayCount(fromDate.value, toDate.value) > MAX_DAYS) {
+    return `기간은 최대 ${MAX_DAYS}일까지 조회할 수 있습니다.`
+  }
+  return ''
+})
 
 // '2026-11-14'에서 며칠 전 날짜 구하기
 function daysBefore(date, days) {
@@ -107,6 +123,8 @@ watch([fromDate, toDate, interval], () => {
 // (1분마다 자동으로 다시 받지는 않음: 그래프를 좌우로 옮겨 보던 위치가 처음으로 돌아가지 않게)
 watch([fromDate, toDate], () => {
   if (!fromDate.value || !toDate.value || dateError.value) return
+  // 간격이 1시간이면 위 load()의 추이 결과를 스토어가 패턴에도 넣어 주므로 따로 받지 않음 (이슈 #25)
+  if (interval.value === 'HOUR') return
   analysisStore.fetchPattern(fromDate.value, toDate.value)
 })
 
@@ -140,7 +158,8 @@ const isOverTarget = (kw) => targetKw.value !== null && kw > targetKw.value
 
 // 최대 피크 아래 줄의 판정. 목표 값이 없으면 판정 없이 시각만 보여 줌
 const maxPeakVerdict = computed(() => {
-  if (targetKw.value === null || !summary.value) return ''
+  // 최대 피크 값이 없을 때도 판정하지 않음 (null은 목표보다 작다고 계산되어 "목표 달성"으로 보였음 — 이슈 #25)
+  if (targetKw.value === null || summary.value?.maxPeakKw == null) return ''
   return isOverTarget(summary.value.maxPeakKw) ? ', 목표 초과' : ', 목표 달성'
 })
 
@@ -257,6 +276,8 @@ const weatherByDate = computed(() => {
   for (const item of trend.value?.weather ?? []) result[item.date.slice(5)] = item.text
   return result
 })
+// 날짜 순번은 그래프 가로축 칸(labels)의 날짜에서 구함.
+// (날씨 목록에서 구하면, 날씨 기록이 없는 기간에는 순번이 비어 가로축 날짜가 모두 사라졌음 — 이슈 #25)
 const dayNumbers = computed(() => {
   const result = {}
   let count = 0
@@ -266,6 +287,8 @@ const dayNumbers = computed(() => {
   }
   return result
 })
+// 바깥 기온 기록이 하나라도 있는지 (없으면 온도 그래프 범례에서 "바깥 기온"을 뺌)
+const hasOutsideTemp = computed(() => points.value.some((item) => item.outsideTempC != null))
 // 날씨 정보가 있는지 (없으면 온도 그래프 가로축을 한 줄로 적어 아래 여백을 줄임)
 const hasWeather = computed(() => (trend.value?.weather ?? []).length > 0)
 
@@ -567,7 +590,10 @@ const tempOption = computed(() => {
 // 순위 보기: 백엔드가 준 시각별 평균을 큰 순서로 정렬만 함. 막대 길이는 1위를 100%로 본 비율(표시용)
 const RANK_COUNT = 10 // 순위 보기에서 보여 줄 개수
 const hourlyRanks = computed(() => {
-  const sorted = [...(trend.value?.hourly ?? [])].sort((a, b) => b.avgGridKw - a.avgGridKw)
+  // 기록이 없는 시각(avgGridKw가 null)은 빼고 정렬 (null이 0처럼 정렬되어 순위에 섞였음 — 이슈 #25)
+  const sorted = (trend.value?.hourly ?? [])
+    .filter((item) => item.avgGridKw != null)
+    .sort((a, b) => b.avgGridKw - a.avgGridKw)
   const top = sorted[0]?.avgGridKw || 1
   return sorted.slice(0, RANK_COUNT).map((item, index) => ({
     rank: index + 1,
@@ -940,7 +966,10 @@ const patternOption = computed(() => {
                 <!-- 범례 (그래프 선 색과 같음) -->
                 <span class="temp-legend">
                   <span class="legend-swatch room" aria-hidden="true"></span>배터리실 온도
-                  <span class="legend-swatch outside" aria-hidden="true"></span>바깥 기온
+                  <!-- 바깥 기온 기록이 하나도 없으면 선이 없으므로 범례에서도 뺌 (이슈 #25) -->
+                  <template v-if="hasOutsideTemp">
+                    <span class="legend-swatch outside" aria-hidden="true"></span>바깥 기온
+                  </template>
                 </span>
               </h2>
               <Chart :option="tempOption" :height="84" />
@@ -1015,7 +1044,9 @@ const patternOption = computed(() => {
               </p>
             </template>
             <template v-else>
-              <div class="rank-scroll">
+              <!-- 기록 없는 시각을 빼고 나면 남는 칸이 없을 수 있음 (이슈 #25) -->
+              <p v-if="!hourlyRanks.length" class="foot-note">시각별 기록이 없습니다.</p>
+              <div v-else class="rank-scroll">
                 <ol class="ranks">
                   <li v-for="item in hourlyRanks" :key="item.hour">
                     <span class="rank num">{{ item.rank }}</span>

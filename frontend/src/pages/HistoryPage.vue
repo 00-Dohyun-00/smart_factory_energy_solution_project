@@ -41,11 +41,27 @@ let timer = null
 // "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
 const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) ?? '')
 
-const dateError = computed(() =>
-  fromDate.value && toDate.value && fromDate.value > toDate.value
-    ? '시작일이 종료일보다 늦습니다.'
-    : '',
-)
+// 백엔드가 한 번에 조회해 주는 최대 기간 (넘으면 400을 줌)
+const MAX_DAYS = 62
+
+// '2026-11-01' ~ '2026-11-18' → 18 (시작일과 종료일을 모두 셈)
+function dayCount(from, to) {
+  const toTime = (date) => {
+    const [year, month, day] = date.split('-').map(Number)
+    return new Date(year, month - 1, day).getTime()
+  }
+  return Math.round((toTime(to) - toTime(from)) / 86400000) + 1
+}
+
+const dateError = computed(() => {
+  if (!fromDate.value || !toDate.value) return ''
+  if (fromDate.value > toDate.value) return '시작일이 종료일보다 늦습니다.'
+  // 요청을 보내기 전에 막음 (보내면 400이 남 — 이슈 #25)
+  if (dayCount(fromDate.value, toDate.value) > MAX_DAYS) {
+    return `기간은 최대 ${MAX_DAYS}일까지 조회할 수 있습니다.`
+  }
+  return ''
+})
 
 // '2026-11-14'에서 며칠 전 날짜 구하기
 function daysBefore(date, days) {
@@ -100,7 +116,12 @@ watch([fromDate, toDate], () => {
 // 위의 감시(watch)가 기간이 바뀐 것을 보고 바로 조회함. 기간이 올바르지 않으면 무시하고 아래처럼 "오늘"로 시작
 const queryFrom = route.query.from
 const queryTo = route.query.to
-if (isValidDate(queryFrom) && isValidDate(queryTo) && queryFrom <= queryTo) {
+if (
+  isValidDate(queryFrom) &&
+  isValidDate(queryTo) &&
+  queryFrom <= queryTo &&
+  dayCount(queryFrom, queryTo) <= MAX_DAYS
+) {
   preset.value = 'custom'
   fromDate.value = queryFrom
   toDate.value = queryTo
@@ -117,7 +138,9 @@ watch(
 
 onMounted(() => {
   // 조회 기간에 오늘이 들어 있을 때만 자동으로 다시 받음 (지난 기간은 바뀌지 않으므로)
+  // 브라우저 탭이 숨겨져 있으면(다른 탭을 보는 중) 요청하지 않음 (CLAUDE.md 폴링 규칙 — 이슈 #25)
   timer = setInterval(() => {
+    if (document.hidden) return
     if (toDate.value >= serverDate.value) load(false)
   }, REFRESH_INTERVAL_MS)
 })
@@ -262,7 +285,13 @@ function toggle(id) {
     <!-- 이력 표 -->
     <section class="card table-card">
       <p v-if="historyStore.errorMessage" class="notice" role="alert">
-        이력을 불러오지 못했습니다. ({{ historyStore.errorMessage }})
+        <!-- 실패해도 이전 목록은 지우지 않으므로, 아래 표가 지금 기간의 것이 아니라는 걸 알려 줌 (이슈 #25) -->
+        {{
+          historyStore.decisions.length
+            ? '새 이력을 불러오지 못해 이전에 받은 이력을 보여 줍니다.'
+            : '이력을 불러오지 못했습니다.'
+        }}
+        ({{ historyStore.errorMessage }})
         <button class="retry" @click="load()">다시 시도</button>
       </p>
 
