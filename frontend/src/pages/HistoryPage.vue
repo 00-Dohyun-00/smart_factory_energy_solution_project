@@ -138,7 +138,9 @@ watch(
 
 onMounted(() => {
   // 조회 기간에 오늘이 들어 있을 때만 자동으로 다시 받음 (지난 기간은 바뀌지 않으므로)
+  // 브라우저 탭이 숨겨져 있으면(다른 탭을 보는 중) 요청하지 않음 (CLAUDE.md 폴링 규칙 — 이슈 #25)
   timer = setInterval(() => {
+    if (document.hidden) return
     if (toDate.value >= serverDate.value) load(false)
   }, REFRESH_INTERVAL_MS)
 })

@@ -121,6 +121,8 @@ watch([fromDate, toDate, interval], () => {
 // (1분마다 자동으로 다시 받지는 않음: 그래프를 좌우로 옮겨 보던 위치가 처음으로 돌아가지 않게)
 watch([fromDate, toDate], () => {
   if (!fromDate.value || !toDate.value || dateError.value) return
+  // 간격이 1시간이면 위 load()의 추이 결과를 스토어가 패턴에도 넣어 주므로 따로 받지 않음 (이슈 #25)
+  if (interval.value === 'HOUR') return
   analysisStore.fetchPattern(fromDate.value, toDate.value)
 })
 

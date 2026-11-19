@@ -15,7 +15,12 @@ const settingsStore = useSettingsStore()
 const themeStore = useThemeStore() // 라이트 / 다크 테마 (아래쪽 버튼으로 바꿈)
 
 // 폴링 주기(초). 환경 설정의 "화면 갱신 주기"를 쓰고, 아직 못 받았으면 5초
-const pollSeconds = computed(() => settingsStore.values['operation.poll_seconds'] ?? 5)
+// 설정 값이 숫자가 아니거나(예: 'NaN', '5f') 1보다 작으면 기본 5초를 씀.
+// 그대로 쓰면 setInterval(…, NaN)이 되어 쉬지 않고 요청을 보내게 됨 (이슈 #24, #25)
+const pollSeconds = computed(() => {
+  const value = settingsStore.values['operation.poll_seconds']
+  return Number.isFinite(value) && value >= 1 ? value : 5
+})
 let timer = null
 
 // 주기에 맞춰 최신 상태를 반복해서 받음. 주기가 바뀌면 이전 반복을 멈추고 새로 시작함
