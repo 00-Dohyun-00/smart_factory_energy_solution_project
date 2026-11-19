@@ -124,7 +124,7 @@ public class SitePowerService {
         Double monthPeakKw = maxPeak(monthIntervals);
 
         return new SitePowerLatestResponse(
-                now,
+                latest.getTs(), // 값과 같은 줄의 기록 시각 (시뮬레이터가 멈추면 이 시각에서 멈춰 있어 오래된 값임을 알 수 있음)
                 round1(loadKw),
                 round1(solarKw),
                 round1(chargeKw),
@@ -214,7 +214,9 @@ public class SitePowerService {
                     PowerMinute p = powerById.get(e.getEquipmentId());
                     return new EquipmentPower(
                             e.getEquipmentId(),
+                            e.getZoneCode(),
                             e.getName(),
+                            e.getRatedKw() != null ? round1(toDouble(e.getRatedKw())) : null,
                             p != null ? round1(toDouble(p.getAvgKw())) : null,
                             // 1번 모터(Z4-MOTOR1)만 실측, 나머지 생산 설비는 시뮬레이션
                             "Z4-MOTOR1".equals(e.getEquipmentId()) ? "MEASURED" : "SIMULATED",
