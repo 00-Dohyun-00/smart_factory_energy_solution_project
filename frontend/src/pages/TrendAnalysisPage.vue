@@ -7,6 +7,7 @@
 -->
 <script setup>
 import { computed, ref, watch } from 'vue'
+import * as echarts from 'echarts'
 import Chart from '@/components/Chart.vue'
 import FitChart from '@/components/FitChart.vue'
 import { useThemeStore } from '@/stores/useThemeStore'
@@ -157,6 +158,60 @@ const highlightValue = (item) =>
 
 function toggleFocus(at) {
   focusAt.value = focusAt.value === at ? '' : at
+}
+// 고른 "눈에 띄는 구간"의 내용 (그래프 세로선 위에 적음). 예: "11-11 09:30 최대 피크 1,617 kW"
+const focusText = computed(() => {
+  const item = trend.value?.highlights?.find((highlight) => highlight.at === focusAt.value)
+  return item
+    ? `${shortTime(item.at)} ${item.label} ${highlightValue(item)} ${item.unit}`.trim()
+    : ''
+})
+
+// ---- 세 그래프의 마우스 점선 맞추기 ----
+// 한 그래프에 마우스를 올리면 나오는 세로 점선(과 툴팁)을 전력 · 배터리 잔량 · 온도 그래프에 같은 시각으로 함께 보여 줌.
+// 마우스가 올라간 그래프의 시각 칸 번호를 받아, 나머지 그래프에 "그 칸의 툴팁을 보여 줘"(showTip)라고 알림.
+// 점선은 각 그래프 칸 안에만 그려져서, 그래프 사이(제목 · 여백)에는 보이지 않음.
+// 그래프는 공통 차트(Chart.vue)가 만들므로, 여기서는 이미 만들어진 그래프를 찾아 마우스 알림만 연결함
+const chartsBox = ref(null)
+let syncing = false // 다른 그래프에 알리는 중이면 true (알림이 서로 되돌아오며 반복되지 않게)
+
+// 지금 화면에 있는 세 그래프 (위에서부터 순서대로)
+function chartInstances() {
+  return [...(chartsBox.value?.querySelectorAll('[_echarts_instance_]') ?? [])]
+    .map((element) => echarts.getInstanceByDom(element))
+    .filter((instance) => instance)
+}
+
+// 마우스가 그래프 영역에 들어올 때마다 연결 (그래프를 새로 만들어도 다시 연결되도록, 이미 연결한 그래프는 건너뜀)
+function linkCharts() {
+  for (const instance of chartInstances()) {
+    if (instance.trendLinked) continue
+    instance.trendLinked = true
+    // 이 그래프의 점선이 움직이면 같은 칸을 나머지 그래프에도 보여 줌
+    instance.on('updateAxisPointer', (event) => {
+      const index = event.axesInfo?.[0]?.value
+      if (syncing || index === undefined) return
+      syncing = true
+      for (const other of chartInstances()) {
+        if (other === instance) continue
+        // 그 칸에 값이 있는 선을 골라 알림 (값이 비어 있는 선을 고르면 툴팁·점선이 나오지 않음. 예: 바깥 기온이 없는 날)
+        const series = other.getOption().series ?? []
+        const seriesIndex = series.findIndex((item) => {
+          const point = item.data?.[index]
+          return point !== null && point !== undefined && (point.value ?? point) !== null
+        })
+        if (seriesIndex >= 0)
+          other.dispatchAction({ type: 'showTip', seriesIndex, dataIndex: index })
+      }
+      syncing = false
+    })
+    // 마우스가 이 그래프를 벗어나면 나머지 그래프의 점선·툴팁도 숨김
+    instance.getZr().on('globalout', () => {
+      for (const other of chartInstances()) {
+        if (other !== instance) other.dispatchAction({ type: 'hideTip' })
+      }
+    })
+  }
 }
 
 // ---- 그래프 공통 ----
@@ -336,7 +391,12 @@ function markLines(lines, withPins = false) {
       data.push({
         xAxis: label,
         lineStyle: { color: 'rgba(0, 0, 0, 0)' },
-        label: { formatter: pinShapes(list), position: 'end', color: COLOR.legendText, fontSize: 11 },
+        label: {
+          formatter: pinShapes(list),
+          position: 'end',
+          color: COLOR.legendText,
+          fontSize: 11,
+        },
       })
     }
   }
@@ -347,7 +407,7 @@ function markLines(lines, withPins = false) {
       // 세로선 위쪽 끝(그래프 위 여백)에 적음. 작은 그래프의 위 여백(16px)에도 들어가게 11px,
       // 바탕을 칠해 다른 선 · 글자와 겹쳐도 읽히게 함
       label: {
-        formatter: '선택',
+        formatter: focusText.value || '선택',
         position: 'end',
         distance: 1,
         color: COLOR.ink,
@@ -820,7 +880,7 @@ const patternOption = computed(() => {
           세 그래프는 그대로 위아래로 두어 가로축(시각)을 맞춤.
           전력은 따로 카드 하나, 배터리 잔량과 온도·날씨는 보조 그래프라 카드 하나를 함께 씀
         -->
-        <div class="charts">
+        <div ref="chartsBox" class="charts" @mouseenter="linkCharts">
           <section v-if="powerItems.length" class="card power-card">
             <h2 class="chart-title main-chart">
               전력 <small>kW</small>
@@ -948,7 +1008,9 @@ const patternOption = computed(() => {
                       <span class="rank-bar" :style="{ width: `${item.width}%` }"></span>
                     </span>
                     <span class="rank-kw num">{{ formatKw(item.avgGridKw) }} kW</span>
-                    <span class="rank-period" :class="{ peak: item.isPeak }">{{ item.period }}</span>
+                    <span class="rank-period" :class="{ peak: item.isPeak }">{{
+                      item.period
+                    }}</span>
                   </li>
                 </ol>
               </div>
