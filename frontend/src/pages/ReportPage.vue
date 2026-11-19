@@ -35,6 +35,8 @@ const themeStore = useThemeStore()
 const COLOR = themeStore.colors
 // 그래프 툴팁도 지금 테마 색으로
 const tooltipColors = () => ({
+  // 툴팁 창을 페이지 맨 위(body)에 붙여, 카드·그래프 칸 밖으로 나가도 잘리지 않게 함
+  appendTo: 'body',
   backgroundColor: COLOR.card,
   borderColor: COLOR.line,
   textStyle: { color: COLOR.ink },
