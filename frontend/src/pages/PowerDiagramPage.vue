@@ -343,28 +343,6 @@ const equipmentShareOption = computed(() => {
       <span class="crumb-parent">모니터링</span>
       <span class="crumb-parent" aria-hidden="true">›</span>
       <h1 class="crumb-title">설비 모니터링</h1>
-      <!-- 설비 게이지 보기 방식: 계통도의 설비 상자와 오른쪽 설비 목록 막대에 함께 적용 -->
-      <div class="gauge-switch">
-        <span class="gauge-switch-label">설비 게이지</span>
-        <div class="presets" role="group" aria-label="설비 게이지 보기 방식">
-          <button
-            :class="{ active: gaugeMode === 'relative' }"
-            :aria-pressed="gaugeMode === 'relative'"
-            title="구역 전력 중 그 설비가 차지하는 비율"
-            @click="gaugeMode = 'relative'"
-          >
-            상대값 (구역 대비 %)
-          </button>
-          <button
-            :class="{ active: gaugeMode === 'absolute' }"
-            :aria-pressed="gaugeMode === 'absolute'"
-            title="설비 전력(kW). 환경 설정의 임계치가 게이지 90% 지점, 그 뒤는 빨간 구간"
-            @click="gaugeMode = 'absolute'"
-          >
-            절대값 (임계치 기준)
-          </button>
-        </div>
-      </div>
     </div>
 
     <!-- 서버 연결이 끊겼다는 알림은 공통 틀(MainLayout)이 모든 화면에 띄움 -->
@@ -377,9 +355,31 @@ const equipmentShareOption = computed(() => {
     <div class="row">
       <!-- 계통도 -->
       <section class="card tree-card">
-        <div class="card-head">
+        <div class="card-head tree-head">
           <h2 class="card-title">전력 계통</h2>
-          <!-- 오른쪽: 안내 글(1줄) 아래에 차단기 범례(2줄) -->
+          <!-- 설비 게이지 보기 방식 (전력 계통 카드 제목 줄 오른쪽 끝): 계통도의 설비 상자와 오른쪽 설비 목록 막대에 함께 적용 -->
+          <div class="gauge-switch">
+            <span class="gauge-switch-label">설비 게이지</span>
+            <div class="presets" role="group" aria-label="설비 게이지 보기 방식">
+              <button
+                :class="{ active: gaugeMode === 'relative' }"
+                :aria-pressed="gaugeMode === 'relative'"
+                title="구역 전력 중 그 설비가 차지하는 비율"
+                @click="gaugeMode = 'relative'"
+              >
+                상대값 (구역 대비 %)
+              </button>
+              <button
+                :class="{ active: gaugeMode === 'absolute' }"
+                :aria-pressed="gaugeMode === 'absolute'"
+                title="설비 전력(kW). 환경 설정의 임계치가 게이지 90% 지점, 그 뒤는 빨간 구간"
+                @click="gaugeMode = 'absolute'"
+              >
+                절대값 (임계치 기준)
+              </button>
+            </div>
+          </div>
+          <!-- 다음 줄 오른쪽: 안내 글 + 차단기 범례 -->
           <div class="head-right">
             <span class="note">구역을 누르면 설비가 펼쳐집니다</span>
             <!-- 범례: 선 위의 작은 네모는 차단기 기호 (도면 표기, 상태 정보는 없음) -->
@@ -447,7 +447,13 @@ const equipmentShareOption = computed(() => {
               :aria-label="`공장 전체 전력 중 구역별 비율, ${ZONE_LABELS[selectedZone]} 강조. 조각을 누르면 그 구역을 고릅니다`"
               @click="onZoneDonutClick"
             >
-              <Chart v-if="status" :option="zoneShareOption" :height="130" />
+              <!-- key: 고른 구역이 바뀌면 그래프를 새로 그림 (아래 설비 원그래프 설명 참고) -->
+              <Chart
+                v-if="status"
+                :key="`zone-${selectedZone}`"
+                :option="zoneShareOption"
+                :height="124"
+              />
             </div>
             <figcaption class="donut-caption">구역별 전력 비율</figcaption>
           </figure>
@@ -554,7 +560,15 @@ const equipmentShareOption = computed(() => {
               aria-label="이 구역 전력 중 설비별 비율. 조각을 누르면 그 설비를 고릅니다"
               @click="onEquipmentDonutClick"
             >
-              <Chart v-if="equipmentRows.length" :option="equipmentShareOption" :height="130" />
+              <!-- key: 고른 설비가 바뀌면 그래프를 새로 그림.
+                   공통 차트(Chart.vue)는 이전 설정에 새 설정을 덮어쓰는데, 원그래프의 "선택된 조각"은
+                   다른 조각으로 바꿀 때 이전 조각의 선택이 풀리지 않아 두 조각이 함께 튀어나와 보였음 -->
+              <Chart
+                v-if="equipmentRows.length"
+                :key="`equipment-${selectedZone}-${selectedEquipment}`"
+                :option="equipmentShareOption"
+                :height="124"
+              />
             </div>
             <figcaption class="donut-caption">설비별 전력 비율</figcaption>
           </figure>
@@ -574,16 +588,37 @@ const equipmentShareOption = computed(() => {
   padding: 20px;
   overflow: hidden;
 }
-/* 제목 줄 오른쪽: 설비 게이지 보기 방식 버튼 */
+/* 전력 계통 카드 제목 줄: 제목(왼쪽) · 게이지 버튼(오른쪽 끝), 안내 글과 차단기 범례는 다음 줄 오른쪽 */
+.tree-head {
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 4px;
+}
+.tree-head .head-right {
+  flex-direction: row;
+  flex-basis: 100%;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+}
+.tree-head .head-right .note {
+  margin-left: 0;
+}
+/* 설비 게이지 보기 방식 버튼 (카드 안 다른 글자와 맞춰 작게) */
 .gauge-switch {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-left: auto;
 }
 .gauge-switch-label {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--mute);
+}
+.gauge-switch .presets button {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 .head-right {
   display: flex;
@@ -653,7 +688,7 @@ const equipmentShareOption = computed(() => {
 .zone-summary {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 11.4px;
 }
 .zone-text {
   flex: 1;
@@ -661,7 +696,7 @@ const equipmentShareOption = computed(() => {
 }
 .donut {
   flex: none;
-  width: 140px;
+  width: 133px;
 }
 /* 원그래프와 그 아래 설명 글 묶음 */
 .donut-box {
@@ -672,7 +707,7 @@ const equipmentShareOption = computed(() => {
   margin: 0;
 }
 .donut-caption {
-  font-size: 11px;
+  font-size: 10.4px;
   color: var(--mute);
   text-align: center;
   white-space: nowrap;
@@ -683,7 +718,7 @@ const equipmentShareOption = computed(() => {
 .zone-kw {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 7.6px;
   white-space: nowrap;
 }
 /* 숫자 + 단위, 짧은 이름표는 한 덩어리로 (중간에서 줄바꿈 안 함) */
@@ -697,24 +732,24 @@ const equipmentShareOption = computed(() => {
   white-space: nowrap;
 }
 .zone-value {
-  font-size: 44px;
+  font-size: 41.8px;
   font-weight: 700;
   line-height: 1.1;
 }
 .zone-unit {
-  font-size: 16px;
+  font-size: 15.2px;
   color: var(--ink-2);
 }
 /* 구역 막대 위 줄: 왼쪽 비율, 오른쪽 임계 합 */
 .zone-share {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
-  font-size: 13px;
+  gap: 7.6px;
+  font-size: 12.3px;
   color: var(--mute);
 }
 .zone-threshold {
-  font-size: 12px;
+  font-size: 11.4px;
   font-weight: 700;
   color: var(--crit);
 }
@@ -722,21 +757,21 @@ const equipmentShareOption = computed(() => {
 .zone-scale {
   display: flex;
   justify-content: space-between;
-  height: 13px;
-  margin-top: 2px;
-  font-size: 10px;
-  line-height: 13px;
+  height: 12.3px;
+  margin-top: 1.9px;
+  font-size: 9.5px;
+  line-height: 12.3px;
   color: var(--mute);
 }
 .track {
-  height: 10px;
-  margin-top: 6px;
+  height: 9.5px;
+  margin-top: 5.7px;
   background: var(--line);
 }
 .track.thin {
   display: block; /* span이라 따로 줄을 차지하게 함 (절대값일 때 한 줄을 다 쓰는 게이지) */
-  height: 8px;
-  margin-top: 4px;
+  height: 7.6px;
+  margin-top: 3.8px;
 }
 /* 절대값 게이지: 90% 지점(임계치)에 빨간 세로 눈금, 그 뒤(90%~100%)는 빨간 구간
    막대 위에 반투명으로 겹쳐서, 막대가 임계치를 넘으면 넘은 부분도 빨갛게 보임 */
@@ -760,10 +795,10 @@ const equipmentShareOption = computed(() => {
   /* 값이 바뀌면 막대가 바로 그 길이가 됨 (움직이는 효과 없음, 2026-11-18) */
 }
 .sub-title {
-  margin: 10px 0 4px;
-  padding-top: 10px;
+  margin: 9.5px 0 3.8px;
+  padding-top: 9.5px;
   border-top: 1px solid var(--line);
-  font-size: 13px;
+  font-size: 12.3px;
   font-weight: 700;
 }
 /* "이 구역의 설비" 위 구분선은 다른 제목보다 진하고 두껍게 (구역 영역과 설비 영역을 나눔) */
@@ -779,8 +814,8 @@ const equipmentShareOption = computed(() => {
   color: var(--mute);
 }
 .sub-note {
-  margin-left: 6px;
-  font-size: 12px;
+  margin-left: 5.7px;
+  font-size: 11.4px;
   font-weight: 400;
   color: var(--mute);
 }
@@ -791,15 +826,15 @@ const equipmentShareOption = computed(() => {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 12px;
-  height: 228px; /* 4줄짜리 설비 카드 3장(+간격)이 들어가는 높이. 상대값·절대값 모두 같은 높이 */
+  gap: 11.4px;
+  height: 216.6px; /* 4줄짜리 설비 카드 3장(+간격)이 들어가는 높이. 상대값·절대값 모두 같은 높이 */
 }
 /* 구역 색: 제목 앞 점, 비율 막대 */
 .zone-dot {
   display: inline-block;
-  width: 12px;
-  height: 12px;
-  margin-right: 8px;
+  width: 11.4px;
+  height: 11.4px;
+  margin-right: 7.6px;
   border-radius: 2px;
   background: var(--zone);
 }
@@ -808,7 +843,7 @@ const equipmentShareOption = computed(() => {
 }
 .equipment-name {
   min-width: 0;
-  font-size: 13px;
+  font-size: 12.3px;
   overflow: hidden;
   text-overflow: ellipsis; /* 이름이 아주 길면 줄을 바꾸지 않고 …로 줄임 (전체 이름은 마우스를 올리면 보임) */
 }
@@ -817,16 +852,16 @@ const equipmentShareOption = computed(() => {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
-  margin-top: 1px;
-  font-size: 11px;
+  gap: 7.6px;
+  margin-top: 0.9px;
+  font-size: 10.4px;
 }
 .equipment-info .state {
-  font-size: 11px;
+  font-size: 10.4px;
 }
 /* 상태 도형(●)과 글자(운전) 사이 띄움 */
 .state-label {
-  margin-left: 3px;
+  margin-left: 2.8px;
 }
 .info-value {
   color: var(--mute);
@@ -838,30 +873,30 @@ const equipmentShareOption = computed(() => {
 }
 /* 설비 카드 3줄: 막대는 카드 안쪽 끝까지 */
 .track.equipment-track {
-  margin-top: 4px;
+  margin-top: 3.8px;
 }
 /* 설비 카드 4줄: 막대 시작점과 끝점 */
 .equipment-scale {
   display: flex;
   justify-content: space-between;
-  height: 13px;
-  margin-top: 1px;
-  font-size: 10px;
-  line-height: 13px;
+  height: 12.3px;
+  margin-top: 0.9px;
+  font-size: 9.5px;
+  line-height: 12.3px;
   color: var(--mute);
 }
 .equipments {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 4px; /* 4줄 카드 3장 + 간격이 칸 높이(234px) 안에 들어가게 */
+  gap: 3.8px; /* 4줄 카드 3장 + 간격이 칸 높이 안에 들어가게 */
   min-width: 0;
 }
 /* 설비 한 줄 전체가 버튼 (누르면 원그래프에서 강조) */
 .equipment-button {
   display: block;
   width: 100%;
-  padding: 5px 8px;
+  padding: 4.8px 7.6px;
   line-height: 1.35; /* 설비 3대 카드가 칸(높이 고정) 안에 다 들어가게 줄 간격을 조금 좁힘 */
   background: color-mix(
     in srgb,
@@ -882,7 +917,7 @@ const equipmentShareOption = computed(() => {
 }
 .threshold {
   flex: none;
-  font-size: 11px;
+  font-size: 10.4px;
   font-weight: 700;
   color: var(--crit);
   white-space: nowrap;
@@ -898,20 +933,20 @@ const equipmentShareOption = computed(() => {
 }
 .equipment-share {
   flex: none;
-  min-width: 42px;
+  min-width: 39.9px;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: 11.4px;
   color: var(--mute);
   text-align: right;
 }
 .equipment-text {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 7.6px;
 }
 /* 설비 운전 상태: 상태색 대신 먹색 계열로, 도형과 글자로 구분 */
 .state {
-  font-size: 12px;
+  font-size: 11.4px;
 }
 .state.running {
   color: var(--ink-2);
@@ -925,7 +960,7 @@ const equipmentShareOption = computed(() => {
 }
 .equipment-kw {
   margin-left: auto;
-  font-size: 14px;
+  font-size: 13.3px;
   font-weight: 700;
 }
 /* 오늘 최대 · 평균 · 사용량: 칸 폭을 고정해서 값이 바뀌어도 위치가 움직이지 않음.
@@ -933,9 +968,9 @@ const equipmentShareOption = computed(() => {
 .today {
   display: grid;
   grid-template-columns: 1fr 1fr 1.3fr;
-  gap: 12px;
-  margin-top: 10px;
-  padding-top: 10px;
+  gap: 11.4px;
+  margin-top: 9.5px;
+  padding-top: 9.5px;
   border-top: 1px solid var(--line);
 }
 /* 세 칸 각각 안에서 가운데 정렬. 숫자 칸 폭이 고정이라 값이 바뀌어도 단위 위치는 그대로 */
@@ -943,11 +978,11 @@ const equipmentShareOption = computed(() => {
   text-align: center;
 }
 .today dt {
-  font-size: 11px;
+  font-size: 10.4px;
   color: var(--mute);
 }
 .today dd {
-  font-size: 16px;
+  font-size: 15.2px;
   font-weight: 700;
 }
 /* 숫자는 정해진 폭 안에서 오른쪽 정렬 → 값의 자릿수가 바뀌어도 뒤의 단위(kW · kWh) 위치가 그대로
@@ -964,29 +999,29 @@ const equipmentShareOption = computed(() => {
 /* 세로가 낮은 화면: 간격과 큰 숫자를 줄여 오른쪽 상세가 스크롤 없이 다 들어가게 함 */
 @media (max-height: 760px) {
   .zone-value {
-    font-size: 32px;
+    font-size: 30.4px;
   }
   .sub-title {
-    margin: 8px 0 4px;
-    padding-top: 8px;
+    margin: 7.6px 0 3.8px;
+    padding-top: 7.6px;
   }
   .equipments {
-    gap: 2px;
+    gap: 1.9px;
   }
   /* 설비 카드 3장이 칸 안에 다 들어가게 카드 안쪽 여백과 줄 간격을 줄임 (두 보기 모두 같은 크기) */
   .equipment-button {
-    padding: 3px 8px;
+    padding: 2.8px 7.6px;
   }
   .equipment-scale {
-    height: 11px;
-    margin-top: 1px;
-    line-height: 11px;
+    height: 10.4px;
+    margin-top: 0.9px;
+    line-height: 10.4px;
   }
   .equipment-area {
-    height: 206px; /* 낮은 화면의 4줄 카드 3장 + 간격 */
+    height: 195.7px; /* 낮은 화면의 4줄 카드 3장 + 간격 */
   }
   .today {
-    padding-top: 8px;
+    padding-top: 7.6px;
   }
 }
 
@@ -996,13 +1031,13 @@ const equipmentShareOption = computed(() => {
     grid-template-columns: minmax(0, 1fr) 340px;
   }
   .zone-value {
-    font-size: 38px;
+    font-size: 36.1px;
   }
   .donut {
-    width: 110px;
+    width: 104.5px;
   }
   .today dd {
-    font-size: 15px;
+    font-size: 14.2px;
   }
 }
 </style>

@@ -119,8 +119,12 @@ const SLOTS = Array.from({ length: 96 }, (_, index) => {
   return `${hour}:${minute}`
 })
 
-// 공장 소비와 한전 구매는 그래프를 나눠 그림 (한 그래프에 선이 많으면 비교가 어려움)
-// 두 그래프는 같은 가로축, 같은 요금 띠, 같은 "지금" 세로선을 씀
+// 누적 영역에서 ESS를 나눠 그릴 때의 이름 (툴팁에 이 이름으로 나옴)
+const ESS_DISCHARGE = 'ESS 방전'
+const ESS_CHARGE = 'ESS 충전'
+
+// 오늘 그래프 하나에 공장 소비 · 태양광 · 한전 구매 · ESS를 함께 그림 (2026-11-19, 두 그래프를 합침)
+// 보고 싶은 선만 제목 줄 버튼으로 켜고 끄며, 선 / 영역 모양도 버튼으로 고름
 function makeTrendOption(lines, withTarget) {
   const list = realtimeStore.todayStatuses
   const target = status.value?.targetPeakKw
@@ -139,17 +143,60 @@ function makeTrendOption(lines, withTarget) {
       { xAxis: item.to === '24:00' ? '23:45' : item.to },
     ])
 
-  const series = lines.map((line) => ({
-    name: line.name,
-    type: 'line',
-    showSymbol: false,
-    connectNulls: false,
-    data: values(line.field),
-    lineStyle: { color: line.color, width: 2.5, type: line.dashed ? 'dashed' : 'solid' },
-    itemStyle: { color: line.color },
-  }))
+  const stacked = chartStyle.value === 'stack'
+  const series = lines.flatMap((line) => {
+    // ESS 충·방전은 짧게 끊겨 나와서 선 모양일 때는 막대로 그림 (방전은 0 위, 충전은 0 아래).
+    // 누적 영역일 때는 ESS도 공급원이라 한전 구매 · 태양광 위에 쌓음 (아래 영역 처리로 넘어감)
+    if (line.bar && !stacked) {
+      return {
+        name: line.name,
+        type: 'bar',
+        barWidth: '70%',
+        data: values(line.field),
+        itemStyle: { color: line.color },
+      }
+    }
+    // 누적 영역의 ESS: 방전(+)과 충전(−)을 두 영역으로 나눠 그림.
+    // 한 선으로 쌓으면 방전 → 충전으로 바뀌는 순간 위(공급원 위)에서 0 아래까지 선이 이어져 그래프를 가로지름
+    if (line.bar && stacked) {
+      const raw = values(line.field)
+      const area = (name, stack, pick) => ({
+        name,
+        type: 'line',
+        showSymbol: false,
+        connectNulls: false,
+        stack,
+        data: raw.map((value) => (value === null ? null : pick(value))),
+        lineStyle: { color: line.color, width: 1.5 },
+        itemStyle: { color: line.color },
+        areaStyle: { color: line.color, opacity: 0.45 },
+      })
+      return [
+        area(ESS_DISCHARGE, 'supply', (value) => Math.max(value, 0)), // 공급원 위에 쌓음
+        area(ESS_CHARGE, 'charge', (value) => Math.min(value, 0)), // 0 아래에 따로
+      ]
+    }
+    // 누적 영역: 공급원(한전 구매 · 태양광 · ESS 방전)을 아래부터 쌓아 칠함 → 쌓인 높이 = 공급원 합계.
+    // 공장 소비는 쌓지 않고 선으로 두어, 쌓인 영역과 비교할 수 있게 함
+    const inStack = stacked && line.stack
+    return {
+      name: line.name,
+      type: 'line',
+      showSymbol: false,
+      connectNulls: false,
+      data: values(line.field),
+      stack: inStack ? 'supply' : undefined,
+      lineStyle: {
+        color: line.color,
+        width: inStack ? 1.5 : 2.5,
+        type: line.dashed && !inStack ? 'dashed' : 'solid',
+      },
+      itemStyle: { color: line.color },
+      areaStyle: inStack ? { color: line.color, opacity: 0.45 } : undefined,
+    }
+  })
 
-  // 요금 띠와 "지금" 세로선은 첫 번째 선에, 목표 피크선은 한전 구매 그래프에만 붙임
+  // 요금 띠, "지금" 세로선, 목표 피크선은 첫 번째 선에 붙임
   const first = series[0]
   first.markArea = { silent: true, data: tariffAreas }
   const markLines = []
@@ -216,8 +263,18 @@ function makeTrendOption(lines, withTarget) {
     // 그래프 안 범례는 숨기고, 버튼으로 끄고 켠 상태만 넘김
     legend: {
       show: false,
+      // ESS 버튼 하나로 누적 영역의 방전 · 충전 두 영역을 함께 끄고 켬
       selected: Object.fromEntries(
-        lines.map((line) => [line.name, !hiddenSeries.value[line.name]]),
+        lines.flatMap((line) => {
+          const shown = !hiddenSeries.value[line.name]
+          return line.bar
+            ? [
+                [line.name, shown],
+                [ESS_DISCHARGE, shown],
+                [ESS_CHARGE, shown],
+              ]
+            : [[line.name, shown]]
+        }),
       ),
     },
     tooltip: {
@@ -249,30 +306,23 @@ function toggleSeries(name) {
   hiddenSeries.value = { ...hiddenSeries.value, [name]: !hiddenSeries.value[name] }
 }
 
-// 오늘 그래프 두 개 (위: 공장 소비 / 아래: 한전 구매)
-const trendCards = computed(() => {
-  const loadLines = [
-    { name: '공장 소비', field: 'loadKw', color: COLOR.ink },
-    { name: '태양광', field: 'solarKw', color: COLOR.solar, dashed: true },
-  ]
-  const gridLines = [{ name: '한전 구매', field: 'gridKw', color: COLOR.grid }]
-  return [
-    {
-      key: 'load',
-      title: '오늘 공장 소비',
-      note: '15분 평균 (kW), 회색 띠는 요금 비싼 시간',
-      lines: loadLines,
-      option: makeTrendOption(loadLines, false),
-    },
-    {
-      key: 'grid',
-      title: '오늘 한전 구매',
-      note: '15분 평균 (kW), 피크는 이 값으로 정해짐',
-      lines: gridLines,
-      option: makeTrendOption(gridLines, true),
-    },
-  ]
-})
+// 그래프 모양: 'line'(선) / 'stack'(누적 영역: 한전 구매 · 태양광을 쌓아 칠함)
+const CHART_STYLES = [
+  { value: 'line', label: '선' },
+  { value: 'stack', label: '누적 영역' },
+]
+const chartStyle = ref('line')
+
+// 오늘 그래프 (공장 소비 · 태양광 · 한전 구매 · ESS 충·방전을 한 그래프에)
+// stack: 누적 영역에서 쌓는 선 (쌓는 순서 = 목록 순서, 한전 구매가 맨 아래) / bar: 선 모양일 때 막대로 그림
+const TREND_LINES = computed(() => [
+  { name: '공장 소비', field: 'loadKw', color: COLOR.ink },
+  { name: '한전 구매', field: 'gridKw', color: COLOR.grid, stack: true },
+  { name: '태양광', field: 'solarKw', color: COLOR.solar, dashed: true, stack: true },
+  // ESS는 막대. 방전 +, 충전 − (충전하면 0 아래로 내려감)
+  { name: 'ESS 충·방전', field: 'essKw', color: COLOR.ess, bar: true, stack: true },
+])
+const trendOption = computed(() => makeTrendOption(TREND_LINES.value, true))
 </script>
 
 <template>
@@ -324,16 +374,32 @@ const trendCards = computed(() => {
       </div>
     </div>
 
-    <!-- 3줄: 오늘 그래프 두 개(공장 소비 / 한전 구매) + 이벤트 로그 -->
+    <!-- 3줄: 오늘 그래프(공장 소비 · 태양광 · 한전 구매 · ESS를 한 그래프에) + 이벤트 로그 -->
     <div class="row bottom">
       <div class="trends">
-        <section v-for="card in trendCards" :key="card.key" class="card trend">
-          <div class="card-head">
-            <h2 class="card-title">{{ card.title }}</h2>
-            <!-- 범례: 누르면 그 선을 끄고 켬 (끈 선은 흐리게) -->
+        <section class="card trend">
+          <div class="card-head trend-head">
+            <h2 class="card-title">오늘 전력</h2>
+            <!-- 그래프 모양: 선 / 누적 영역 (제목 줄 오른쪽 끝) -->
+            <div class="presets style-switch" role="group" aria-label="그래프 모양">
+              <button
+                v-for="item in CHART_STYLES"
+                :key="item.value"
+                :class="{ active: chartStyle === item.value }"
+                :aria-pressed="chartStyle === item.value"
+                @click="chartStyle = item.value"
+              >
+                {{ item.label }}
+              </button>
+            </div>
+            <!-- 안내 글은 다음 줄로 (제목 줄에 버튼이 많아 한 줄에 두면 글자가 끼임) -->
+            <span class="note trend-note"
+              >15분 평균 (kW) · 회색 띠는 요금 비싼 시간 · ESS는 방전 +, 충전 −</span
+            >
+            <!-- 범례: 그래프 바로 위 줄. 누르면 그 선을 끄고 켬 (끈 선은 흐리게) -->
             <div class="legend-buttons">
               <button
-                v-for="line in card.lines"
+                v-for="line in TREND_LINES"
                 :key="line.name"
                 class="legend-button"
                 :class="{ off: hiddenSeries[line.name] }"
@@ -342,16 +408,21 @@ const trendCards = computed(() => {
               >
                 <span
                   class="legend-swatch"
-                  :class="{ dashed: line.dashed }"
+                  :class="{ dashed: line.dashed, bar: line.bar }"
                   :style="{ '--swatch': line.color }"
                   aria-hidden="true"
                 ></span>
                 {{ line.name }}
               </button>
             </div>
-            <span class="note">{{ card.note }}</span>
           </div>
-          <Chart v-if="realtimeStore.todayStatuses.length" :option="card.option" :height="170" />
+          <!-- key: 선 ↔ 누적 영역을 바꾸면 새로 그림 (공통 차트는 이전 설정에 덮어써서, 영역을 끄면 칠한 색이 남음) -->
+          <Chart
+            v-if="realtimeStore.todayStatuses.length"
+            :key="chartStyle"
+            :option="trendOption"
+            :height="200"
+          />
           <p v-else-if="realtimeStore.todayLoading" class="empty chart-empty">불러오는 중입니다.</p>
           <p v-else-if="realtimeStore.todayError" class="empty chart-empty" role="alert">
             그래프를 불러오지 못했습니다. ({{ realtimeStore.todayError }})
@@ -539,7 +610,7 @@ const trendCards = computed(() => {
 /* 2줄: 높이 고정 (ESS 추천이 와서 버튼·판단 근거가 생겨도 줄 높이가 변하지 않아 아래 화면이 움직이지 않음)
    내용이 아주 길면(판단 근거 "모두 보기") ESS 추천 카드 안에서만 스크롤 */
 .middle {
-  height: 340px;
+  height: 306px; /* 2026-11-19: 340px에서 10% 줄임 */
 }
 .peak {
   flex: 1;
@@ -608,8 +679,40 @@ const trendCards = computed(() => {
 .legend-swatch.dashed {
   border-top-style: dashed;
 }
+/* 막대로 그리는 선(ESS)의 견본: 작은 네모 */
+.legend-swatch.bar {
+  width: 10px;
+  height: 10px;
+  border-top: 0;
+  background: var(--swatch);
+}
+/* 오늘 전력 제목 줄: 제목 · 선 버튼 · 모양 버튼이 넘치면 줄을 바꾸고, 안내 글은 항상 다음 줄 */
+.trend-head {
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 4px;
+}
+/* 선 / 누적 영역 버튼은 제목 줄 오른쪽 끝 */
+.trend-head .style-switch {
+  margin-left: auto;
+}
+/* 선 이름 버튼(범례)은 맨 아래 줄 = 그래프 바로 위 */
+.trend-head .legend-buttons {
+  flex-basis: 100%;
+}
+.trend-head .trend-note {
+  flex-basis: 100%;
+  margin-left: 0;
+  font-size: 12px;
+}
+/* 그래프 모양(선 / 영역) 버튼: 제목 줄에 들어가게 작게 */
+.style-switch button {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+}
 .chart-empty {
-  height: 170px;
+  height: 200px;
 }
 .events-card {
   display: flex;

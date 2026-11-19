@@ -96,7 +96,6 @@ const kpis = computed(() => {
   const warnAt = s && gridMax ? (s.warnKw / gridMax) * 100 : 0
   const targetAt = s && gridMax ? (target / gridMax) * 100 : 0
 
-  // ESS: 가운데가 대기, 왼쪽이 충전, 오른쪽이 방전
   // 배터리 잔량이 있는 구간 (하한 아래 경고 · 상한 위 주의 · 그 사이 정상)
   const socClass = !s
     ? ''
@@ -107,8 +106,6 @@ const kpis = computed(() => {
         : 'fill-ok'
   // 한전 구매전력이 있는 구간
   const gridClass = s ? zoneClass(s.gridKw, s.warnKw, target) : ''
-
-  const essRatio = s && maxPowerKw ? 0.5 + ((charging ? -essKw : essKw) / maxPowerKw) * 0.5 : 0.5
 
   return [
     {
@@ -203,23 +200,21 @@ const kpis = computed(() => {
       prefixIcon: s?.pcsStatus ?? '', // 글자 앞 아이콘 (대기 · 방전 · 충전)
       value: formatKw(essKw),
       unit: 'kW',
-      // 아랫줄을 글자 3개로 나눠 '|'를 카드(=계기판) 가운데에 고정, 양옆에 충전·방전 안내
-      sides: ['왼쪽 충전', '오른쪽 방전'],
-      min: maxPowerKw ? `충전 ${formatKw(maxPowerKw)}` : '충전',
-      max: maxPowerKw ? `방전 ${formatKw(maxPowerKw)}` : '방전',
-      // 바깥 가는 테: 가운데(대기)를 기준으로 왼쪽 충전 · 오른쪽 방전을 다른 색으로
-      // 안쪽: 가운데에서 바늘까지 차오름 (충전이면 충전 색, 방전이면 방전 색)
-      segments: [
-        segment(0, 49.5, 'ring-charge', true),
-        segment(50.5, 100, 'ring-discharge', true),
-        segment(0, 100, 'track'),
-        segment(
-          Math.min(50, essRatio * 100),
-          Math.max(50, essRatio * 100),
-          charging ? 'fill-charge' : 'fill-discharge',
-        ),
-      ],
-      needle: s && maxPowerKw ? needle(essRatio) : null,
+      // 아랫줄: 지금 출력이 최대 출력의 몇 %인지 (표시용 비율)
+      sub: !s
+        ? ''
+        : s.pcsStatus === 'STANDBY' || !maxPowerKw
+          ? `최대 출력 ${maxPowerKw ? formatKw(maxPowerKw) : '—'} kW`
+          : `최대 ${formatKw(maxPowerKw)} kW의 ${formatOneDecimal((essKw / maxPowerKw) * 100)}%`,
+      // 반원 계기판 대신 건전지 (2026-11-19): 안의 막대 = 지금 잔량(SOC), 옆 화살표 = 충전 ↑ / 방전 ↓
+      battery: s
+        ? {
+            soc: Math.min(100, Math.max(0, s.socPercent)),
+            mode: charging ? 'charge' : s.pcsStatus === 'DISCHARGING' ? 'discharge' : 'idle',
+          }
+        : null,
+      segments: [],
+      needle: null,
     },
     {
       key: 'soc',
@@ -262,8 +257,57 @@ const kpis = computed(() => {
           <span class="dot" :class="kpi.dot" aria-hidden="true"></span>
           <h2 class="kpi-name">{{ kpi.name }}</h2>
         </div>
+        <!-- ESS: 건전지. 안의 막대가 지금 잔량(SOC)만큼 차 있고, 옆 화살표로 충전(↑)·방전(↓)을 보여 줌
+             (계기판과 같은 칸 크기를 써서 다른 카드와 높이가 같음) -->
+        <svg
+          v-if="kpi.key === 'ess'"
+          class="gauge battery"
+          :class="kpi.battery?.mode"
+          viewBox="0 0 120 72"
+          aria-hidden="true"
+        >
+          <!-- 몸통과 꼭지 -->
+          <rect class="battery-body" x="8" y="12" width="86" height="46" rx="6" />
+          <rect class="battery-cap" x="95" y="26" width="6" height="18" rx="2" />
+          <!-- 안쪽 칸(바탕) + 잔량 막대 -->
+          <rect class="battery-track" x="13" y="17" width="76" height="36" rx="2" />
+          <rect
+            v-if="kpi.battery"
+            class="battery-level"
+            x="13"
+            y="17"
+            :width="(76 * kpi.battery.soc) / 100"
+            height="36"
+            rx="2"
+          />
+          <!-- 막대를 10칸으로 나눠 보이게 하는 세로 줄 -->
+          <line
+            v-for="cell in 9"
+            :key="cell"
+            class="battery-cell"
+            :x1="13 + cell * 7.6"
+            y1="17"
+            :x2="13 + cell * 7.6"
+            y2="53"
+          />
+          <!-- 잔량 % (막대 위 가운데) -->
+          <text v-if="kpi.battery" class="battery-soc" x="51" y="40" text-anchor="middle">
+            {{ Math.round(kpi.battery.soc) }}%
+          </text>
+          <!-- 충전 중: 위 화살표 / 방전 중: 아래 화살표 -->
+          <path
+            v-if="kpi.battery?.mode === 'charge'"
+            class="battery-arrow"
+            d="M111 52 V22 M104 30 L111 21 L118 30"
+          />
+          <path
+            v-else-if="kpi.battery?.mode === 'discharge'"
+            class="battery-arrow"
+            d="M111 20 V50 M104 42 L111 51 L118 42"
+          />
+        </svg>
         <!-- 반원 계기판: 색 구간 + 바늘 (값을 못 받았으면 바늘 없이 회색 반원만) -->
-        <svg class="gauge" viewBox="0 0 120 72" aria-hidden="true">
+        <svg v-else class="gauge" viewBox="0 0 120 72" aria-hidden="true">
           <!-- 구간마다 그 부분의 호만 그림 (길이가 0인 구간은 d가 비어 있어 건너뜀) -->
           <template v-for="(item, index) in kpi.segments" :key="index">
             <path
@@ -591,6 +635,52 @@ const kpis = computed(() => {
   stroke: var(--crit);
   stroke-width: 2.4;
   stroke-linecap: round;
+}
+/* ESS 건전지 */
+.battery-body {
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 2.5;
+}
+.battery-cap {
+  fill: var(--ink-2);
+}
+.battery-track {
+  fill: var(--line);
+}
+/* 잔량 막대 색: 충전 중 파랑 · 방전 중 주황 · 대기 청록(ESS 색) */
+.battery-level {
+  fill: var(--gauge-ess);
+}
+.battery.charge .battery-level,
+.battery.charge .battery-arrow {
+  color: var(--gauge-charge);
+  fill: var(--gauge-charge);
+}
+.battery.discharge .battery-level,
+.battery.discharge .battery-arrow {
+  color: var(--gauge-discharge);
+  fill: var(--gauge-discharge);
+}
+.battery-cell {
+  stroke: var(--card);
+  stroke-width: 1.2;
+}
+.battery-soc {
+  font-size: 14px;
+  font-weight: 700;
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--card);
+  stroke-width: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.battery-arrow {
+  fill: none !important;
+  stroke: currentColor;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .kpi-sides {
   display: grid;
