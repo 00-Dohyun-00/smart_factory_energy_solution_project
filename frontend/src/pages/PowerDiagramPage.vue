@@ -464,7 +464,29 @@ const equipmentShareOption = computed(() => {
         </p>
         <p v-else class="empty">불러오는 중입니다.</p>
 
-        <h3 class="sub-title">
+        <!-- 오늘 최대 · 평균 · 사용량: "이 구역의 설비" 위 (최근 1시간 그래프 바로 아래) -->
+        <dl class="today">
+          <div>
+            <dt>오늘 최대</dt>
+            <dd>
+              <span class="num today-num">{{ formatKw(detail?.todayMaxKw) }}</span> kW
+            </dd>
+          </div>
+          <div>
+            <dt>오늘 평균</dt>
+            <dd>
+              <span class="num today-num">{{ formatKw(detail?.todayAvgKw) }}</span> kW
+            </dd>
+          </div>
+          <div>
+            <dt>오늘 사용량</dt>
+            <dd>
+              <span class="num today-num wide">{{ formatInteger(detail?.todayKwh) }}</span> kWh
+            </dd>
+          </div>
+        </dl>
+        <!-- 위쪽에 진한 구분선: 구역 요약(위)과 설비 목록(아래) 영역을 나눔 -->
+        <h3 class="sub-title equipment-title">
           이 구역의 설비 <span class="sub-note">누르면 원그래프에 강조</span>
         </h3>
         <!-- 보기 방식(상대값·절대값)을 바꿔도 칸 높이가 같아서 위 그래프와 원그래프 크기·위치가 변하지 않음 -->
@@ -537,27 +559,6 @@ const equipmentShareOption = computed(() => {
             <figcaption class="donut-caption">설비별 전력 비율</figcaption>
           </figure>
         </div>
-
-        <dl class="today">
-          <div>
-            <dt>오늘 최대</dt>
-            <dd>
-              <span class="num today-num">{{ formatKw(detail?.todayMaxKw) }}</span> kW
-            </dd>
-          </div>
-          <div>
-            <dt>오늘 평균</dt>
-            <dd>
-              <span class="num today-num">{{ formatKw(detail?.todayAvgKw) }}</span> kW
-            </dd>
-          </div>
-          <div>
-            <dt>오늘 사용량</dt>
-            <dd>
-              <span class="num today-num wide">{{ formatInteger(detail?.todayKwh) }}</span> kWh
-            </dd>
-          </div>
-        </dl>
       </section>
     </div>
   </div>
@@ -765,6 +766,10 @@ const equipmentShareOption = computed(() => {
   font-size: 13px;
   font-weight: 700;
 }
+/* "이 구역의 설비" 위 구분선은 다른 제목보다 진하고 두껍게 (구역 영역과 설비 영역을 나눔) */
+.sub-title.equipment-title {
+  border-top: 2px solid var(--line-strong);
+}
 .empty {
   display: flex;
   align-items: center;
@@ -929,8 +934,8 @@ const equipmentShareOption = computed(() => {
   display: grid;
   grid-template-columns: 1fr 1fr 1.3fr;
   gap: 12px;
-  margin-top: auto;
-  padding-top: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
 }
 /* 세 칸 각각 안에서 가운데 정렬. 숫자 칸 폭이 고정이라 값이 바뀌어도 단위 위치는 그대로 */
