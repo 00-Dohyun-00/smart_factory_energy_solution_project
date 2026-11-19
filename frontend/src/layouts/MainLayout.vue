@@ -195,8 +195,9 @@ const peakMark = computed(() => {
           {{ realtimeStore.connected ? '●' : '◆' }}
         </span>
         <!-- 접었을 때도 날씨는 아이콘으로 보여 줌 (마우스를 올리면 글자와 기온) -->
+        <!-- 날씨 기록이 없으면 백엔드가 weather를 null로 줌 → 그때는 날씨 칸을 숨김 (안 숨기면 화면 전체가 오류로 멈춤) -->
         <span
-          v-if="realtimeStore.status"
+          v-if="realtimeStore.status?.weather"
           class="rail-weather"
           :title="`${realtimeStore.status.weather.text} ${realtimeStore.status.weather.tempC}℃`"
         >
@@ -288,7 +289,7 @@ const peakMark = computed(() => {
           시뮬레이션 <span class="num">{{ realtimeStore.status.simulationSpeed }}</span>배속
         </p>
         <!-- 날씨: 아이콘 + 날씨 글자 + 기온 (글자도 함께 적어 아이콘을 모르는 사람도 알 수 있게) -->
-        <p v-if="realtimeStore.status" class="weather">
+        <p v-if="realtimeStore.status?.weather" class="weather">
           <WeatherIcon :text="realtimeStore.status.weather.text" :size="26" />
           <span class="weather-text">{{ realtimeStore.status.weather.text }}</span>
           <span class="weather-temp num">{{ realtimeStore.status.weather.tempC }}℃</span>

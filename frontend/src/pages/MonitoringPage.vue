@@ -60,13 +60,13 @@ const EVENT_INFO = {
   NORMAL: { shape: '●', label: '정상', className: 'ok', color: 'ok' },
   INFO: { shape: '○', label: '알림', className: 'info', color: 'ink2' },
 }
-// 이벤트 종류 (category는 가짜 백엔드에 임시로 넣은 값, 백엔드와 확정 필요)
+// 이벤트 종류: 백엔드 eventType 값 그대로 (event_log.event_type). 예전 가짜 백엔드의 category를 대신함
 const EVENT_CATEGORIES = {
-  STAGE: '단계 변화',
+  STAGE_CHANGE: '단계 변화',
   RECOMMEND: '추천',
-  ACTION: '적용·넘김',
-  WINDOW: '구간 종료',
-  BATTERY: '배터리',
+  HANDLE: '적용·넘김',
+  INTERVAL_END: '구간 종료',
+  COMM: '통신',
   SETTING: '설정 변경',
 }
 
@@ -76,7 +76,7 @@ const eventLevel = ref('ALL')
 const filteredEvents = computed(() =>
   realtimeStore.events.filter(
     (event) =>
-      (eventCategory.value === 'ALL' || event.category === eventCategory.value) &&
+      (eventCategory.value === 'ALL' || event.eventType === eventCategory.value) &&
       (eventLevel.value === 'ALL' || event.level === eventLevel.value),
   ),
 )
@@ -407,7 +407,7 @@ const trendCards = computed(() => {
                   <span aria-hidden="true">{{ EVENT_INFO[event.level].shape }}</span>
                   {{ EVENT_INFO[event.level].label }}
                 </td>
-                <td class="event-category">{{ EVENT_CATEGORIES[event.category] ?? '—' }}</td>
+                <td class="event-category">{{ EVENT_CATEGORIES[event.eventType] ?? '—' }}</td>
                 <td class="event-text">{{ event.message }}</td>
               </tr>
             </tbody>

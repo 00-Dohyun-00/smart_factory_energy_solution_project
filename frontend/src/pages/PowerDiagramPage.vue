@@ -24,7 +24,7 @@ const ZONE_LABELS = {
   Z3: '사출',
   Z4: '모듈 조립',
   Z5: '검사',
-  U: '유틸리티',
+  Z6: '유틸리티', // 백엔드 구역 코드 그대로 (예전 프론트 코드는 'U')
 }
 // 설비 운전 상태. 피크 상태(● 정상 등)와 헷갈리지 않게 상태색(초록·주황·빨강)은 쓰지 않고
 // 상태마다 도형과 글자를 다르게 함 (PowerTree.vue와 같은 모양)
@@ -109,7 +109,7 @@ const thresholds = computed(() => {
 
 // 고른 구역의 설비와 합계, 비율 (표시용 합계·비율)
 const zoneEquipments = computed(() =>
-  (status.value?.equipments ?? []).filter((item) => item.zoneId === selectedZone.value),
+  (status.value?.equipments ?? []).filter((item) => item.zoneCode === selectedZone.value),
 )
 const zoneKw = computed(() =>
   zoneEquipments.value.length
@@ -267,7 +267,7 @@ function onEquipmentDonutClick(event) {
 
 // ---- 원그래프 두 개 (공장 안 구역 비율, 구역 안 설비 비율) ----
 // 고른 조각은 진한 색으로 칠하고 바깥으로 조금 빼서(selected) 강조하고, 나머지는 옅게 그림
-const ZONE_ORDER = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'U']
+const ZONE_ORDER = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'Z6']
 
 function donutOption(items, unitLabel) {
   return {
@@ -300,7 +300,7 @@ const zoneShareOption = computed(() => {
     return {
       name: ZONE_LABELS[zoneId],
       value: equipments
-        .filter((item) => item.zoneId === zoneId)
+        .filter((item) => item.zoneCode === zoneId)
         .reduce((sum, item) => sum + item.loadKw, 0), // 표시용 합계
       selected: isSelected,
       // 구역마다 자기 색. 고른 구역은 진하게 + 테두리, 나머지는 옅게

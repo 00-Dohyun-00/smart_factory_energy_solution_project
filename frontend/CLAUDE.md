@@ -196,7 +196,7 @@ src/
 ### 시각은 서버 값을 쓴다
 
 - 시뮬레이터는 배속으로 돌 수 있다. 화면의 "현재 시각", 15분 구간, 남은 시간은 모두 API 응답의 시각 값에서 만든다.
-- 가짜 백엔드(`fakeBackend.js`)는 기본 **10배속**으로 돈다(15분 구간이 1분 30초). 주소 뒤에 `?speed=1`(실제 속도)~`?speed=120`을 붙이면 바꿀 수 있고, 새로 고치면 기본값으로 돌아간다. 배속일 때는 왼쪽 메뉴의 시각 아래에 "시뮬레이션 10배속"이 보인다(`status.simulationSpeed`, 필드는 확인 필요).
+- 2026-11-19부터 모든 화면이 실제 백엔드를 쓴다. "지금"과 "오늘"은 `site-powers/latest`의 `recordedAt`(실제 서버 시각)에서 구한다. 백엔드는 배속이 없어 `simulationSpeed`가 1이고, 그때는 배속 표시를 숨긴다. 가짜 백엔드(`fakeBackend.js`)는 더 이상 어느 화면도 부르지 않는다(예전에는 기본 10배속이라 실제 API 날짜와 어긋났음 — 이슈 #25-1).
 - 업무 표시용으로 `Date.now()`나 `new Date()`(인자 없이)를 쓰지 않는다. 브라우저 시계는 "마지막 수신 후 경과 시간" 판단에만 쓴다.
 - 백엔드 시각은 `LocalDateTime`(한국 시간, 예: `2026-11-14T14:03:00`)이다.
 
@@ -231,16 +231,16 @@ src/
 - 주소 규칙은 `/api/{복수형 명사}`다. `api()`에는 `/api`를 뺀 경로를 넘긴다. (예: `api('/site-powers/latest')`)
 - **백엔드가 아직 없는 API**는 해당 `{기능}Api.js` 함수가 임시로 가짜 데이터를 돌려주게 만든다. 함수 이름과 응답 모양은 실제와 같게 하고, `// TODO: 백엔드 연결 후 교체` 주석을 남긴다. Store와 페이지는 고치지 않아도 되게 한다.
 - 주소와 응답 모양의 기준은 **팀 API 명세 v0.2**(구글 시트 "(api 명세서) 2조 에너지솔루션")다. 명세와 화면의 차이·백엔드 요청 목록은 `docs/api-spec-diff.md`에 있다. (예전 `docs/api-spec.md`는 v0.1 주소라 쓰지 않는다)
-- 대부분의 API는 아직 백엔드에 없어 `api/` 함수가 가짜 데이터(`fakeBackend.js`)를 돌려준다. 함수 이름은 그대로 두고, 백엔드가 열리면 각 파일 맨 위 주석의 "교체 예" 한 줄로 바꾼다. 가짜 응답도 명세 v0.2 모양에 맞춰 두었다(2026-11-17). **실제 백엔드에 연결한 API는 아래 표의 "쓰는 화면" 칸에 "(연결됨)"으로 적는다.**
+- 명세의 API는 모두 실제 백엔드에 연결했다(2026-11-19). 아래 표의 "쓰는 화면" 칸에 연결한 날짜를 적는다. 새 API가 백엔드보다 먼저 필요하면 위 규칙대로 가짜 데이터로 시작하고, 열리면 실제로 바꾼 뒤 표에 "(연결됨)"을 적는다.
 
 | 명세 번호 | 메서드 | 주소 (v0.2) | 프론트 함수 | 쓰는 화면 |
 |---|---|---|---|---|
-| 1 | GET | `/api/site-powers/latest` | `getLatestBatteryStatus` | 공통 틀, 통합, 설비 모니터링 |
-| 2 | GET | `/api/recommendations/latest` (없으면 204) | `getLatestBatteryDecision` | 통합 |
-| 3 | PATCH | `/api/recommendations/{id}` 본문 `{ status }` | `updateBatteryDecision` | 통합 |
-| 4 | GET | `/api/events?limit=10` | `getRecentEvents` | 통합 |
-| 5 | GET | `/api/site-powers/today` | `getTodayBatteryStatuses` | 통합 |
-| 7 | GET | `/api/zones/{zoneName}` (예: `Z2`) | `getZoneRecent` | 설비 모니터링 |
+| 1 | GET | `/api/site-powers/latest` | `getLatestBatteryStatus` | 공통 틀, 통합, 설비 모니터링 (**연결됨**, 2026-11-19) |
+| 2 | GET | `/api/recommendations/latest` (없으면 204) | `getLatestBatteryDecision` | 통합 (**연결됨**, 2026-11-19) |
+| 3 | PATCH | `/api/recommendations/{id}` 본문 `{ status }` | `updateBatteryDecision` | 통합 (**연결됨**, 2026-11-19) |
+| 4 | GET | `/api/events?limit=30` | `getRecentEvents` | 통합 (**연결됨**, 2026-11-19) |
+| 5 | GET | `/api/site-powers/today` | `getTodayBatteryStatuses` | 통합 (**연결됨**, 2026-11-19) |
+| 7 | GET | `/api/zones/{zoneCode}` (예: `Z2`, 유틸리티 `Z6`) | `getZoneRecent` | 설비 모니터링 (**연결됨**, 2026-11-19) |
 | 8 | GET | `/api/recommendations?from=&to=` | `getBatteryDecisions` | 추천 이력, 추이 분석 (**연결됨**, 2026-11-17) |
 | 9 | GET | `/api/reports?month=` | `getReport` | 월간 성적표 (**연결됨**, 2026-11-18) |
 | 10 | GET | `/api/analyses/trend?from=&to=&interval=` | `getTrendAnalysis` | 추이 분석 (**연결됨**, 2026-11-18) |
@@ -254,7 +254,13 @@ src/
 - 백엔드가 설정 값을 못 찾으면 분석·성적표의 `targetPeakKw` 등이 `null`로 온다. 이때 화면은 목표선·"목표 초과/달성"·히트맵 색 단계를 그리지 않는다(값을 지어내지 않음). 성적표는 `hasData`가 true여도 `dailyPeaks`·`heatmap`이 `null`일 수 있어 빈 목록으로 보고 "기록 없음"을 보여 준다.
 - 설정은 공용 DB 값이라 화면에서 저장하면 팀원 모두에게 바로 바뀐다. 백엔드가 저장을 허용하는 키는 화면에서 고칠 수 있는 항목과 같다(`peak.target_kw`·`peak.warn_ratio`·`ess.soc_low`·`ess.soc_high`·`ess.room_temp_limit`·`operation.auto_mode`·`operation.poll_seconds`·`operation.decision_valid_minutes`). 배터리 용량과 최대 출력은 백엔드에서도 보기 전용이다. 실시간 화면은 아직 가짜 데이터라 저장한 목표 피크가 통합 화면의 단계·게이지에는 반영되지 않는다.
 - 설정 값은 명세대로 **문자열**로 오고 간다. `useSettingsStore`가 `values`에서 숫자·`true`/`false`로 바꿔 주고, 저장할 때 다시 문자열로 보낸다. 키 이름은 명세 그대로 쓴다(예: `settingsStore.values['ess.max_power_kw']`).
-- 가짜 데이터에 임시로 넣어 쓰는 값(백엔드와 확정 필요): 최대 피크 `todayPeakKw`·`monthPeakKw`, 요금 시간대 `tariff{ period, label, until, nextLabel, periods[] }`, ESS `pcsStatus`·`sohPercent`.
+- 실시간 연결하면서 맞춘 것(2026-11-19):
+  - 구역 코드는 백엔드 그대로 `Z1`~`Z6`이다(유틸리티 = `Z6`, 예전 프론트는 `U`). 색 변수도 `--zone-z6`, 테마 키 `zoneZ6`.
+  - `site-powers/latest`의 설비(`equipments[]`)에는 구역이 없어서, `useRealtimeStore`가 `GET /api/equipment`를 처음 한 번 받아 설비마다 `zoneCode`를 붙인다. 백엔드가 `equipments[]`에 `zoneCode`를 넣어 주면 이 코드는 지운다.
+  - 이벤트 종류는 백엔드 `eventType`(`STAGE_CHANGE`·`RECOMMEND`·`HANDLE`·`INTERVAL_END`·`COMM`·`SETTING`)을 쓴다.
+  - 날씨 기록이 없으면 `weather`가 `null`로 오고, 왼쪽 메뉴의 날씨 칸을 숨긴다.
+  - 화면 갱신 주기가 짧으면(설정 `operation.poll_seconds`, 공용 DB 값) 앞 요청이 끝나기 전에는 다음 폴링을 건너뛴다.
+  - [적용]/[넘기기]는 공용 DB에 바로 기록되고, 적용하면 시뮬레이터에 ESS 명령이 내려간다.
 
 성적표의 운영 방식 비교(한전 100% / 태양광 자가소비 / 태양광+ESS 추천 운영)는 **지금 성적표 화면에 넣지 않는다** (2026-11-15 결정). 나중에 백엔드의 가상 시나리오 시뮬레이션이 연결되면 그때 비교 화면을 만든다. 만들 때는 개수를 코드에 박지 않고 API가 주는 배열을 `v-for`로 그대로 그린다.
 
