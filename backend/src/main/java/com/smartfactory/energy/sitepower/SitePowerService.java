@@ -181,6 +181,7 @@ public class SitePowerService {
                     round1(rows.stream().mapToDouble(r -> toDouble(r.getLoadKw())).average().orElse(0)),
                     round1(rows.stream().mapToDouble(r -> toDouble(r.getSolarKw())).average().orElse(0)),
                     round1(rows.stream().mapToDouble(r -> toDouble(r.getGridKw())).average().orElse(0)),
+                    round1(rows.stream().mapToDouble(r -> toDouble(r.getEssKw())).average().orElse(0)),
                     socByQuarter.get(quarter)
             ));
         }

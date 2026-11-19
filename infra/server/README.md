@@ -8,9 +8,10 @@ AI 서버(ai, FastAPI), 로컬 백업 DB(backup-db).
 `http://localhost:5173`으로 접속하면 되고, `/api`로 가는 요청은 컨테이너 안에서 자동으로
 `backend` 컨테이너로 넘어갑니다.
 
-`ai`는 지금 기본 뼈대만 있습니다(`ai/app/main.py`) — `POST /predict` 요청/응답 모양만 잡아뒀고,
-실제 예측 모델은 아직 없습니다(항상 `action: "IDLE"` 반환). Spring이 이 서버를 실제로 호출하는
-코드는 다음 작업입니다.
+`ai`는 공장 부하 96구간 예측 서버입니다(`ai/app/main.py`). `GET /load-forecasts?start=&slots=`로
+15분 칸마다 예측 부하(평균, 상위 90%)를 kW로 돌려줍니다. Spring 판단 엔진이 1분마다 불러 24시간 계획에 쓰고,
+충전·방전 판단은 Spring(최적화)이 합니다. compose가 backend에 `AI_SERVER_URL=http://ai:8000`을 넘겨줍니다.
+ai 서버가 꺼져 있어도 backend는 최근 1시간 평균 부하로 대신 계획합니다.
 
 ## 띄우기
 

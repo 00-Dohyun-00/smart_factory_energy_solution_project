@@ -8,7 +8,7 @@
   사용 예: <KpiCards :status="realtimeStore.status" :stale="!realtimeStore.connected" />
 -->
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { formatClock, formatKw, formatOneDecimal } from '@/utils/format'
 
@@ -21,7 +21,60 @@ const props = defineProps({
 
 const settingsStore = useSettingsStore() // ESS 최대 출력, 잔량 하한·상한 (값은 공통 틀이 받아 둠)
 
-const status = computed(() => props.status)
+// ---- 값이 바뀔 때 부드럽게 넘어가기 ----
+// 백엔드 값은 1분 기록이라 1분에 한 번 바뀜. 그대로 그리면 바늘·게이지·숫자가 한 번에 툭 튀어 끊겨 보였음 (이슈 #32).
+// 그래서 카드에 그리는 값을 0.6초 동안 이전 값에서 새 값으로 옮겨 감.
+// 움직이는 동안만 사이 값을 지나가고, 끝나면 받은 값 그대로를 보여 줌 (값을 새로 만들지 않음)
+const MOVE_MS = 600
+const MOVING_FIELDS = ['loadKw', 'gridKw', 'solarKw', 'chargeKw', 'dischargeKw', 'socPercent']
+const RATIO_FIELDS = ['gridPercent', 'solarPercent', 'essPercent'] // sourceRatio 안의 값
+
+const shown = ref(props.status) // 카드에 그리는 값 (움직이는 중이면 사이 값)
+let frame = 0
+
+// 운영체제에서 "움직임 줄이기"를 켠 사용자에게는 움직이지 않고 바로 보여 줌
+const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
+// from → to 사이에서 t(0~1)만큼 간 값. 어느 한쪽이 없으면 새 값 그대로
+const between = (from, to, t) =>
+  typeof from === 'number' && typeof to === 'number' ? from + (to - from) * t : to
+
+function sameValues(a, b) {
+  return (
+    MOVING_FIELDS.every((key) => a[key] === b[key]) &&
+    RATIO_FIELDS.every((key) => a.sourceRatio?.[key] === b.sourceRatio?.[key])
+  )
+}
+
+function moveTo(next) {
+  cancelAnimationFrame(frame)
+  const from = shown.value
+  // 처음 받았을 때, 값이 그대로일 때(1분 안의 폴링), 연결이 끊겼을 때는 움직이지 않음
+  if (!from || !next || props.stale || reduceMotion() || sameValues(from, next)) {
+    shown.value = next
+    return
+  }
+  const start = performance.now()
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / MOVE_MS)
+    if (t >= 1) {
+      shown.value = next
+      return
+    }
+    const ease = 1 - (1 - t) ** 3 // 처음엔 빠르게, 끝에서 천천히
+    const value = { ...next, sourceRatio: { ...next.sourceRatio } }
+    for (const key of MOVING_FIELDS) value[key] = between(from[key], next[key], ease)
+    for (const key of RATIO_FIELDS) {
+      value.sourceRatio[key] = between(from.sourceRatio?.[key], next.sourceRatio?.[key], ease)
+    }
+    shown.value = value
+    frame = requestAnimationFrame(step)
+  }
+  frame = requestAnimationFrame(step)
+}
+
+watch(() => props.status, moveTo)
+onBeforeUnmount(() => cancelAnimationFrame(frame))
 
 // ESS 카드의 숫자 앞에 붙이는 말
 const PCS_SHORT = { DISCHARGING: '방전', CHARGING: '충전', STANDBY: '대기' }
@@ -72,11 +125,11 @@ function needle(ratio) {
 
 // 한전 구매전력이 목표 피크의 몇 %인지 (표시용 비율: 백엔드 값 두 개를 나눈 것)
 const gridPercent = computed(() =>
-  status.value ? (status.value.gridKw / status.value.targetPeakKw) * 100 : null,
+  shown.value ? (shown.value.gridKw / shown.value.targetPeakKw) * 100 : null,
 )
 
 const kpis = computed(() => {
-  const s = status.value
+  const s = shown.value
   const target = s?.targetPeakKw
   const over = gridPercent.value > 100
   // ESS는 충전 중이면 충전 전력을, 그 밖에는 방전 전력을 보여 줌
@@ -216,8 +269,8 @@ const kpis = computed(() => {
 <template>
   <div class="kpi-wrap" :class="{ stale }">
     <!-- 연결이 끊기면 아래 숫자가 언제 값에서 멈춰 있는지 알려 줌 -->
-    <p v-if="stale && status" class="stale-note" role="status">
-      ◆ 연결이 끊겨 <span class="num">{{ formatClock(status.recordedAt) }}</span> 값에서 멈춰
+    <p v-if="stale && shown" class="stale-note" role="status">
+      ◆ 연결이 끊겨 <span class="num">{{ formatClock(shown.recordedAt) }}</span> 값에서 멈춰
       있습니다
     </p>
     <div class="kpis">
