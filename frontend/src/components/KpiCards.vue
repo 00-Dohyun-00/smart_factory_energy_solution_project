@@ -238,7 +238,7 @@ const kpis = computed(() => {
           : s.pcsStatus === 'DISCHARGING'
             ? 'fill-discharge'
             : 'fill-ess',
-      name: 'ESS 충·방전',
+      name: '배터리 잔량 (SOC)', // 잔량 건전지가 주인공이라 이름을 바꿈 (충·방전 상태와 kW는 아래에 그대로)
       // 숫자 앞에 지금 무엇을 하는 중인지 적음 (방전 500 kW / 충전 300 kW / 대기 0.0 kW)
       prefix: s ? (PCS_SHORT[s.pcsStatus] ?? '') : '',
       prefixIcon: s?.pcsStatus ?? '', // 글자 앞 아이콘 (대기 · 방전 · 충전)
