@@ -147,6 +147,27 @@ class SitePowerServiceTest {
     }
 
     @Test
+    void 공급원_비율은_충전_중이거나_태양광이_남아도_합이_100() {
+        LocalDateTime lastMinute = LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES).minusMinutes(1);
+        // 공장 1000, 태양광 300, 배터리 200 충전 → 한전 900 (공장 700 + 충전 200)
+        powerTable.add(power(lastMinute, 900, 300, -200, 1000));
+
+        SitePowerLatestResponse charging = sitePowerService.getLatest();
+
+        assertThat(charging.sourceRatio().gridPercent()).isEqualTo(70.0);
+        assertThat(charging.sourceRatio().solarPercent()).isEqualTo(30.0);
+        assertThat(charging.sourceRatio().essPercent()).isEqualTo(0.0);
+
+        // 공장 800, 태양광 1000 → 태양광이 다 채움 (100%를 넘지 않음)
+        powerTable.add(power(lastMinute.plusSeconds(1), 0, 1000, 0, 800));
+
+        SitePowerLatestResponse surplus = sitePowerService.getLatest();
+
+        assertThat(surplus.sourceRatio().solarPercent()).isEqualTo(100.0);
+        assertThat(surplus.sourceRatio().gridPercent()).isEqualTo(0.0);
+    }
+
+    @Test
     void 오늘_목록은_15분마다_평균과_구간_마지막_잔량() {
         LocalDateTime start = LocalDate.now().atStartOfDay();
         powerTable.add(power(start, 1000, 0, 0, 1000));

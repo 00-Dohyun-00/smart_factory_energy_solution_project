@@ -148,7 +148,7 @@ public class SitePowerService {
                 todayPeakKw,
                 monthPeakKw,
                 tariffAt(now),
-                new SourceRatio(percent(gridKw, loadKw), percent(solarKw, loadKw), percent(dischargeKw, loadKw)),
+                sourceRatio(loadKw, solarKw, dischargeKw),
                 todayEnergy(today),
                 equipments(latest.getTs())
         );
@@ -322,10 +322,12 @@ public class SitePowerService {
                 .orElse(null);
     }
 
-    // 그 시각이 요금 시간대 안에 있는지. 끝 시각 00:00은 하루 끝(24시)으로 봄
+    // 그 시각이 요금 시간대 안에 있는지. 끝 시각 00:00이나 23:59 이후는 하루 끝(24시)으로 봄
+    // (DB는 하루 끝을 23:59:59로 저장해서, 그대로 비교하면 23:59:59에는 맞는 시간대가 없음)
     private boolean isInPeriod(TariffPeriod period, LocalTime time) {
-        boolean endsAtMidnight = period.getEndTime().equals(LocalTime.MIDNIGHT);
-        return !time.isBefore(period.getStartTime()) && (endsAtMidnight || time.isBefore(period.getEndTime()));
+        LocalTime end = period.getEndTime();
+        boolean endsAtDayEnd = end.equals(LocalTime.MIDNIGHT) || !end.isBefore(LocalTime.of(23, 59));
+        return !time.isBefore(period.getStartTime()) && (endsAtDayEnd || time.isBefore(end));
     }
 
     // 끝 시각 글자. 하루 끝(00:00 또는 23:59 이후)은 "24:00"
@@ -366,9 +368,19 @@ public class SitePowerService {
         };
     }
 
-    // part가 whole의 몇 %인지 (whole이 0이면 0)
-    private Double percent(double part, double whole) {
-        return whole == 0 ? 0.0 : round1(part * 100 / whole);
+    // 공장 전력(loadKw)을 무엇으로 채웠는지 비율. 세 칸의 합은 100 (공장 전력이 0이면 모두 0)
+    // 태양광 → 배터리 방전 → 한전 순으로 채움. grid_kw로 바로 나누면 충전 중일 때
+    // 충전 전력까지 들어가고, 태양광이 남을 때는 100%를 넘어서 합이 100이 안 됨
+    private SourceRatio sourceRatio(double loadKw, double solarKw, double dischargeKw) {
+        if (loadKw <= 0) {
+            return new SourceRatio(0.0, 0.0, 0.0);
+        }
+        double solarUsed = Math.min(solarKw, loadKw);
+        double essUsed = Math.min(dischargeKw, loadKw - solarUsed);
+        double solarPercent = round1(solarUsed * 100 / loadKw);
+        double essPercent = round1(essUsed * 100 / loadKw);
+        // 한전은 100에서 나머지를 뺌 (반올림 때문에 합이 99.9나 100.1이 되지 않게)
+        return new SourceRatio(round1(100 - solarPercent - essPercent), solarPercent, essPercent);
     }
 
     private double toDouble(BigDecimal value) {
