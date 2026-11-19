@@ -17,7 +17,7 @@ public class ZoneController {
 
     private final ZoneService zoneService;
 
-    @Operation(summary = "구역 목록 조회 (display_order 순서)")
+    @Operation(summary = "구역 목록 조회 (zone_code 순서)")
     @GetMapping
     public List<ZoneResponse> findAll() {
         return zoneService.findAll();

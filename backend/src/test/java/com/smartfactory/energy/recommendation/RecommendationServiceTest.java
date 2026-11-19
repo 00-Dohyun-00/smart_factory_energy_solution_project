@@ -9,11 +9,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.smartfactory.energy.ess.EssCommandHolder;
 import com.smartfactory.energy.event.EventLog;
 import com.smartfactory.energy.event.EventLogRepository;
 import com.smartfactory.energy.global.exception.NotFoundException;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
 import com.smartfactory.energy.recommendation.dto.RecommendationResponse;
+import com.smartfactory.energy.setting.SettingRepository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -36,6 +38,8 @@ class RecommendationServiceTest {
     @Mock RecommendationRepository recommendationRepository;
     @Mock DemandInterval15mRepository demandInterval15mRepository;
     @Mock EventLogRepository eventLogRepository;
+    @Mock SettingRepository settingRepository;
+    @Mock EssCommandHolder essCommandHolder;
     @InjectMocks RecommendationService recommendationService;
 
     static final LocalDateTime W = LocalDateTime.of(2026, 11, 10, 14, 0);

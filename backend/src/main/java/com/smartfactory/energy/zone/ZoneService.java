@@ -14,7 +14,7 @@ public class ZoneService {
     private final ZoneRepository zoneRepository;
 
     public List<ZoneResponse> findAll() {
-        return zoneRepository.findAllByOrderByDisplayOrderAsc().stream()
+        return zoneRepository.findAllByOrderByZoneCodeAsc().stream()
                 .map(ZoneResponse::from)
                 .toList();
     }

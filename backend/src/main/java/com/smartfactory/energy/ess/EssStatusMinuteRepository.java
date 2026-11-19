@@ -12,6 +12,6 @@ public interface EssStatusMinuteRepository extends JpaRepository<EssStatusMinute
     @Query("select e from EssStatusMinute e where e.ts >= :start and e.ts < :end order by e.ts")
     List<EssStatusMinute> findInPeriod(LocalDateTime start, LocalDateTime end);
 
-    // 가장 최근 1분 기록
+    // 가장 최근 1분 기록 (서버 재시작 때 SOC를 이어서 시작하기 위함)
     Optional<EssStatusMinute> findFirstByOrderByTsDesc();
 }

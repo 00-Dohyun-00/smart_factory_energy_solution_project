@@ -152,8 +152,8 @@ class SitePowerServiceTest {
         powerTable.add(power(start, 1000, 0, 0, 1000));
         powerTable.add(power(start.plusMinutes(1), 2000, 0, 0, 2000));
         powerTable.add(power(start.plusMinutes(15), 1500, 0, 0, 1500));
-        essTable.add(ess(start, 0, 0, 50));
-        essTable.add(ess(start.plusMinutes(14), 0, 0, 48));
+        essTable.add(ess(start, 50));
+        essTable.add(ess(start.plusMinutes(14), 48));
 
         List<SitePowerQuarterResponse> today = sitePowerService.getToday();
 

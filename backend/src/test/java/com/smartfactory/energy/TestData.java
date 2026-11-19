@@ -1,6 +1,5 @@
 package com.smartfactory.energy;
 
-import com.smartfactory.energy.ess.EssStatus;
 import com.smartfactory.energy.ess.EssStatusMinute;
 import com.smartfactory.energy.power.DemandInterval15m;
 import com.smartfactory.energy.power.SitePowerMinute;
@@ -41,9 +40,9 @@ public class TestData {
         return result;
     }
 
-    // ESS 1분 상태 1줄
-    public static EssStatusMinute ess(LocalDateTime ts, double chargeKwh, double dischargeKwh, double soc) {
-        return new EssStatusMinute(ts, bd(0), bd(chargeKwh), bd(dischargeKwh), bd(soc), bd(25), EssStatus.IDLE);
+    // ESS 1분 상태 1줄 (충·방전량은 이제 site_power_minute.ess_kw로 계산해서 여기 저장하지 않음)
+    public static EssStatusMinute ess(LocalDateTime ts, double soc) {
+        return new EssStatusMinute(ts, bd(soc), bd(25));
     }
 
     // demand_interval_15m 뷰 1줄. 뷰 Entity는 생성자가 없어서 값을 직접 넣음
