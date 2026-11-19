@@ -37,9 +37,8 @@ public class ZoneDetailService {
 
         // 2. 그 구역의 생산 설비 (사용 중인 것만)
         List<String> equipmentIds = equipmentRepository.findAll().stream()
-                .filter(e -> zone.getZoneId().equals(e.getZoneId()))
+                .filter(e -> zone.getZoneCode().equals(e.getZoneCode()))
                 .filter(e -> e.getEquipmentRole() == EquipmentRole.LOAD)
-                .filter(Equipment::getIsActive)
                 .map(Equipment::getEquipmentId)
                 .toList();
 
@@ -64,9 +63,7 @@ public class ZoneDetailService {
             kwByMinute.merge(p.getTs(), kw, Double::sum);
             if (!p.getTs().isBefore(todayStart)) {
                 todayKwByMinute.merge(p.getTs(), kw, Double::sum);
-                if (p.getEnergyKwh() != null) {
-                    todayKwh += p.getEnergyKwh().doubleValue();
-                }
+                todayKwh += kw / 60; // 1분 kW → kWh
             }
         }
 

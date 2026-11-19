@@ -32,24 +32,26 @@ let TARGET_PEAK_KW = 1800 // 목표 피크
 let WARN_KW = 1746 // 주의선 (목표의 97%, 기준은 확인 필요)
 let MAX_DISCHARGE_KW = 500 // ESS 최대 방전 출력
 
-// 공장 컨셉: 전기차 열관리 부품 공장 (가상). 설비 구성과 전력 비중은 임시로 정한 값입니다.
-// share = 평소 공장 전력에서 그 설비가 차지하는 비중 (합계 1.0)
+// 공장 컨셉: 전기차 열관리 부품 공장 (가상).
+// 설비 id · 이름 · 구역 · 정격 전력은 실제 DB equipment 표와 같게 맞춤 (2026-11-18, GET /api/equipment)
+// zoneId = 화면의 구역 id (DB zone_code. 유틸리티는 DB에서 U1이지만 화면은 U로 씀)
+// share = 평소 공장 전력에서 그 설비가 차지하는 비중 (합계 1.0, 임시로 정한 값)
 const EQUIPMENTS = [
-  { id: 'Z1-FIN', name: '핀 성형기', share: 0.05 },
-  { id: 'Z1-TUBE', name: '튜브 가공기', share: 0.04 },
-  { id: 'Z1-CORE', name: '코어 조립기', share: 0.03 },
-  { id: 'Z2-FURN', name: '브레이징로', share: 0.3 },
-  { id: 'Z2-DRY', name: '탈지·건조기', share: 0.06 },
-  { id: 'Z3-INJ1', name: '사출기 1호', share: 0.1 },
-  { id: 'Z3-INJ2', name: '사출기 2호', share: 0.1 },
-  { id: 'Z3-TEMP', name: '금형 온조기', share: 0.04 },
-  { id: 'Z4-MOTOR1', name: '1번 모터', share: 0 }, // 실측 설비 (조립 라인 컨베이어)
-  { id: 'Z4-ROBOT', name: '체결 로봇', share: 0.02 },
-  { id: 'Z5-LEAK', name: '기밀 검사기', share: 0.03 },
-  { id: 'Z5-EOL', name: '성능 시험기', share: 0.05 },
-  { id: 'U-COMP', name: '공기압축기', share: 0.08 },
-  { id: 'U-CHIL', name: '냉각 칠러', share: 0.06 },
-  { id: 'U-HVAC', name: '공조·조명', share: 0.04 },
+  { id: 'HEX-01', zoneId: 'Z1', name: 'CNC 가공기 1호', ratedKw: 120, share: 0.05 },
+  { id: 'HEX-02', zoneId: 'Z1', name: 'CNC 가공기 2호', ratedKw: 120, share: 0.04 },
+  { id: 'HEX-03', zoneId: 'Z1', name: '프레스', ratedKw: 100, share: 0.03 },
+  { id: 'BRZ-01', zoneId: 'Z2', name: '브레이징로', ratedKw: 600, share: 0.3 },
+  { id: 'BRZ-02', zoneId: 'Z2', name: '탈지·건조기', ratedKw: 180, share: 0.06 },
+  { id: 'INJ-01', zoneId: 'Z3', name: '사출기 1호', ratedKw: 220, share: 0.1 },
+  { id: 'INJ-02', zoneId: 'Z3', name: '사출기 2호', ratedKw: 220, share: 0.1 },
+  { id: 'INJ-03', zoneId: 'Z3', name: '사출기 3호', ratedKw: 220, share: 0.04 },
+  { id: 'MOD-01', zoneId: 'Z4', name: '조립 라인 1', ratedKw: 40, share: 0.01 },
+  { id: 'MOD-02', zoneId: 'Z4', name: '조립 라인 2', ratedKw: 40, share: 0.01 },
+  { id: 'INS-01', zoneId: 'Z5', name: '리크 테스터', ratedKw: 120, share: 0.05 },
+  { id: 'INS-02', zoneId: 'Z5', name: '비전 검사기', ratedKw: 80, share: 0.03 },
+  { id: 'UTL-01', zoneId: 'U', name: '공기압축기', ratedKw: 200, share: 0.08 }, // 실측 설비 (DB is_virtual = false)
+  { id: 'UTL-02', zoneId: 'U', name: '냉각탑', ratedKw: 150, share: 0.06 },
+  { id: 'UTL-03', zoneId: 'U', name: '공조기', ratedKw: 120, share: 0.04 },
 ]
 
 // 실패 상황을 화면에서 확인하기 위한 장치. 주소 뒤에 붙여서 씁니다.
@@ -86,12 +88,20 @@ let appliedEssKw = 0 // 적용 중인 ESS 전력 (+방전, −충전, kW)
 
 // ---- 최근 이벤트 (모니터링 화면의 "최근 이벤트" 목록용) ----
 // level: CRITICAL(경고) | WARNING(주의) | NORMAL(정상) | INFO(그 밖의 기록)
+// category: STAGE(단계 변화) | RECOMMEND(추천) | ACTION(적용·넘김) | WINDOW(구간 종료) | BATTERY(배터리) | SETTING(설정 변경)
+//   (category는 이벤트 로그의 "종류" 칼럼·필터용으로 임시로 넣은 값. 백엔드와 확정 필요)
 const events = []
 let nextEventId = 1
 let lastPeakStatus = null // 단계가 바뀌었는지 알기 위해 직전 단계를 기억
 
-function addEvent(level, message, date = simNow()) {
-  events.unshift({ id: nextEventId++, occurredAt: toLocalDateTime(date), level, message })
+function addEvent(level, category, message, date = simNow()) {
+  events.unshift({
+    id: nextEventId++,
+    occurredAt: toLocalDateTime(date),
+    level,
+    category,
+    message,
+  })
   if (events.length > 50) events.pop()
 }
 
@@ -101,11 +111,11 @@ function seedEventsOnce(now) {
   if (eventsSeeded) return
   eventsSeeded = true
   const ago = (minutes) => new Date(now.getTime() - minutes * 60000)
-  addEvent('INFO', '계획 방전 추천을 넘김 (운영자)', ago(47))
-  addEvent('WARNING', '주의 단계 진입', ago(31))
-  addEvent('CRITICAL', '목표 초과 예상, 방전 500 kW 추천', ago(30))
-  addEvent('INFO', '방전 500 kW 적용 (운영자)', ago(29))
-  addEvent('NORMAL', '정상 단계로 돌아옴', ago(17))
+  addEvent('INFO', 'ACTION', '계획 방전 추천을 넘김 (운영자)', ago(47))
+  addEvent('WARNING', 'STAGE', '주의 단계 진입', ago(31))
+  addEvent('CRITICAL', 'RECOMMEND', '목표 초과 예상, 방전 500 kW 추천', ago(30))
+  addEvent('INFO', 'ACTION', '방전 500 kW 적용 (운영자)', ago(29))
+  addEvent('NORMAL', 'STAGE', '정상 단계로 돌아옴', ago(17))
 }
 
 // 1분 평균: 그 시각 직전 1분을 10초 간격으로 여섯 번 재서 평균 냄 (그래프가 톱니처럼 튀지 않게)
@@ -351,6 +361,7 @@ function updateWindow(nowMs, gridWithoutEss) {
       const to = toLocalDateTime(new Date(startMs)).slice(11, 16)
       addEvent(
         endedKw > TARGET_PEAK_KW ? 'CRITICAL' : 'NORMAL',
+        'WINDOW',
         `${from}–${to} 구간 ${endedKw.toLocaleString('ko-KR')} kW로 종료`,
         new Date(startMs),
       )
@@ -595,6 +606,7 @@ function updateDecision(now, info) {
   sessionDecisions.push(currentDecision)
   addEvent(
     kind === 'PEAK' ? 'CRITICAL' : 'INFO',
+    'RECOMMEND',
     kind === 'PEAK'
       ? `방어선 초과 예상, 방전 ${powerKw} kW 추천`
       : `${ADVICE_RULES[kind].ruleLabel} ${powerKw} kW 추천 (${untilText}까지)`,
@@ -606,7 +618,7 @@ function updateDecision(now, info) {
     currentDecision.appliedBy = '자동 모드' // 명세 v0.2 값. 화면이 "(시뮬레이션)"을 붙여 보여 줌
     currentDecision.appliedAt = toLocalDateTime(now)
     appliedEssKw = followKw(currentDecision)
-    addEvent('INFO', `${ACTION_TEXTS[action]} ${powerKw} kW 자동 적용 (시뮬레이션)`, now)
+    addEvent('INFO', 'ACTION', `${ACTION_TEXTS[action]} ${powerKw} kW 자동 적용 (시뮬레이션)`, now)
   }
 }
 
@@ -807,21 +819,20 @@ export async function fakeGetDecisions(from, to) {
 function equipmentsAt(time) {
   const seconds = time.getTime() / 1000
   const baseKw = baseLoadAt(time)
-  const motorKw = 2.2 + 0.3 * Math.sin(seconds / 5) // 1번 모터만 실측이라고 가정
   const extraKw = {
-    'Z2-FURN': furnaceSwingAt(seconds),
-    'Z3-INJ1': injectionSwingAt(seconds) * 0.6,
-    'Z3-INJ2': injectionSwingAt(seconds) * 0.4,
-    'Z4-MOTOR1': motorKw,
-    'U-HVAC': -motorKw,
+    'BRZ-01': furnaceSwingAt(seconds),
+    'INJ-01': injectionSwingAt(seconds) * 0.6,
+    'INJ-02': injectionSwingAt(seconds) * 0.4,
   }
   return EQUIPMENTS.map((item) => ({
     id: item.id,
+    zoneId: item.zoneId,
     name: item.name,
+    ratedKw: item.ratedKw,
     loadKw: round1(baseKw * item.share + (extraKw[item.id] ?? 0)),
-    origin: item.id === 'Z4-MOTOR1' ? 'MEASURED' : 'SIMULATED',
+    origin: item.id === 'UTL-01' ? 'MEASURED' : 'SIMULATED',
     // 설비 상태. 브레이징로는 전력이 크게 오를 때 "가열 중"으로 표시 (필드는 확인 필요)
-    state: item.id === 'Z2-FURN' && furnaceSwingAt(seconds) > 100 ? 'HEATING' : 'RUNNING',
+    state: item.id === 'BRZ-01' && furnaceSwingAt(seconds) > 100 ? 'HEATING' : 'RUNNING',
   }))
 }
 
@@ -986,14 +997,14 @@ function updateLiveSoc(now) {
     if (appliedEssKw > 0) {
       // 하한에 닿으면 배터리를 보호하려고 방전을 멈춤
       appliedEssKw = 0
-      addEvent('WARNING', `잔량 하한 ${SOC_LOW_LIMIT}% 도달, 방전 멈춤`, now)
+      addEvent('WARNING', 'BATTERY', `잔량 하한 ${SOC_LOW_LIMIT}% 도달, 방전 멈춤`, now)
     }
   }
   if (liveSocPercent >= SOC_HIGH_LIMIT) {
     liveSocPercent = SOC_HIGH_LIMIT
     if (appliedEssKw < 0) {
       appliedEssKw = 0
-      addEvent('INFO', `잔량 상한 ${SOC_HIGH_LIMIT}% 도달, 충전 멈춤`, now)
+      addEvent('INFO', 'BATTERY', `잔량 상한 ${SOC_HIGH_LIMIT}% 도달, 충전 멈춤`, now)
     }
   }
 }
@@ -1072,8 +1083,8 @@ export async function fakeGetLatestStatus() {
 
   // 단계가 바뀌면 이벤트로 남김 (경고는 추천 이벤트와 겹치므로 주의·정상만)
   if (lastPeakStatus && lastPeakStatus !== peakStatus) {
-    if (peakStatus === 'WARNING') addEvent('WARNING', '주의 단계 진입', now)
-    if (peakStatus === 'NORMAL') addEvent('NORMAL', '정상 단계로 돌아옴', now)
+    if (peakStatus === 'WARNING') addEvent('WARNING', 'STAGE', '주의 단계 진입', now)
+    if (peakStatus === 'NORMAL') addEvent('NORMAL', 'STAGE', '정상 단계로 돌아옴', now)
   }
   lastPeakStatus = peakStatus
 
@@ -1160,11 +1171,12 @@ export async function fakeUpdateDecision(id, status) {
     appliedEssKw = sign * currentDecision.powerKw
     addEvent(
       'INFO',
+      'ACTION',
       `${ACTION_TEXTS[currentDecision.action]} ${currentDecision.powerKw} kW 적용 (운영자)`,
     )
   } else {
     appliedEssKw = 0
-    addEvent('INFO', `${currentDecision.ruleLabel} 추천을 넘김 (운영자)`)
+    addEvent('INFO', 'ACTION', `${currentDecision.ruleLabel} 추천을 넘김 (운영자)`)
   }
   return { ...currentDecision }
 }
@@ -1183,7 +1195,7 @@ export async function fakeGetZoneRecent(zoneId) {
   // 어떤 시각에 그 구역이 쓴 전력 (그 구역 설비들의 합)
   const zoneKwAt = (time) =>
     equipmentsAt(time)
-      .filter((item) => item.id.startsWith(`${zoneId}-`))
+      .filter((item) => item.zoneId === zoneId)
       .reduce((sum, item) => sum + item.loadKw, 0)
 
   const points = []
@@ -1805,7 +1817,12 @@ export async function fakeUpdateSettings(changes) {
       newValue: change.value,
       changedBy: '운영자',
     })
-    addEvent('INFO', `설정 변경: ${item.label} ${oldValue} → ${change.value} (운영자)`, now)
+    addEvent(
+      'INFO',
+      'SETTING',
+      `설정 변경: ${item.label} ${oldValue} → ${change.value} (운영자)`,
+      now,
+    )
   }
   applySettings()
 

@@ -31,40 +31,14 @@ public class PowerMinute {
     @Column(name = "avg_kw", nullable = false, precision = 10, scale = 2)
     private BigDecimal avgKw;
 
-    @Column(name = "max_kw", precision = 10, scale = 2)
-    private BigDecimal maxKw;
-
-    @Column(name = "min_kw", precision = 10, scale = 2)
-    private BigDecimal minKw;
-
-    @Column(name = "energy_kwh", precision = 10, scale = 4)
-    private BigDecimal energyKwh;
-
-    @Column(name = "grid_kwh", precision = 10, scale = 4)
-    private BigDecimal gridKwh;
-
-    @Column(name = "solar_kwh", precision = 10, scale = 4)
-    private BigDecimal solarKwh;
-
-    @Column(name = "ess_kwh", precision = 10, scale = 4)
-    private BigDecimal essKwh;
-
     // 0 또는 1 (가동 여부). DB는 smallint라서 Short로 매핑합니다.
     @Column(name = "is_running", nullable = false)
     private Short isRunning;
 
-    public PowerMinute(String equipmentId, LocalDateTime ts, BigDecimal avgKw, BigDecimal maxKw, BigDecimal minKw,
-                        BigDecimal energyKwh, BigDecimal gridKwh, BigDecimal solarKwh, BigDecimal essKwh,
-                        Short isRunning) {
+    public PowerMinute(String equipmentId, LocalDateTime ts, BigDecimal avgKw, Short isRunning) {
         this.equipmentId = equipmentId;
         this.ts = ts;
         this.avgKw = avgKw;
-        this.maxKw = maxKw;
-        this.minKw = minKw;
-        this.energyKwh = energyKwh;
-        this.gridKwh = gridKwh;
-        this.solarKwh = solarKwh;
-        this.essKwh = essKwh;
         this.isRunning = isRunning;
     }
 }

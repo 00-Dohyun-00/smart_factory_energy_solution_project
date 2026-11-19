@@ -32,7 +32,8 @@ public class SolarPower {
     @Column(name = "power_type", length = 10)
     private SolarPowerType powerType;
 
-    @Column(name = "power_kw", nullable = false, precision = 10, scale = 2)
+    // DB는 NULL을 허용함 (아직 값을 못 받은 시각이 있을 수 있음)
+    @Column(name = "power_kw", precision = 10, scale = 2)
     private BigDecimal powerKw;
 
     public SolarPower(LocalDateTime ts, SolarPowerType powerType, BigDecimal powerKw) {
