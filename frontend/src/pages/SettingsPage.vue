@@ -328,7 +328,6 @@ const historyRows = computed(() =>
       <div class="groups">
         <section
           v-for="group in allGroups"
-          v-show="group.fields.length"
           :key="group.key"
           class="card group"
           :class="{ wide: group.wide }"
@@ -338,6 +337,11 @@ const historyRows = computed(() =>
             <span class="note">{{ group.note }}</span>
           </div>
 
+          <!-- 칸이 하나도 없어도 묶음 틀은 그대로 둠 (예: 서버가 끊겨 설비 목록을 못 받은 설비 임계치) -->
+          <p v-if="!group.fields.length" class="group-empty">
+            설비 목록을 받으면 설비마다 임계치 칸이 생깁니다. (지금은 서버에서 설비 목록을 받지
+            못했습니다)
+          </p>
           <div
             v-for="field in group.fields"
             :key="field.key"
@@ -539,6 +543,18 @@ const historyRows = computed(() =>
   flex-direction: column;
 }
 /* 설비 임계치: 한 줄을 다 쓰고, 칸은 3열로 */
+/* 칸이 없는 묶음의 빈 영역: 틀이 납작해지지 않게 높이를 둠 */
+.group-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--mute);
+  text-align: center;
+}
 .group.wide {
   display: grid;
   grid-column: 1 / -1;
@@ -547,7 +563,8 @@ const historyRows = computed(() =>
 }
 .group.wide > .card-head,
 .group.wide > .group-foot,
-.group.wide > .group-notice {
+.group.wide > .group-notice,
+.group.wide > .group-empty {
   grid-column: 1 / -1;
 }
 .group-notice {
