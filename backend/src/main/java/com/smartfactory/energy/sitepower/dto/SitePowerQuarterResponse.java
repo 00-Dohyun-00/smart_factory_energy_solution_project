@@ -10,6 +10,7 @@ public record SitePowerQuarterResponse(
         Double loadKw,            // 구간 평균 공장 전력
         Double solarKw,           // 구간 평균 태양광
         Double gridKw,            // 구간 평균 한전 구매
+        Double essKw,             // 구간 평균 ESS 출력 (+ 방전 / − 충전)
         Double socPercent         // 구간 마지막 1분의 배터리 잔량 (기록 없으면 null)
 ) {
 }
