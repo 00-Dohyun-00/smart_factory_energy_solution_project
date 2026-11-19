@@ -36,11 +36,21 @@ function clamp(ratio) {
 
 // 반원 위의 색 구간 하나. from·to는 반원 전체를 100으로 봤을 때의 위치(%)
 // ring이 true면 안쪽 굵은 반원이 아니라 바깥쪽 가는 테(정상·주의·경고 구간 표시)에 그림
+// 예전에는 반원 전체를 그리고 점선 간격(stroke-dasharray)으로 일부만 보이게 했는데,
+// 브라우저·확대 배율에 따라 칠하기 시작하는 경계가 살짝 어긋나 비뚤어 보여서
+// 구간마다 시작·끝 각도를 계산해 그 부분의 호만 직접 그림 (경계가 항상 반지름 방향의 곧은 선)
 function segment(from, to, className, ring = false) {
-  const start = clamp(from / 100) * 100
-  const end = clamp(to / 100) * 100
-  // 길이 0에서 시작 → start만큼 비움 → (end - start)만큼 칠함 → 나머지는 비움
-  return { dash: `0 ${start} ${Math.max(0, end - start)} 200`, className, ring }
+  const start = clamp(from / 100)
+  const end = clamp(to / 100)
+  // 칠할 길이가 없으면 그리지 않음 (아래 template에서 d가 없는 구간은 건너뜀)
+  if (end - start <= 0) return { d: '', className, ring }
+  const radius = ring ? 59.5 : 50 // 바깥 테 / 안쪽 게이지 반지름 (중심 60,62)
+  const point = (ratio) => {
+    const angle = Math.PI * (1 - ratio) // 0이면 왼쪽 끝, 1이면 오른쪽 끝
+    return `${(60 + radius * Math.cos(angle)).toFixed(3)} ${(62 - radius * Math.sin(angle)).toFixed(3)}`
+  }
+  // A 명령: 반지름, 회전 0, 작은 호(0), 시계 방향(1)으로 시작점 → 끝점
+  return { d: `M${point(start)} A${radius} ${radius} 0 0 1 ${point(end)}`, className, ring }
 }
 
 // 값이 어느 구간에 있는지에 따라 차오르는 게이지 색을 고름 (바깥 테와 같은 색)
@@ -193,7 +203,8 @@ const kpis = computed(() => {
       prefixIcon: s?.pcsStatus ?? '', // 글자 앞 아이콘 (대기 · 방전 · 충전)
       value: formatKw(essKw),
       unit: 'kW',
-      sub: '왼쪽 충전 | 오른쪽 방전',
+      // 아랫줄을 글자 3개로 나눠 '|'를 카드(=계기판) 가운데에 고정, 양옆에 충전·방전 안내
+      sides: ['왼쪽 충전', '오른쪽 방전'],
       min: maxPowerKw ? `충전 ${formatKw(maxPowerKw)}` : '충전',
       max: maxPowerKw ? `방전 ${formatKw(maxPowerKw)}` : '방전',
       // 바깥 가는 테: 가운데(대기)를 기준으로 왼쪽 충전 · 오른쪽 방전을 다른 색으로
@@ -253,15 +264,15 @@ const kpis = computed(() => {
         </div>
         <!-- 반원 계기판: 색 구간 + 바늘 (값을 못 받았으면 바늘 없이 회색 반원만) -->
         <svg class="gauge" viewBox="0 0 120 72" aria-hidden="true">
-          <path
-            v-for="(item, index) in kpi.segments"
-            :key="index"
-            class="seg"
-            :class="[item.className, { ring: item.ring }]"
-            :d="item.ring ? 'M0.5 62 A59.5 59.5 0 0 1 119.5 62' : 'M10 62 A50 50 0 0 1 110 62'"
-            pathLength="100"
-            :stroke-dasharray="item.dash"
-          />
+          <!-- 구간마다 그 부분의 호만 그림 (길이가 0인 구간은 d가 비어 있어 건너뜀) -->
+          <template v-for="(item, index) in kpi.segments" :key="index">
+            <path
+              v-if="item.d"
+              class="seg"
+              :class="[item.className, { ring: item.ring }]"
+              :d="item.d"
+            />
+          </template>
           <template v-if="kpi.needle">
             <line class="needle" x1="60" y1="62" :x2="kpi.needle.x" :y2="kpi.needle.y" />
             <circle class="hub" cx="60" cy="62" r="3.5" />
@@ -295,6 +306,12 @@ const kpis = computed(() => {
             <span class="swatch" :class="item.className" aria-hidden="true"></span>
             {{ item.label }} {{ item.percent }}%
           </span>
+        </p>
+        <!-- ESS: '왼쪽 충전' | '오른쪽 방전'. 양쪽 칸 폭을 같게(1fr) 두어 '|'가 언제나 정확히 가운데 -->
+        <p v-else-if="kpi.sides" class="kpi-sub kpi-sides">
+          <span class="side-left">{{ kpi.sides[0] }}</span>
+          <span class="side-bar" aria-hidden="true">|</span>
+          <span class="side-right">{{ kpi.sides[1] }}</span>
         </p>
         <p v-else class="kpi-sub num" :class="{ over: kpi.over }">
           <template v-if="kpi.subLabel && kpi.sub">{{ kpi.subLabel }}</template>
@@ -574,6 +591,18 @@ const kpis = computed(() => {
   stroke: var(--crit);
   stroke-width: 2.4;
   stroke-linecap: round;
+}
+.kpi-sides {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  column-gap: 6px;
+}
+.side-left {
+  text-align: right;
+}
+.side-right {
+  text-align: left;
 }
 .kpi-sub.over {
   font-weight: 700;
