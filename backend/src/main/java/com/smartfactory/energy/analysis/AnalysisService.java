@@ -9,6 +9,8 @@ import com.smartfactory.energy.analysis.dto.TrendSummary;
 import com.smartfactory.energy.analysis.dto.TrendWeather;
 import com.smartfactory.energy.ess.EssStatusMinute;
 import com.smartfactory.energy.ess.EssStatusMinuteRepository;
+import com.smartfactory.energy.power.DemandInterval15m;
+import com.smartfactory.energy.power.DemandInterval15mRepository;
 import com.smartfactory.energy.power.SitePowerMinute;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.recommendation.Recommendation;
@@ -29,6 +31,7 @@ import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -53,6 +56,7 @@ public class AnalysisService {
     private final SettingRepository settingRepository;
     private final TariffPeriodRepository tariffPeriodRepository;
     private final RecommendationRepository recommendationRepository;
+    private final DemandInterval15mRepository demandInterval15mRepository;
 
     // 기간 추이 분석
     public TrendResponse getTrend(LocalDate from, LocalDate to, String interval) {
@@ -78,8 +82,9 @@ public class AnalysisService {
         // 3. 기준값 읽기 (setting 테이블)
         Double targetPeakKw = settingNumber("peak.target_kw");
 
-        // 4. 15분 피크 계산 (요약, 처리별 결과, 눈에 띄는 구간이 같이 씀)
-        Map<LocalDateTime, Double> quarterPeaks = makeQuarterPeaks(powers);
+        // 4. 15분 피크 (요약, 처리별 결과, 눈에 띄는 구간이 같이 씀)
+        // 피크 분석·성적표·추천 이력과 같은 숫자가 나오게 demand_interval_15m 뷰에서 읽음
+        Map<LocalDateTime, Double> quarterPeaks = makeQuarterPeaks(start, end);
 
         // 5. 화면 구역별로 만들어서 응답 하나로 묶기
         return new TrendResponse(
@@ -94,7 +99,7 @@ public class AnalysisService {
                 makePoints(powers, essList, weathers, interval),
                 makeWeather(weathers),
                 makeHourly(powers, to),
-                makeByStatus(recommendations, quarterPeaks, powers),
+                makeByStatus(recommendations, quarterPeaks, targetPeakKw),
                 makeHighlights(powers, essList, quarterPeaks, targetPeakKw)
         );
     }
@@ -171,7 +176,7 @@ public class AnalysisService {
         EssStatusMinute maxRoom = pickMax(essList, EssStatusMinute::getBatteryTemp);
 
         return new TrendSummary(
-                maxPeak != null ? maxPeak.getValue() : null,
+                maxPeak != null ? round1(maxPeak.getValue()) : null,
                 maxPeak != null ? maxPeak.getKey() : null,
                 avgGridKw,
                 round1(solarKwh),
@@ -226,38 +231,43 @@ public class AnalysisService {
     // ---------- 추천 처리별 결과 (byStatus) ----------
 
     // 방전 추천을 적용·자동·넘김으로 나눠서 몇 번 막았는지 셈
+    // 판단 엔진은 1분마다 추천을 낼 수 있어서 같은 15분 구간에 추천이 여러 줄일 수 있음
+    // → 추천 줄 수가 아니라 "구간 1개 = 1건"으로 셈. 그 구간을 어떻게 처리했는지는 적용 > 자동 > 넘김 순으로 봄
     private List<TrendStatusResult> makeByStatus(List<Recommendation> recommendations,
-                                                 Map<LocalDateTime, Double> quarterPeaks,
-                                                 List<SitePowerMinute> powers) {
-        // 15분이 다 찬 구간만 결과로 인정 (진행 중인 구간은 아직 결과가 없음)
-        Map<LocalDateTime, Long> minuteCounts = powers.stream()
-                .collect(Collectors.groupingBy(p -> bucketStart(p.getTs(), "QUARTER"), Collectors.counting()));
+                                                 Map<LocalDateTime, Double> quarterPeaks, Double targetPeakKw) {
+        // 15분 구간 시작 시각 → 그 구간의 대표 방전 추천
+        Map<LocalDateTime, Recommendation> byWindow = new HashMap<>();
+        for (Recommendation r : recommendations) {
+            if (r.getAction() != RecommendationAction.DISCHARGE || statusCode(r.getStatus()) == null) {
+                continue; // 방전이 아니거나 아직 처리 전(대기중)인 추천은 뺌
+            }
+            byWindow.merge(r.getIntervalStart(), r, this::pickHandled);
+        }
 
         List<TrendStatusResult> result = new ArrayList<>();
-        for (RecommendationStatus status : List.of(
-                RecommendationStatus.APPLIED, RecommendationStatus.AUTO, RecommendationStatus.SKIPPED)) {
+        for (String status : List.of("APPLIED", "AUTO", "IGNORED")) {
             List<Double> resultPeaks = new ArrayList<>();
             int defendedCount = 0;
 
-            for (Recommendation r : recommendations) {
-                if (r.getAction() != RecommendationAction.DISCHARGE || r.getStatus() != status) {
+            for (Map.Entry<LocalDateTime, Recommendation> entry : byWindow.entrySet()) {
+                Recommendation r = entry.getValue();
+                if (!status.equals(statusCode(r.getStatus()))) {
                     continue;
                 }
-                LocalDateTime window = r.getIntervalStart();
-                if (minuteCounts.getOrDefault(window, 0L) < 15) {
-                    continue; // 결과가 아직 없는 추천은 빼고 셈
+                Double resultPeak = quarterPeaks.get(entry.getKey());
+                if (resultPeak == null) {
+                    continue; // 15분이 다 차지 않은 구간은 결과가 아직 없어서 뺌
                 }
-                Double resultPeak = quarterPeaks.get(window);
                 resultPeaks.add(resultPeak);
-                if (r.getTargetPeakKw() != null && resultPeak <= r.getTargetPeakKw().doubleValue()) {
+                Double target = r.getTargetPeakKw() != null ? r.getTargetPeakKw().doubleValue() : targetPeakKw;
+                if (target != null && resultPeak <= target) {
                     defendedCount++;
                 }
             }
 
             int count = resultPeaks.size();
-            // 응답 코드는 화면과 맞춘 값 그대로 (SKIPPED → IGNORED)
             result.add(new TrendStatusResult(
-                    status == RecommendationStatus.SKIPPED ? "IGNORED" : status.name(),
+                    status,
                     count,
                     defendedCount,
                     count > 0 ? round1(defendedCount * 100.0 / count) : null,
@@ -265,6 +275,36 @@ public class AnalysisService {
             ));
         }
         return result;
+    }
+
+    // 같은 구간의 추천 2개 중 대표 1개 (적용 > 자동 > 넘김, 같으면 나중 추천)
+    private Recommendation pickHandled(Recommendation a, Recommendation b) {
+        int rankA = statusRank(a.getStatus());
+        int rankB = statusRank(b.getStatus());
+        if (rankA != rankB) {
+            return rankA < rankB ? a : b;
+        }
+        return a.getRecommendedAt().isAfter(b.getRecommendedAt()) ? a : b;
+    }
+
+    // 대표 추천을 고를 때의 순서 (작을수록 먼저)
+    private int statusRank(RecommendationStatus status) {
+        return switch (status) {
+            case APPLIED -> 0;
+            case AUTO -> 1;
+            case SKIPPED, EXPIRED -> 2;
+            case PENDING -> 3;
+        };
+    }
+
+    // 처리 상태를 화면 코드로 바꿈 (넘김·만료 → IGNORED). 처리 전(대기중)이면 null
+    private String statusCode(RecommendationStatus status) {
+        return switch (status) {
+            case APPLIED -> "APPLIED";
+            case AUTO -> "AUTO";
+            case SKIPPED, EXPIRED -> "IGNORED";
+            case PENDING -> null;
+        };
     }
 
     // ---------- 눈에 띄는 구간 (highlights) ----------
@@ -276,7 +316,7 @@ public class AnalysisService {
 
         quarterPeaks.entrySet().stream().max(Map.Entry.comparingByValue()).ifPresent(peak -> {
             boolean over = targetPeakKw != null && peak.getValue() > targetPeakKw;
-            result.add(new TrendHighlight(peak.getKey(), "15분 피크 최대", peak.getValue(), "kW", over ? "CRITICAL" : "INFO"));
+            result.add(new TrendHighlight(peak.getKey(), "15분 피크 최대", round1(peak.getValue()), "kW", over ? "CRITICAL" : "INFO"));
         });
 
         EssStatusMinute minSoc = pickMin(essList, EssStatusMinute::getSoc);
@@ -306,14 +346,13 @@ public class AnalysisService {
     // ---------- 작은 도우미 메서드 ----------
 
     // 15분 구간마다 한전 구매 평균 (= 그 구간의 피크 값). 한전이 기본요금을 매기는 방식
-    private Map<LocalDateTime, Double> makeQuarterPeaks(List<SitePowerMinute> powers) {
-        Map<LocalDateTime, List<SitePowerMinute>> groups = powers.stream()
-                .collect(Collectors.groupingBy(p -> bucketStart(p.getTs(), "QUARTER")));
+    // demand_interval_15m 뷰에서 15분이 다 찬 구간만 씀 (진행 중인 구간은 아직 결과가 아님)
+    // 값은 반올림하지 않고 둠 (목표와 비교할 때 1800.04가 1800.0으로 바뀌어 "달성"이 되지 않게)
+    private Map<LocalDateTime, Double> makeQuarterPeaks(LocalDateTime start, LocalDateTime end) {
         Map<LocalDateTime, Double> result = new TreeMap<>();
-        for (LocalDateTime time : groups.keySet()) {
-            Double avg = average(groups.get(time).stream().map(SitePowerMinute::getGridKw).toList());
-            if (avg != null) {
-                result.put(time, avg);
+        for (DemandInterval15m d : demandInterval15mRepository.findInPeriod(start, end)) {
+            if (d.getMinuteCount() != null && d.getMinuteCount() >= 15 && d.getActualAvgKw() != null) {
+                result.put(d.getIntervalStart(), d.getActualAvgKw().doubleValue());
             }
         }
         return result;

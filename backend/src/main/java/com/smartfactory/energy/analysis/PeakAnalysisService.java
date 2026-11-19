@@ -18,12 +18,14 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalDouble;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -177,13 +179,16 @@ public class PeakAnalysisService {
         TariffPeriod busiest = null;
         double busiestAvg = 0;
         for (TariffPeriod period : tariffPeriodRepository.findBySeason(seasonOf(to))) {
-            double avg = heatmap.stream()
+            OptionalDouble avg = heatmap.stream()
                     .filter(cell -> isInPeriod(period, LocalTime.of(cell.hour(), 0)))
                     .mapToDouble(PeakHeatmapCell::peakKw)
-                    .average().orElse(-1);
-            if (avg >= 0 && (busiest == null || avg > busiestAvg)) {
+                    .average();
+            if (avg.isEmpty()) {
+                continue; // 이 시간대에 기록이 없음
+            }
+            if (busiest == null || avg.getAsDouble() > busiestAvg) {
                 busiest = period;
-                busiestAvg = avg;
+                busiestAvg = avg.getAsDouble();
             }
         }
 
@@ -194,8 +199,8 @@ public class PeakAnalysisService {
                 intervals.size(),
                 round1(avgReduction),
                 round1(maxReduction),
-                busiest != null ? busiest.getStartTime().toString() : null,
-                busiest != null ? busiest.getEndTime().toString() : null,
+                busiest != null ? timeText(busiest.getStartTime()) : null,
+                busiest != null ? endText(busiest.getEndTime()) : null,
                 busiest != null ? periodLabel(busiest) : null
         );
     }
@@ -244,6 +249,19 @@ public class PeakAnalysisService {
             return TariffSeason.SPRING_FALL;
         }
         return TariffSeason.WINTER;
+    }
+
+    // 시각 글자 (예: 17:00)
+    private String timeText(LocalTime time) {
+        return time.format(DateTimeFormatter.ofPattern("HH:mm"));
+    }
+
+    // 끝 시각 글자. 하루 끝(00:00 또는 23:59 이후)은 "24:00" (00:00으로 보이면 "22:00 ~ 00:00"처럼 거꾸로 읽힘)
+    private String endText(LocalTime end) {
+        if (end.equals(LocalTime.MIDNIGHT) || !end.isBefore(LocalTime.of(23, 59))) {
+            return "24:00";
+        }
+        return timeText(end);
     }
 
     private double toDouble(BigDecimal value) {

@@ -92,7 +92,7 @@ public class ReportService {
         // 5. 화면 구역별로 만들기
         ReportSummary summary = makeSummary(recommendations, resultPeaks, targetPeakKw, peak);
         Double monthPeakKw = peak.hasData() ? peak.summary().maxPeakKw() : null;
-        ReportBill bill = makeBill(yearMonth, powers, monthPeakKw, targetPeakKw, periodEnd);
+        ReportBill bill = makeBill(yearMonth, powers, monthPeakKw, targetPeakKw);
         List<ReportExceeded> exceeded = makeExceeded(intervals, recommendations, targetPeakKw);
         ReportEss ess = makeEss(essList, recommendations, resultPeaks, targetPeakKw);
         ReportSolar solar = makeSolar(powers);
@@ -109,16 +109,21 @@ public class ReportService {
     private ReportSummary makeSummary(List<Recommendation> recommendations, Map<LocalDateTime, Double> resultPeaks,
                                       Double targetPeakKw, PeakResponse peak) {
         // 피크 방어 추천 수와, 그중 실제 피크가 목표 이하로 끝난 수
+        // 판단 엔진은 1분마다 추천을 낼 수 있어서 같은 15분 구간에 추천이 여러 줄일 수 있음
+        // → 추천 줄 수가 아니라 "구간 1개 = 1회"로 셈. 아직 끝나지 않은 구간은 결과가 없어서 뺌
+        Map<LocalDateTime, Recommendation> defenseByWindow = latestByWindow(recommendations.stream()
+                .filter(r -> r.getReasonType() == RecommendationReasonType.PEAK_DEFENSE)
+                .toList());
         int defenseTotal = 0;
         int defenseSuccess = 0;
-        for (Recommendation r : recommendations) {
-            if (r.getReasonType() != RecommendationReasonType.PEAK_DEFENSE) {
+        for (Map.Entry<LocalDateTime, Recommendation> entry : defenseByWindow.entrySet()) {
+            Double result = resultPeaks.get(entry.getKey());
+            if (result == null) {
                 continue;
             }
             defenseTotal++;
-            Double result = resultPeaks.get(r.getIntervalStart());
-            Double target = r.getTargetPeakKw() != null ? r.getTargetPeakKw().doubleValue() : targetPeakKw;
-            if (result != null && target != null && result <= target) {
+            Double target = targetOf(entry.getValue(), targetPeakKw);
+            if (target != null && result <= target) {
                 defenseSuccess++;
             }
         }
@@ -135,7 +140,7 @@ public class ReportService {
     // ---------- 전기요금 (bill) ----------
 
     private ReportBill makeBill(YearMonth yearMonth, List<SitePowerMinute> powers, Double monthPeakKw,
-                                Double targetPeakKw, LocalDate periodEnd) {
+                                Double targetPeakKw) {
         Double basePrice = settingNumber("tariff.base_charge");
         List<TariffPeriod> periods = tariffPeriodRepository.findBySeason(seasonOf(yearMonth.atDay(1)));
 
@@ -158,25 +163,39 @@ public class ReportService {
         }
 
         double totalKwh = kwhByType.values().stream().mapToDouble(Double::doubleValue).sum();
-        long energyCharge = Math.round(chargeByType.values().stream().mapToDouble(Double::doubleValue).sum());
+        // 합계는 시간대별로 반올림한 금액을 더해서 만듦 (항목 합과 합계가 1원 어긋나지 않게)
+        long energyCharge = 0;
+        for (double charge : chargeByType.values()) {
+            energyCharge += Math.round(charge);
+        }
         long baseCharge = baseCharge(monthPeakKw, basePrice);
         long overTarget = 0;
         if (monthPeakKw != null && targetPeakKw != null && basePrice != null) {
             overTarget = Math.round(Math.max(0, monthPeakKw - targetPeakKw) * basePrice);
         }
 
-        // 월말 예상: 지금까지의 하루 평균 전력량요금 × 그 달 날수 + 기본요금
-        int daysSoFar = periodEnd.getDayOfMonth();
-        long monthEndEstimate = Math.round((double) energyCharge / daysSoFar * yearMonth.lengthOfMonth()) + baseCharge;
+        // 월말 예상: 실제 기록된 시간 기준 하루 평균 전력량요금 × 그 달 날수 + 기본요금
+        // (달력 날짜로 나누면 기록이 빈 날이나 진행 중인 오늘도 하루로 세서 낮게 나옴)
+        double recordedDays = powers.size() / 1440.0; // 1분 기록 1440개 = 하루
+        long monthEndEstimate = Math.round(energyCharge / recordedDays * yearMonth.lengthOfMonth()) + baseCharge;
 
+        // 시간대별 비중. 마지막 칸은 100에서 앞 칸들을 뺀 값 (합이 100.1%처럼 어긋나지 않게)
         List<ReportTariffUsage> byTariff = new ArrayList<>();
-        for (TariffPeriodType type : TariffPeriodType.values()) {
+        TariffPeriodType[] types = TariffPeriodType.values();
+        double percentSoFar = 0;
+        for (int i = 0; i < types.length; i++) {
+            TariffPeriodType type = types[i];
             double kwh = kwhByType.get(type);
+            double percent = 0.0;
+            if (totalKwh > 0) {
+                percent = i < types.length - 1 ? round1(kwh * 100 / totalKwh) : round1(100 - percentSoFar);
+            }
+            percentSoFar += percent;
             byTariff.add(new ReportTariffUsage(
                     periodCode(type),
                     periodLabel(type),
                     round1(kwh),
-                    totalKwh == 0 ? 0.0 : round1(kwh * 100 / totalKwh),
+                    percent,
                     Math.round(chargeByType.get(type))
             ));
         }
@@ -223,12 +242,7 @@ public class ReportService {
         if (targetPeakKw == null) {
             return List.of();
         }
-        // 15분 구간 시작 시각 → 그 구간의 마지막 추천
-        Map<LocalDateTime, Recommendation> recByWindow = new HashMap<>();
-        for (Recommendation r : recommendations) {
-            recByWindow.merge(r.getIntervalStart(), r,
-                    (a, b) -> a.getRecommendedAt().isAfter(b.getRecommendedAt()) ? a : b);
-        }
+        Map<LocalDateTime, Recommendation> recByWindow = latestByWindow(recommendations);
 
         return intervals.stream()
                 .filter(d -> d.getActualAvgKw().doubleValue() > targetPeakKw)
@@ -275,12 +289,15 @@ public class ReportService {
             dailyDischarge.add(new ReportDailyDischarge(date, round1(dischargeByDate.get(date))));
         }
 
-        // 적용했는데도 실제 피크가 목표를 넘은 횟수
+        // 적용했는데도 실제 피크가 목표를 넘은 횟수 (같은 구간은 1회로 셈)
+        Map<LocalDateTime, Recommendation> appliedByWindow = latestByWindow(recommendations.stream()
+                .filter(r -> r.getStatus() == RecommendationStatus.APPLIED)
+                .toList());
         int blockedCount = 0;
-        for (Recommendation r : recommendations) {
-            Double result = resultPeaks.get(r.getIntervalStart());
-            Double target = r.getTargetPeakKw() != null ? r.getTargetPeakKw().doubleValue() : targetPeakKw;
-            if (r.getStatus() == RecommendationStatus.APPLIED && result != null && target != null && result > target) {
+        for (Map.Entry<LocalDateTime, Recommendation> entry : appliedByWindow.entrySet()) {
+            Double result = resultPeaks.get(entry.getKey());
+            Double target = targetOf(entry.getValue(), targetPeakKw);
+            if (result != null && target != null && result > target) {
                 blockedCount++;
             }
         }
@@ -329,6 +346,21 @@ public class ReportService {
         } catch (DateTimeParseException e) {
             throw new IllegalArgumentException("month 형식이 올바르지 않습니다. (예: 2026-11)");
         }
+    }
+
+    // 15분 구간 시작 시각 → 그 구간의 마지막 추천
+    private Map<LocalDateTime, Recommendation> latestByWindow(List<Recommendation> recommendations) {
+        Map<LocalDateTime, Recommendation> result = new HashMap<>();
+        for (Recommendation r : recommendations) {
+            result.merge(r.getIntervalStart(), r,
+                    (a, b) -> a.getRecommendedAt().isAfter(b.getRecommendedAt()) ? a : b);
+        }
+        return result;
+    }
+
+    // 추천에 적힌 목표 피크. 없으면 지금 설정값
+    private Double targetOf(Recommendation r, Double targetPeakKw) {
+        return r.getTargetPeakKw() != null ? r.getTargetPeakKw().doubleValue() : targetPeakKw;
     }
 
     // 15분이 다 찬 구간만 (진행 중인 구간은 아직 결과가 아님)

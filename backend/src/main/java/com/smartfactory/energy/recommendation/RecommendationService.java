@@ -1,5 +1,9 @@
 package com.smartfactory.energy.recommendation;
 
+import com.smartfactory.energy.event.EventLog;
+import com.smartfactory.energy.event.EventLogRepository;
+import com.smartfactory.energy.event.EventType;
+import com.smartfactory.energy.global.exception.NotFoundException;
 import com.smartfactory.energy.power.DemandInterval15m;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
 import com.smartfactory.energy.recommendation.dto.RecommendationResponse;
@@ -10,6 +14,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +29,10 @@ public class RecommendationService {
 
     private final RecommendationRepository recommendationRepository;
     private final DemandInterval15mRepository demandInterval15mRepository;
+    private final EventLogRepository eventLogRepository;
+
+    // 로그인이 없어서 화면에서 처리하면 처리자는 항상 "운영자"
+    private static final String OPERATOR = "운영자";
 
     // 기간 안의 추천 이력 (최신 순)
     public List<RecommendationResponse> findInPeriod(LocalDate from, LocalDate to) {
@@ -51,5 +60,68 @@ public class RecommendationService {
                 .stream()
                 .map(r -> RecommendationResponse.from(r, resultPeaks.get(r.getIntervalStart())))
                 .toList();
+    }
+
+    // 지금 추천 1건 (가장 최근 추천). 추천이 하나도 없으면 빈 값
+    public Optional<RecommendationResponse> findLatest() {
+        return recommendationRepository.findFirstByOrderByRecommendedAtDescRecommendationIdDesc()
+                .map(r -> RecommendationResponse.from(r, resultPeakOf(r.getIntervalStart())));
+    }
+
+    // 추천 적용 / 넘기기. status는 화면 코드 APPLIED 또는 IGNORED
+    @Transactional
+    public RecommendationResponse handle(Long id, String status) {
+        // 1. 요청 값 검사
+        RecommendationStatus newStatus;
+        if ("APPLIED".equals(status)) {
+            newStatus = RecommendationStatus.APPLIED;
+        } else if ("IGNORED".equals(status)) {
+            newStatus = RecommendationStatus.SKIPPED; // 화면의 IGNORED(넘김) = DB의 SKIPPED
+        } else {
+            throw new IllegalArgumentException("status는 APPLIED 또는 IGNORED여야 합니다.");
+        }
+
+        // 2. 없는 추천이면 404, 지금 추천이 아니거나 이미 처리했으면 400
+        Recommendation recommendation = recommendationRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("추천을 찾을 수 없습니다. id=" + id));
+        Long latestId = recommendationRepository.findFirstByOrderByRecommendedAtDescRecommendationIdDesc()
+                .map(Recommendation::getRecommendationId)
+                .orElse(null);
+        if (!recommendation.getRecommendationId().equals(latestId)) {
+            throw new IllegalArgumentException("이미 지난 추천입니다. 최신 추천을 확인해 주세요.");
+        }
+        if (recommendation.getStatus() != RecommendationStatus.PENDING) {
+            throw new IllegalArgumentException("이미 처리한 추천입니다.");
+        }
+
+        // 3. 처리 결과 저장 + 이벤트 1줄
+        LocalDateTime now = LocalDateTime.now().withNano(0); // 초 단위까지만
+        recommendation.handle(newStatus, OPERATOR, now);
+        eventLogRepository.save(new EventLog(now, EventType.HANDLE, null, handleMessage(recommendation),
+                recommendation.getRecommendationId()));
+
+        return RecommendationResponse.from(recommendation, resultPeakOf(recommendation.getIntervalStart()));
+    }
+
+    // 이벤트 문장. 예: "방전 500 kW 적용 (운영자)", "피크 방어 추천을 넘김 (운영자)"
+    private String handleMessage(Recommendation r) {
+        if (r.getStatus() == RecommendationStatus.APPLIED) {
+            String actionText = switch (r.getAction()) {
+                case CHARGE -> "충전";
+                case DISCHARGE -> "방전";
+                case IDLE -> "대기";
+            };
+            return actionText + " " + r.getPowerKw().stripTrailingZeros().toPlainString() + " kW 적용 (" + OPERATOR + ")";
+        }
+        return RecommendationResponse.from(r, null).ruleLabel() + " 추천을 넘김 (" + OPERATOR + ")";
+    }
+
+    // 그 15분 구간의 실제 피크. 15분이 다 차지 않았으면 null
+    private BigDecimal resultPeakOf(LocalDateTime intervalStart) {
+        return demandInterval15mRepository.findInPeriod(intervalStart, intervalStart.plusMinutes(1)).stream()
+                .filter(d -> d.getMinuteCount() != null && d.getMinuteCount() >= 15)
+                .map(DemandInterval15m::getActualAvgKw)
+                .findFirst()
+                .orElse(null);
     }
 }

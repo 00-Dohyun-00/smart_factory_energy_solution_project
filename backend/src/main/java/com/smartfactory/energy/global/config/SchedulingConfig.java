@@ -1,25 +1,18 @@
 package com.smartfactory.energy.global.config;
 
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * @Scheduled(주기 실행) 설정.
  *
- * 팀 공용 DB(Supabase)를 쓰기 때문에 시뮬레이터 같은 주기 실행 작업은 한 명의 PC에서만 돌아야 합니다.
- * (여러 명이 동시에 실행하면 같은 테이블에 데이터가 중복으로 쌓입니다.)
+ * Supabase 장애 감지(SupabaseHealthChecker)와 백업 DB 동기화(DbSyncService)는
+ * 모든 PC에서 항상 돌아야 해서 @EnableScheduling은 항상 켜 둡니다.
  *
- * backend/.env 에 SIMULATOR_ENABLED=true 를 넣은 사람만 @Scheduled 작업이 실행됩니다. (기본값: 꺼짐)
+ * 시뮬레이터(PowerSimulator, MinuteAggregationJob)는 팀 공용 DB라서 한 명만 돌려야 하므로,
+ * 이 설정과는 별개로 각 클래스에 @ConditionalOnProperty(simulator.enabled=true)를 개별로 붙여뒀습니다.
  */
-@Slf4j
 @Configuration
 @EnableScheduling
-@ConditionalOnProperty(name = "simulator.enabled", havingValue = "true")
 public class SchedulingConfig {
-
-    public SchedulingConfig() {
-        log.info("시뮬레이터(@Scheduled 작업) 켜짐: 이 PC에서 주기 실행 작업이 동작합니다.");
-    }
 }
