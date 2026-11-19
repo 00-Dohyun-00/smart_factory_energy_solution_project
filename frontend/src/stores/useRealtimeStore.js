@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   getLatestBatteryStatus,
@@ -24,6 +24,19 @@ export const useRealtimeStore = defineStore('realtime', () => {
   const connected = ref(true) // 서버 연결 표시등
   const failCount = ref(0)
   const errorMessage = ref('')
+
+  // 새 1분 기록이 몇 분째 안 들어오는지 (멈추지 않았으면 null)
+  // 서버는 응답하는데 시뮬레이터가 꺼지면 recordedAt(마지막 1분 기록 시각)만 멈추고 화면 숫자가 조용히 굳음.
+  // 서버의 지금 시각(구간 끝 − 남은 초)과 recordedAt의 차이로 알아냄 (브라우저 시계는 쓰지 않음).
+  // 기록은 1분마다 쌓여 평소에도 1분 가까이 벌어지므로, 3분 이상일 때만 멈춘 것으로 봄
+  const STOPPED_MINUTES = 3
+  const dataStoppedMinutes = computed(() => {
+    const latest = status.value
+    if (!latest?.recordedAt || !latest.windowEnd || latest.remainingSeconds == null) return null
+    const serverNow = new Date(latest.windowEnd).getTime() - latest.remainingSeconds * 1000
+    const minutes = Math.floor((serverNow - new Date(latest.recordedAt).getTime()) / 60000)
+    return minutes >= STOPPED_MINUTES ? minutes : null
+  })
 
   // 요청 번호와 "요청 중" 표시.
   // 화면 갱신 주기가 짧으면(예: 1초) 앞 요청이 끝나기 전에 다음 요청이 나가 서버에 요청이 쌓이므로,
@@ -103,6 +116,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
     zoneError,
     connected,
     errorMessage,
+    dataStoppedMinutes,
     fetchLatest,
     fetchToday,
     fetchZoneDetail,
