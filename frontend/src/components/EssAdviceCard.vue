@@ -1,10 +1,14 @@
 <!--
-  ESS 추천 카드: 추천(충전·방전·대기), 이유, 판단 근거, [적용] [넘기기]
+  ESS 추천 카드: 무엇을(충전·방전·대기, kW, 언제까지) → 하면 무엇이 좋은지(한두 문장) → [적용] [넘기기]
   추천 판단은 백엔드가 하고, 여기서는 보여 주고 버튼 입력만 받습니다.
+
+  2026-11-18 개편: 이번 15분 상황은 예상 피크 카드, 배터리 잔량은 KPI 카드가 이미 보여 주므로
+  이 카드는 "수락할지 넘길지"만 판단하게 함. 판단 근거 목록(usedValues)은 추천 이력 화면에서 봄.
+  처리 상태는 지난 일("적용했습니다")이 아니라 지금 상태("적용 중")로 적음.
 -->
 <script setup>
-import { computed, ref } from 'vue'
-import { formatClock, formatKw } from '@/utils/format'
+import { computed } from 'vue'
+import { formatClock, formatHourMinute, formatKw } from '@/utils/format'
 
 const props = defineProps({
   // 최신 추천 1건 (없으면 null)
@@ -23,40 +27,22 @@ const ACTION_LABELS = { CHARGE: '충전', DISCHARGE: '방전', IDLE: '대기' }
 
 const actionLabel = computed(() => ACTION_LABELS[props.decision?.action] ?? '—')
 
-// 이유 문장을 마침표(.)·쉼표(,) 뒤에서 나눈 줄들
-// 뒤에 공백이 올 때만 나눔 → "1,800 kW"나 "0.5"처럼 숫자 안의 쉼표·점에서는 나누지 않음
-const reasonLines = computed(() =>
-  (props.decision?.reason ?? '').split(/(?<=[.,])\s+/).filter((line) => line),
-)
-
-// 대기 추천은 적용할 동작이 없으므로 버튼을 보여 주지 않음
+// 아직 답하지 않은 충·방전 추천만 버튼을 보여 줌
 const needsAnswer = computed(
   () => props.decision?.status === 'RECOMMENDED' && props.decision?.action !== 'IDLE',
 )
 
-// 카드 맨 아래(버튼 또는 처리 결과)에 보여 줄 것이 있는지. 아직 처리 전인 대기 추천은 없음
-const showAnswer = computed(
-  () =>
-    props.decision?.action !== 'IDLE' ||
-    ['APPLIED', 'AUTO', 'IGNORED'].includes(props.decision?.status),
-)
-
-// 판단 근거: 백엔드가 준 목록(usedValues)을 그대로 보여 줌. 숫자는 자릿수만 맞춤
-const usedValues = computed(() =>
-  (props.decision?.usedValues ?? []).map((item) => ({
-    label: item.label,
-    text: typeof item.value === 'number' ? formatKw(item.value) : item.value,
-    unit: item.unit,
-  })),
-)
-
-// 판단 근거는 항목이 많아(11개) 카드가 길어지면 좁은 화면에서 [적용] 버튼이 첫 화면 아래로 밀림.
-// 그래서 앞의 몇 개(백엔드가 앞에 둔 중요한 값)만 보이고, 나머지는 [모두 보기]로 펼침
-const SHOWN_COUNT = 4
-const showAllUsed = ref(false)
-const visibleUsed = computed(() =>
-  showAllUsed.value ? usedValues.value : usedValues.value.slice(0, SHOWN_COUNT),
-)
+// 처리 상태 (지금 상태로 적음)
+const stateBadge = computed(() => {
+  const decision = props.decision
+  if (!decision) return null
+  if (decision.status === 'APPLIED') {
+    return { text: `적용 중 · ${formatClock(decision.appliedAt)} ${decision.appliedBy}`, on: true }
+  }
+  if (decision.status === 'AUTO') return { text: '자동 적용 중 (시뮬레이션)', on: true }
+  if (decision.status === 'IGNORED') return { text: '넘김', on: false }
+  return null
+})
 </script>
 
 <template>
@@ -81,69 +67,41 @@ const visibleUsed = computed(() =>
     <p v-if="!decision" class="empty">아직 받은 추천이 없습니다.</p>
 
     <template v-else>
-      <p class="act" :class="{ idle: decision.action === 'IDLE' }">
-        {{ actionLabel }}
-        <template v-if="decision.action !== 'IDLE'">
-          <span class="power num">{{ formatKw(decision.powerKw) }}</span>
-          <span class="unit">kW</span>
-        </template>
-      </p>
-      <!-- 이유 문장은 마침표(.)와 쉼표(,) 뒤에서 줄을 바꿔 읽기 쉽게 함 -->
-      <p class="why">
-        <span v-for="(line, index) in reasonLines" :key="index" class="why-line">{{ line }}</span>
-      </p>
-
-      <!-- 판단 근거 -->
-      <div v-if="usedValues.length" class="used">
-        <div class="used-head">
-          <h3>판단 근거</h3>
-          <button
-            v-if="usedValues.length > SHOWN_COUNT"
-            class="more-used"
-            :aria-expanded="showAllUsed"
-            @click="showAllUsed = !showAllUsed"
-          >
-            {{ showAllUsed ? '접기' : `모두 보기 (${usedValues.length}개)` }}
-          </button>
-        </div>
-        <dl>
-          <div v-for="item in visibleUsed" :key="item.label">
-            <dt>{{ item.label }}</dt>
-            <dd class="num">{{ item.text }} {{ item.unit }}</dd>
-          </div>
-        </dl>
+      <!-- 무엇을: 동작, 출력, 언제까지 + 지금 처리 상태 -->
+      <div class="act-row">
+        <p class="act" :class="{ idle: decision.action === 'IDLE' }">
+          {{ actionLabel }}
+          <template v-if="decision.action !== 'IDLE'">
+            <span class="power num">{{ formatKw(decision.powerKw) }}</span>
+            <span class="unit">kW</span>
+          </template>
+        </p>
+        <span v-if="decision.windowEnd" class="until num">
+          ~ {{ formatHourMinute(decision.windowEnd) }}
+        </span>
+        <span v-if="stateBadge" class="state" :class="{ off: !stateBadge.on }">
+          {{ stateBadge.text }}
+        </span>
       </div>
 
-      <div v-if="showAnswer" class="answer">
-        <template v-if="needsAnswer">
-          <div class="buttons">
-            <button class="apply" :disabled="busy || offline" @click="emit('apply')">
-              <template v-if="busy">보내는 중…</template>
-              <template v-else>
-                {{ actionLabel }} <span class="num">{{ formatKw(decision.powerKw) }}</span> kW 적용
-              </template>
-            </button>
-            <button class="skip" :disabled="busy || offline" @click="emit('ignore')">넘기기</button>
-          </div>
-          <!-- 버튼이 왜 눌리지 않는지 알려 줌 -->
-          <p v-if="offline" class="blocked">
-            <span aria-hidden="true">◆</span> 서버와 연결이 끊겨 지금은 적용할 수 없습니다
-          </p>
-          <p v-else class="note">적용해도 실제 설비를 제어하지는 않습니다 (시뮬레이션).</p>
-        </template>
-        <p v-else-if="decision.status === 'APPLIED'" class="done">
-          적용했습니다
-          <span class="done-sub">
-            <span class="num">{{ formatClock(decision.appliedAt) }}</span>, {{ decision.appliedBy }}
-          </span>
+      <!-- 하면 무엇이 좋은지 (백엔드가 보낸 한두 문장) -->
+      <p class="benefit">{{ decision.reason }}</p>
+
+      <div v-if="needsAnswer" class="answer">
+        <div class="buttons">
+          <button class="apply" :disabled="busy || offline" @click="emit('apply')">
+            <template v-if="busy">보내는 중…</template>
+            <template v-else>
+              {{ actionLabel }} <span class="num">{{ formatKw(decision.powerKw) }}</span> kW 적용
+            </template>
+          </button>
+          <button class="skip" :disabled="busy || offline" @click="emit('ignore')">넘기기</button>
+        </div>
+        <!-- 버튼이 왜 눌리지 않는지 알려 줌 -->
+        <p v-if="offline" class="blocked">
+          <span aria-hidden="true">◆</span> 서버와 연결이 끊겨 지금은 적용할 수 없습니다
         </p>
-        <p v-else-if="decision.status === 'AUTO'" class="done">
-          자동으로 적용했습니다 (시뮬레이션)
-          <span class="done-sub num">{{ formatClock(decision.appliedAt) }}</span>
-        </p>
-        <p v-else-if="decision.status === 'IGNORED'" class="done quiet">이번 추천은 넘겼습니다</p>
-        <!-- 대기 추천은 이유 문장이 이미 "할 일 없음"을 설명하므로 상자를 따로 띄우지 않음 (카드가 길어지지 않게) -->
-        <p v-else-if="decision.action !== 'IDLE'" class="done quiet">지금은 할 일이 없습니다</p>
+        <p v-else class="note">적용해도 실제 설비를 제어하지는 않습니다 (시뮬레이션).</p>
       </div>
     </template>
   </section>
@@ -153,7 +111,7 @@ const visibleUsed = computed(() =>
 .advice {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 .head {
   display: flex;
@@ -209,16 +167,22 @@ const visibleUsed = computed(() =>
   color: var(--mute);
 }
 
+/* 무엇을 */
+.act-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
 .act {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 700;
   line-height: 1.1;
 }
 .power {
-  font-size: 44px;
+  font-size: 48px;
   line-height: 1;
 }
 .unit {
@@ -227,59 +191,45 @@ const visibleUsed = computed(() =>
   color: var(--ink-2);
 }
 .act.idle {
-  font-size: 36px;
+  font-size: 40px;
   color: var(--ink-2);
 }
-.why {
-  font-size: 13px;
+.until {
+  font-size: 16px;
   color: var(--ink-2);
 }
-.why-line {
-  display: block;
-}
-
-/* 판단 근거: 항목이 11개라 촘촘하게 잡아 옆의 15분 구간 카드보다 너무 길어지지 않게 함 */
-.used {
-  padding: 8px 12px;
-  background: var(--bg);
-}
-.used-head {
-  display: flex;
-  align-items: baseline;
-  margin-bottom: 4px;
-}
-.used h3 {
-  font-size: 12px;
-  font-weight: 700;
-}
-.more-used {
+/* 처리 상태: 지금 상태라 테두리 배지로 */
+.state {
   margin-left: auto;
-  padding: 0;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--ink-2);
-  font-size: 12px;
+  padding: 2px 10px;
+  border: 1.5px solid var(--ok);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ok);
+  white-space: nowrap;
+}
+.state.off {
+  border-color: var(--line-strong);
+  font-weight: 400;
   color: var(--ink-2);
 }
-.used dl {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px 12px;
-}
-.used dt {
-  font-size: 11px;
-  color: var(--mute);
-}
-.used dd {
-  font-size: 14px;
-  font-weight: 700;
+
+/* 하면 무엇이 좋은지: 카드에서 가장 먼저 읽히는 문장 */
+.benefit {
+  padding: 12px 14px;
+  background: var(--bg);
+  border-left: 4px solid var(--ink);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink);
 }
 
-/* 버튼 또는 처리 결과는 카드 맨 아래에 붙임 */
+/* 버튼은 카드 맨 아래에 붙임 */
 .answer {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   margin-top: auto;
 }
 .buttons {
@@ -323,21 +273,5 @@ const visibleUsed = computed(() =>
 .note {
   font-size: 12px;
   color: var(--mute);
-}
-.done {
-  padding: 10px 12px;
-  background: var(--bg);
-  border-left: 4px solid var(--ink);
-  font-weight: 700;
-}
-.done-sub {
-  margin-left: 6px;
-  font-weight: 400;
-  color: var(--ink-2);
-}
-.done.quiet {
-  border-left-color: var(--line-strong);
-  font-weight: 400;
-  color: var(--ink-2);
 }
 </style>
