@@ -109,7 +109,7 @@ const thresholds = computed(() => {
 
 // 고른 구역의 설비와 합계, 비율 (표시용 합계·비율)
 const zoneEquipments = computed(() =>
-  (status.value?.equipments ?? []).filter((item) => item.zoneCode === selectedZone.value),
+  (status.value?.equipments ?? []).filter((item) => item.zoneId === selectedZone.value),
 )
 const zoneKw = computed(() =>
   zoneEquipments.value.length
@@ -322,7 +322,7 @@ const zoneShareOption = computed(() => {
     return {
       name: ZONE_LABELS[zoneId],
       value: equipments
-        .filter((item) => item.zoneCode === zoneId)
+        .filter((item) => item.zoneId === zoneId)
         .reduce((sum, item) => sum + item.loadKw, 0), // 표시용 합계
       selected: isSelected,
       // 구역마다 자기 색. 고른 구역은 진하게 + 테두리, 나머지는 옅게

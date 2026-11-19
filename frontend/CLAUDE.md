@@ -78,6 +78,7 @@ src/
 - 왼쪽 메뉴(`MainLayout.vue`): 맨 위 `WATTever`, 자동 모드일 때 "자동 모드 · 시뮬레이션" 표시, 접었다 펴는 메뉴 4개, 맨 아래 환경 설정 링크와 현재 시각·날씨·서버 연결 표시. 환경 설정은 자주 쓰지 않아 메뉴 목록(`menus`)에서 빼고 맨 아래에 따로 둔다(2026-11-17, UI 피드백). "통합" 옆에는 지금 피크 단계(■ 경고, ▲ 주의)를 표시한다. 위쪽 헤더는 없다.
 - 맨 위 줄 세 개 버튼으로 왼쪽 메뉴 전체를 접었다 편다. 접으면 좁은 띠(56px)만 남고, 띠에는 자동 모드("자동"), 피크 단계, 연결 상태만 보인다. 접은 상태는 브라우저 저장소(`localStorage`)에 적어 두어 새로 고쳐도 유지된다.
 - 서버 연결이 끊겼다는 알림은 `MainLayout.vue`가 모든 화면 위쪽에 한 번만 띄운다(마지막 수신 시각, 자동 재연결 안내, `[지금 다시 시도]`). 각 화면에서 따로 만들지 않는다.
+- 서버는 응답하는데 새 1분 기록이 3분 넘게 안 들어오면(시뮬레이터를 켠 백엔드가 꺼진 경우) 같은 자리에 주의 알림("▲ 새 기록이 N분째 들어오지 않습니다")을 띄우고, 왼쪽 시계 아래에도 "▲ 기록이 N분째 멈춤"을 적는다(2026-11-19). 멈춘 시간은 서버 시각(`windowEnd − remainingSeconds`)과 `recordedAt`의 차이다(`useRealtimeStore.dataStoppedMinutes`). 연결이 끊기면 연결 끊김 알림만 보인다.
 - `routes`의 `meta`에 `parent`(메뉴 이름)와 `title`(화면 이름)을 적는다. `title`은 브라우저 탭 제목(`통합 · WATTever`)에 쓰인다. 없는 주소는 왼쪽 메뉴가 보이는 채로 404 안내를 보여 준다.
 - 다른 화면으로 옮기면 본문 스크롤을 맨 위로 올린다.
 - 새 화면을 만들면 `router/index.js`의 `routes`와 `MainLayout.vue`의 `menus` 두 곳에 추가한다. 아직 없는 화면은 `ComingSoonPage.vue`를 연결하고 `meta`에 메뉴 이름과 제목을 적는다.
@@ -196,7 +197,7 @@ src/
 ### 시각은 서버 값을 쓴다
 
 - 시뮬레이터는 배속으로 돌 수 있다. 화면의 "현재 시각", 15분 구간, 남은 시간은 모두 API 응답의 시각 값에서 만든다.
-- 2026-11-19부터 모든 화면이 실제 백엔드를 쓴다. "지금"과 "오늘"은 `site-powers/latest`의 `recordedAt`(실제 서버 시각)에서 구한다. 백엔드는 배속이 없어 `simulationSpeed`가 1이고, 그때는 배속 표시를 숨긴다. 가짜 백엔드(`fakeBackend.js`)는 더 이상 어느 화면도 부르지 않는다(예전에는 기본 10배속이라 실제 API 날짜와 어긋났음 — 이슈 #25-1).
+- 2026-11-19부터 모든 화면이 실제 백엔드를 쓴다. "지금"과 "오늘"은 `site-powers/latest`의 `recordedAt`에서 구한다. `recordedAt`은 **마지막 1분 기록의 시각**이다(2026-11-19 백엔드 변경, 그 전에는 서버 시각). 그래서 시뮬레이터가 멈추면 왼쪽 메뉴 시계와 "오늘"이 마지막 기록 시각에 멈춘다. 15분 구간(`windowStart`·`windowEnd`·`remainingSeconds`)은 서버의 지금 시각 기준이다. 백엔드는 배속이 없어 `simulationSpeed`가 1이고, 그때는 배속 표시를 숨긴다. 가짜 백엔드(`fakeBackend.js`)는 더 이상 어느 화면도 부르지 않는다(예전에는 기본 10배속이라 실제 API 날짜와 어긋났음 — 이슈 #25-1).
 - 업무 표시용으로 `Date.now()`나 `new Date()`(인자 없이)를 쓰지 않는다. 브라우저 시계는 "마지막 수신 후 경과 시간" 판단에만 쓴다.
 - 백엔드 시각은 `LocalDateTime`(한국 시간, 예: `2026-11-14T14:03:00`)이다.
 
@@ -256,8 +257,8 @@ src/
 - 설정 값은 명세대로 **문자열**로 오고 간다. `useSettingsStore`가 `values`에서 숫자·`true`/`false`로 바꿔 주고, 저장할 때 다시 문자열로 보낸다. 키 이름은 명세 그대로 쓴다(예: `settingsStore.values['ess.max_power_kw']`).
 - 실시간 연결하면서 맞춘 것(2026-11-19):
   - 구역 코드는 백엔드 그대로 `Z1`~`Z6`이다(유틸리티 = `Z6`, 예전 프론트는 `U`). 색 변수도 `--zone-z6`, 테마 키 `zoneZ6`.
-  - `site-powers/latest`의 설비(`equipments[]`)에는 구역이 없어서, `useRealtimeStore`가 `GET /api/equipment`를 처음 한 번 받아 설비마다 `zoneCode`를 붙인다. 백엔드가 `equipments[]`에 `zoneCode`를 넣어 주면 이 코드는 지운다.
-  - 이벤트 종류는 백엔드 `eventType`(`STAGE_CHANGE`·`RECOMMEND`·`HANDLE`·`INTERVAL_END`·`COMM`·`SETTING`)을 쓴다.
+  - 설비의 구역은 `site-powers/latest`의 `equipments[].zoneId`(값은 `Z1`~`Z6`, 한전·태양광·ESS는 `null`)를 쓴다. 백엔드가 #29 요청으로 넣어 줬다(2026-11-19). 그 전에 쓰던 `GET /api/equipment`로 구역을 붙이는 임시 코드는 지웠다.
+  - 이벤트 종류는 백엔드 `eventType`(`STAGE_CHANGE`·`RECOMMEND`·`HANDLE`·`INTERVAL_END`·`COMM`·`SETTING`)을 쓴다. 백엔드는 화면용 코드 `category`(`STAGE`·`ACTION`·`WINDOW` 등)도 함께 주지만 프론트는 쓰지 않는다.
   - 날씨 기록이 없으면 `weather`가 `null`로 오고, 왼쪽 메뉴의 날씨 칸을 숨긴다.
   - 화면 갱신 주기가 짧으면(설정 `operation.poll_seconds`, 공용 DB 값) 앞 요청이 끝나기 전에는 다음 폴링을 건너뛴다.
   - [적용]/[넘기기]는 공용 DB에 바로 기록되고, 적용하면 시뮬레이터에 ESS 명령이 내려간다.

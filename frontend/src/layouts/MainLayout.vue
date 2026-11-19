@@ -6,7 +6,7 @@ import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { useThemeStore } from '@/stores/useThemeStore'
 import WeatherIcon from '@/components/WeatherIcon.vue'
-import { formatClock } from '@/utils/format'
+import { formatClock, formatElapsedMinutes, formatMonthDayTime } from '@/utils/format'
 
 const realtimeStore = useRealtimeStore()
 const route = useRoute()
@@ -284,6 +284,11 @@ const peakMark = computed(() => {
           </svg>
           {{ formatClock(realtimeStore.status?.recordedAt) }}
         </p>
+        <!-- 시계는 마지막 기록 시각이라 기록이 멈추면 함께 멈춤 → 지금 시각으로 오해하지 않게 알림 -->
+        <p v-if="realtimeStore.connected && realtimeStore.dataStoppedMinutes" class="stopped num">
+          <span aria-hidden="true">▲</span> 기록이
+          {{ formatElapsedMinutes(realtimeStore.dataStoppedMinutes) }}째 멈춤
+        </p>
         <!-- 시계가 실제보다 빨리 가는 이유를 알려 줌 (시뮬레이션이 배속으로 돌 때만) -->
         <p v-if="realtimeStore.status?.simulationSpeed > 1" class="speed">
           시뮬레이션 <span class="num">{{ realtimeStore.status.simulationSpeed }}</span>배속
@@ -322,6 +327,22 @@ const peakMark = computed(() => {
         <button class="notice-button" :disabled="retrying" @click="retryNow">
           {{ retrying ? '연결하는 중…' : '지금 다시 시도' }}
         </button>
+      </div>
+
+      <!--
+        서버는 응답하는데 새 기록이 안 들어올 때 (예: 시뮬레이터를 켠 백엔드가 꺼짐)
+        연결은 정상이라 위 알림이 뜨지 않으므로 따로 알림. 연결이 끊겼을 때는 위 알림만 보임
+      -->
+      <div v-else-if="realtimeStore.dataStoppedMinutes" class="notice stopped-notice" role="status">
+        <p>
+          <span aria-hidden="true">▲</span>
+          새 기록이
+          <span class="num">{{ formatElapsedMinutes(realtimeStore.dataStoppedMinutes) }}</span>째
+          들어오지 않습니다. 화면의 값은
+          <span class="num">{{ formatMonthDayTime(realtimeStore.status.recordedAt) }}</span>
+          기록입니다.
+          <span class="notice-sub">시뮬레이터를 켠 백엔드가 꺼졌을 수 있습니다.</span>
+        </p>
       </div>
 
       <RouterView />
@@ -550,6 +571,11 @@ const peakMark = computed(() => {
   font-size: 12px;
   color: var(--mute);
 }
+.stopped {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--warn);
+}
 .weather {
   display: flex;
   align-items: center;
@@ -628,6 +654,11 @@ const peakMark = computed(() => {
   border: 1px solid var(--crit);
   font-weight: 700;
   color: var(--crit);
+}
+/* 기록 멈춤 알림: 연결 끊김(빨강 ◆)보다 한 단계 낮은 주의(주황 ▲) */
+.stopped-notice {
+  border-color: var(--warn);
+  color: var(--warn);
 }
 .notice-sub {
   margin-left: 6px;
