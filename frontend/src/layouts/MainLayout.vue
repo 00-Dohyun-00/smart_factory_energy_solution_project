@@ -289,6 +289,10 @@ const peakMark = computed(() => {
           <span aria-hidden="true">▲</span> 기록이
           {{ formatElapsedMinutes(realtimeStore.dataStoppedMinutes) }}째 멈춤
         </p>
+        <!-- 숫자가 1분 동안 그대로인 게 정상임을 알림 (값은 1분 기록이라 1분에 한 번 바뀜) -->
+        <p v-else-if="realtimeStore.connected && realtimeStore.status" class="speed">
+          1분마다 갱신
+        </p>
         <!-- 시계가 실제보다 빨리 가는 이유를 알려 줌 (시뮬레이션이 배속으로 돌 때만) -->
         <p v-if="realtimeStore.status?.simulationSpeed > 1" class="speed">
           시뮬레이션 <span class="num">{{ realtimeStore.status.simulationSpeed }}</span>배속
