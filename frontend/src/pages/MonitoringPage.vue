@@ -39,6 +39,21 @@ watch(
   },
 )
 
+// 운영 모드 바꾸기 (ESS 추천 카드의 버튼에서 확인을 마친 뒤): 환경 설정 operation.auto_mode 저장
+// 공용 DB 설정이라 저장하면 팀원 모두의 화면에 적용됨. 실패하면 카드 아래에 이유를 보여 줌
+const modeBusy = ref(false)
+async function changeMode(wantAuto) {
+  modeBusy.value = true
+  actionError.value = ''
+  try {
+    await settingsStore.saveSettings([{ key: 'operation.auto_mode', value: wantAuto }])
+  } catch (error) {
+    actionError.value = `운영 모드를 바꾸지 못했습니다. (${error.message})`
+  } finally {
+    modeBusy.value = false
+  }
+}
+
 async function answerDecision(newStatus) {
   busy.value = true
   actionError.value = ''
@@ -392,8 +407,10 @@ const trendOption = computed(() => makeTrendOption(TREND_LINES.value, true))
           :busy="busy"
           :offline="!realtimeStore.connected"
           :auto="settingsStore.values['operation.auto_mode'] === true"
+          :mode-busy="modeBusy"
           @apply="answerDecision('APPLIED')"
           @ignore="answerDecision('IGNORED')"
+          @change-mode="changeMode"
         />
         <p v-if="actionError" class="action-error" role="alert">{{ actionError }}</p>
       </div>

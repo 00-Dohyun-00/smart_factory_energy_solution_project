@@ -7,7 +7,7 @@
   처리 상태는 지난 일("적용했습니다")이 아니라 지금 상태("적용 중")로 적음.
 -->
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { formatClock, formatHourMinute, formatKw } from '@/utils/format'
 
 const props = defineProps({
@@ -19,9 +19,46 @@ const props = defineProps({
   offline: { type: Boolean, default: false },
   // 운영 모드가 자동이면 true (실제 제어가 아니라 시뮬레이션)
   auto: { type: Boolean, default: false },
+  // 운영 모드를 저장하는 중이면 true (버튼을 잠깐 막음)
+  modeBusy: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['apply', 'ignore'])
+// change-mode: 운영 모드 버튼을 눌러 확인까지 마침 (true = 자동, false = 운영자 승인). 저장은 부모가 함
+const emit = defineEmits(['apply', 'ignore', 'change-mode'])
+
+// 운영 모드 버튼: 지금 모드가 아닌 쪽을 누르면 한 번 묻고, 확인하면 부모에게 알림
+// 운영 모드는 공용 DB의 환경 설정이라 바꾸면 팀원 모두의 화면에 바로 적용됨
+// 확인 팝업 (브라우저 내장 <dialog>). 열려 있는 동안 바꾸려는 모드를 기억함 (true = 자동, false = 운영자 승인)
+const modeDialog = ref(null)
+const pendingAuto = ref(null)
+function chooseMode(wantAuto) {
+  if (wantAuto === props.auto || props.modeBusy) return
+  pendingAuto.value = wantAuto
+  modeDialog.value?.showModal() // 화면 맨 위에 띄우고 뒤는 어둡게, Esc로 닫힘
+}
+// [바꾸기]: 부모에게 알리고 닫음 / [취소]·Esc·바깥 누르기: 그냥 닫음
+function confirmMode() {
+  emit('change-mode', pendingAuto.value)
+  modeDialog.value?.close()
+}
+function closeModeDialog() {
+  modeDialog.value?.close()
+}
+// 팝업 바깥(어두운 배경)을 누르면 닫음 (팝업 상자 안을 누른 것은 무시)
+function onDialogClick(event) {
+  if (event.target === modeDialog.value) closeModeDialog()
+}
+// 팝업에 적을 모드 이름과 설명
+const MODE_TEXT = {
+  manual: {
+    name: '운영자 승인 모드',
+    desc: '추천이 오면 운영자가 보고 [적용] 또는 [넘기기]를 누릅니다.',
+  },
+  auto: {
+    name: '자동 모드 (시뮬레이션)',
+    desc: '추천을 바로 적용한 것으로 기록합니다. 실제 설비를 제어하지는 않습니다.',
+  },
+}
 
 const ACTION_LABELS = { CHARGE: '충전', DISCHARGE: '방전', IDLE: '대기' }
 
@@ -67,17 +104,30 @@ const isIdleNow = computed(
     <div class="head">
       <h2 class="card-title">ESS 추천</h2>
       <!-- 모드 신호등: 지금 모드의 등만 켜짐 (승인 모드 = 주황 등, 자동 모드 = 초록 등). 글자도 함께 굵게 -->
-      <div
-        class="mode-signal"
-        role="status"
-        :aria-label="auto ? '지금 모드: 자동 모드 (시뮬레이션)' : '지금 모드: 운영자 승인 모드'"
-      >
-        <span class="lamp-item manual" :class="{ on: !auto }" aria-hidden="true">
-          <span class="lamp"></span>운영자 승인
-        </span>
-        <span class="lamp-item auto" :class="{ on: auto }" aria-hidden="true">
-          <span class="lamp"></span>자동<small v-if="auto"> (시뮬레이션)</small>
-        </span>
+      <div class="mode-signal" role="group" aria-label="운영 모드 (누르면 바꿈)">
+        <!-- 운영 모드 버튼: 지금 모드의 등이 켜져 있고, 다른 쪽을 누르면 확인 후 바꿈 -->
+        <button
+          type="button"
+          class="lamp-item manual"
+          :class="{ on: !auto }"
+          :aria-pressed="!auto"
+          :disabled="modeBusy"
+          title="운영자 승인 모드로 바꾸기 (추천을 사람이 보고 적용)"
+          @click="chooseMode(false)"
+        >
+          <span class="lamp" aria-hidden="true"></span>운영자 승인
+        </button>
+        <button
+          type="button"
+          class="lamp-item auto"
+          :class="{ on: auto }"
+          :aria-pressed="auto"
+          :disabled="modeBusy"
+          title="자동 모드로 바꾸기 (추천을 바로 반영한 것으로 표시, 시뮬레이션)"
+          @click="chooseMode(true)"
+        >
+          <span class="lamp" aria-hidden="true"></span>자동<small v-if="auto"> (시뮬레이션)</small>
+        </button>
       </div>
     </div>
 
@@ -154,6 +204,49 @@ const isIdleNow = computed(
         </p>
       </div>
     </div>
+
+    <!-- 운영 모드 바꾸기 확인 팝업 -->
+    <dialog
+      ref="modeDialog"
+      class="mode-dialog"
+      aria-labelledby="mode-dialog-title"
+      @click="onDialogClick"
+      @close="pendingAuto = null"
+    >
+      <div v-if="pendingAuto !== null" class="dialog-box">
+        <h3 id="mode-dialog-title" class="dialog-title">운영 모드를 바꿀까요?</h3>
+        <!-- 지금 모드 → 바꿀 모드 -->
+        <div class="dialog-change">
+          <div class="dialog-mode from" :class="pendingAuto ? 'manual' : 'auto'">
+            <span class="dialog-caption">지금</span>
+            <strong
+              ><span class="lamp" aria-hidden="true"></span
+              >{{ (pendingAuto ? MODE_TEXT.manual : MODE_TEXT.auto).name }}</strong
+            >
+          </div>
+          <span class="dialog-arrow" aria-hidden="true">→</span>
+          <div class="dialog-mode to" :class="pendingAuto ? 'auto' : 'manual'">
+            <span class="dialog-caption">바꿀 모드</span>
+            <strong
+              ><span class="lamp" aria-hidden="true"></span
+              >{{ (pendingAuto ? MODE_TEXT.auto : MODE_TEXT.manual).name }}</strong
+            >
+          </div>
+        </div>
+        <p class="dialog-desc">{{ (pendingAuto ? MODE_TEXT.auto : MODE_TEXT.manual).desc }}</p>
+        <!-- 공용 설정 주의 -->
+        <p class="dialog-warn">
+          <span aria-hidden="true">▲</span> 공용 설정이라 저장하면
+          <strong>모든 팀원의 화면</strong>에 바로 적용됩니다.
+        </p>
+        <div class="dialog-buttons">
+          <button type="button" class="dialog-cancel" @click="closeModeDialog">취소</button>
+          <button type="button" class="dialog-ok" @click="confirmMode">
+            {{ pendingAuto ? '자동 모드로 바꾸기' : '운영자 승인 모드로 바꾸기' }}
+          </button>
+        </div>
+      </div>
+    </dialog>
   </section>
 </template>
 
@@ -177,15 +270,32 @@ const isIdleNow = computed(
   border: 1px solid var(--line-strong);
   border-radius: 999px;
 }
+/* 운영 모드 버튼: 누를 수 있게 보이도록 테두리 · 마우스 올림 표시 */
 .lamp-item {
   display: inline-flex;
   align-items: center;
   gap: 4.8px;
-  padding: 2.4px 8px 2.4px 5.6px;
+  padding: 3px 10px 3px 7px;
+  background: none;
+  border: 1px solid transparent;
   border-radius: 999px;
   font-size: 10.4px;
-  color: var(--faint);
+  color: var(--ink-2);
   white-space: nowrap;
+  cursor: pointer;
+}
+.lamp-item:not(.on):hover {
+  background: var(--card);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.lamp-item:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+/* 켜진(지금) 모드는 다시 눌러도 바뀌는 게 없어서 기본 화살표 */
+.lamp-item.on {
+  cursor: default;
 }
 .lamp-item small {
   font-size: 8.8px;
@@ -392,5 +502,123 @@ const isIdleNow = computed(
 .note {
   font-size: 9.6px;
   color: var(--mute);
+}
+
+/* ---- 운영 모드 확인 팝업 ---- */
+.mode-dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: 0;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--ink);
+}
+/* 뒤 화면을 어둡게 (그림자 대신 반투명 덮개) */
+.mode-dialog::backdrop {
+  background: rgba(20, 24, 28, 0.4);
+}
+.dialog-box {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 22px 18px;
+}
+.dialog-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+/* 지금 모드 → 바꿀 모드 */
+.dialog-change {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+.dialog-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.dialog-mode.to {
+  background: var(--card);
+  border: 2px solid var(--ink);
+}
+.dialog-mode strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.dialog-mode.from strong {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+.dialog-caption {
+  font-size: 11px;
+  color: var(--mute);
+}
+/* 모드 등 색: 운영자 승인 = 주황, 자동 = 초록 (카드 위 신호등과 같음) */
+.dialog-mode .lamp {
+  flex: none;
+}
+.dialog-mode.manual .lamp {
+  background: var(--warn);
+}
+.dialog-mode.auto .lamp {
+  background: var(--ok);
+}
+.dialog-arrow {
+  font-size: 18px;
+  color: var(--mute);
+}
+.dialog-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.dialog-warn {
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--warn) 10%, var(--card));
+  border-left: 3px solid var(--warn);
+  font-size: 12px;
+  color: var(--ink);
+}
+.dialog-warn > span {
+  color: var(--warn);
+}
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+.dialog-cancel,
+.dialog-ok {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.dialog-cancel {
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+}
+.dialog-cancel:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.dialog-ok {
+  background: var(--ink);
+  border: 0;
+  font-weight: 700;
+  color: var(--card);
+}
+.dialog-ok:hover {
+  background: var(--ink-2);
 }
 </style>
