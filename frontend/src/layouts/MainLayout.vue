@@ -521,22 +521,30 @@ const peakMark = computed(() => {
   align-items: center;
   margin: -4px -20px 10px;
 }
+/* 환경 설정: 옆의 라이트/다크 버튼처럼 테두리가 있는 버튼 모양 */
 .settings-link {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   flex: 1;
-  padding: 9px 20px;
-  font-size: 15px;
+  height: 32px;
+  margin: 0 8px 0 16px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  font-size: 14px;
   color: var(--ink-2);
 }
 .settings-link:hover {
   background: var(--bg);
+  border-color: var(--ink-2);
+  color: var(--ink);
 }
+/* 환경 설정 화면에 있을 때: 먹색 테두리 + 굵은 글씨 */
 .settings-link.router-link-exact-active {
-  padding-left: 16px;
   background: var(--bg);
-  border-left: 4px solid var(--ink);
+  border: 2px solid var(--ink);
   font-weight: 700;
   color: var(--ink);
 }
@@ -602,7 +610,7 @@ const peakMark = computed(() => {
   justify-content: center; /* 글자 가운데 정렬 */
   gap: 4px;
   width: 66px; /* 라이트 모드("◐ 다크")일 때 크기로 고정 → 다크로 바꿔도("☀ 라이트") 버튼 크기가 그대로 */
-  height: 28px;
+  height: 32px;
   margin-right: 16px;
   padding: 0;
   white-space: nowrap;

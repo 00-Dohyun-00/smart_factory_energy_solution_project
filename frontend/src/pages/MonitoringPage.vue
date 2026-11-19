@@ -710,24 +710,31 @@ const trendOption = computed(() => makeTrendOption(TREND_LINES.value, true))
 /* 제목 줄의 범례 버튼 */
 .legend-buttons {
   display: flex;
-  gap: 3.2px;
+  gap: 4px;
 }
+/* 범례 버튼: 누를 수 있게 보이도록 테두리 · 흰 바탕 · 마우스 올림 표시 */
 .legend-button {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 0.8px 4.8px;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 3px;
+  height: 20px;
+  padding: 0 7px;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
   font-size: 9.6px;
   color: var(--ink-2);
+  cursor: pointer;
 }
 .legend-button:hover {
-  border-color: var(--line-strong);
+  background: var(--bg);
+  border-color: var(--ink-2);
+  color: var(--ink);
 }
-/* 끈 선: 흐리게 + 취소선 */
+/* 끈 선: 점선 테두리 + 흐리게 + 취소선 */
 .legend-button.off {
+  background: var(--bg);
+  border-style: dashed;
   color: var(--faint);
   text-decoration: line-through;
 }
