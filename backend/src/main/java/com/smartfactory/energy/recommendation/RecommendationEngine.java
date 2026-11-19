@@ -6,6 +6,8 @@ import com.smartfactory.energy.event.EventLog;
 import com.smartfactory.energy.event.EventLogRepository;
 import com.smartfactory.energy.event.EventStage;
 import com.smartfactory.energy.event.EventType;
+import com.smartfactory.energy.loadforecast.LoadForecastService;
+import com.smartfactory.energy.loadforecast.dto.LoadForecast;
 import com.smartfactory.energy.power.SitePowerMinute;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.recommendation.dto.EssPlanResponse;
@@ -38,13 +40,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 판단 엔진. 1분마다(RecommendationEngineJob) 아래 순서로 지금 추천을 만듭니다.
- * 1. 계획에 넣을 값 모으기: 예상 부하, 예상 태양광(Open-Meteo), 요금, 지금 잔량, 환경 설정
+ * 1. 계획에 넣을 값 모으기: 예상 부하(AI 서버), 예상 태양광(Open-Meteo), 요금, 지금 잔량, 환경 설정
  * 2. 지금부터 24시간(15분 96칸) ESS 계획 짜기 (EssPlanner.plan) → 칸마다 충·방전과 예상 잔량
  * 3. 이번 15분 구간의 실제 전력과 계획을 보고 지금 무엇을 추천할지 정하기 (EssPlanner.decide)
  * 4. 추천이 바뀌었거나 새 15분 구간이면 recommendation에 1줄 저장 (+ 이벤트, 자동 모드면 바로 적용)
  *
- * 부하 예측은 아직 "최근 1시간 평균"을 앞으로 24시간에 그대로 씁니다. (AI 부하 예측은 백엔드에 아직 없음)
- * AI 예측을 붙일 때는 loadForecastOf 한 곳만 바꾸면 됩니다.
+ * 부하 예측은 AI 서버(FastAPI)가 하고, 판단(충전·방전)은 여기서 최적화로 합니다. (11/18 결정)
+ * AI 서버가 응답하지 않으면 최근 1시간 평균으로 대신 씁니다. (LoadForecastService)
  */
 @Slf4j
 @Service
@@ -60,11 +62,11 @@ public class RecommendationEngine {
     private static final int LOAD_HISTORY_MINUTES = 60;
     // "최근 ESS 없이 한전 구매"를 볼 최근 분 수
     private static final int RECENT_MINUTES = 4;
-    private static final String LOAD_FORECAST_METHOD = "최근 1시간 평균 (부하 예측 모델 연결 전 임시)";
     private static final String AUTO_HANDLER = "자동 모드";
     private static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm");
 
     private final EssPlanner essPlanner;
+    private final LoadForecastService loadForecastService;
     private final SolarForecastService solarForecastService;
     private final EssSocState essSocState;
     private final EssCommandHolder essCommandHolder;
@@ -96,10 +98,11 @@ public class RecommendationEngine {
         double socPercent = essSocState.get().doubleValue();
         LocalDateTime windowStart = quarterStartOf(now);
 
-        // 2. 24시간 계획
-        List<PlanInput> inputs = planInputsOf(windowStart, history);
+        // 2. 24시간 계획 (부하는 AI 서버 예측, 안 되면 최근 1시간 평균)
+        LoadForecast loadForecast = loadForecastService.forecast(windowStart, HORIZON_SLOTS, history);
+        List<PlanInput> inputs = planInputsOf(windowStart, loadForecast);
         EssPlanner.PlanResult plan = essPlanner.plan(inputs, socPercent, limits);
-        latestPlan = planResponseOf(now, socPercent, plan, inputs, limits);
+        latestPlan = planResponseOf(now, socPercent, plan, inputs, limits, loadForecast.method());
 
         // 3. 지금 추천
         EssPlanner.NowInfo info = nowInfoOf(history, windowStart, socPercent);
@@ -112,8 +115,7 @@ public class RecommendationEngine {
     // ---------- 계획에 넣을 값 ----------
 
     // 지금 15분 칸부터 96칸: 예상 부하 − 예상 태양광, 단가
-    List<PlanInput> planInputsOf(LocalDateTime windowStart, List<SitePowerMinute> history) {
-        double[] load = loadForecastOf(history);
+    List<PlanInput> planInputsOf(LocalDateTime windowStart, LoadForecast loadForecast) {
         List<SolarForecastSlot> solar = solarForecastService.forecastFrom(windowStart, HORIZON_SLOTS);
         List<TariffPeriod> periods = tariffPeriodRepository.findAll();
 
@@ -121,25 +123,17 @@ public class RecommendationEngine {
         for (int i = 0; i < HORIZON_SLOTS; i++) {
             LocalDateTime slotStart = windowStart.plusMinutes(15L * i);
             TariffPeriod period = periodAt(periods, slotStart.plusSeconds(450)); // 칸 가운데 시각의 요금
+            LoadForecast.Slot load = loadForecast.slots().get(i);
             inputs.add(new PlanInput(
                     slotStart,
-                    load[0],
-                    load[1],
+                    load.loadKw(),
+                    load.peakLoadKw(),
                     solar.get(i).solarKw(),
                     period != null ? period.getUnitPrice().doubleValue() : 0,
                     period != null ? period.getPeriodType() : null
             ));
         }
         return inputs;
-    }
-
-    // 부하 예측 [평균, 높게 본 값]. 지금은 둘 다 최근 1시간 평균 (AI 예측을 붙이면 여기만 바꿈)
-    // 높게 본 값을 "최근 가장 높았던 15분"으로 잡으면, 한 번 튄 값이 24시간 내내 나온다고 보게 되어
-    // 하루를 다 못 막는다고 판단(방어선을 올림)해 버림. 예측 오차는 예비 잔량(RESERVE_EXTRA_KW)이,
-    // 지금 구간에 튀는 부하는 실시간 피크 방어(EssPlanner.decide)가 막음
-    private double[] loadForecastOf(List<SitePowerMinute> history) {
-        double mean = history.stream().mapToDouble(r -> r.getLoadKw().doubleValue()).average().orElse(0);
-        return new double[] {mean, mean};
     }
 
     // 이번 15분 구간 상황 (지금 상태 API의 예상 피크와 같은 방식: 남은 분 = 15 − 쌓인 1분 기록 수)
@@ -236,7 +230,7 @@ public class RecommendationEngine {
 
     // 계획 + 칸마다 예상 잔량 (화면·확인용)
     private EssPlanResponse planResponseOf(LocalDateTime now, double socPercent, EssPlanner.PlanResult plan,
-                                           List<PlanInput> inputs, EssLimits limits) {
+                                           List<PlanInput> inputs, EssLimits limits, String loadForecastMethod) {
         List<EssPlanResponse.Slot> slots = new ArrayList<>();
         double soc = socPercent;
         for (int i = 0; i < inputs.size(); i++) {
@@ -255,7 +249,7 @@ public class RecommendationEngine {
                     round1(soc)
             ));
         }
-        return new EssPlanResponse(now, round1(socPercent), plan.lineKw(), plan.marginKw(), LOAD_FORECAST_METHOD, slots);
+        return new EssPlanResponse(now, round1(socPercent), plan.lineKw(), plan.marginKw(), loadForecastMethod, slots);
     }
 
     // ---------- 작은 도우미 ----------

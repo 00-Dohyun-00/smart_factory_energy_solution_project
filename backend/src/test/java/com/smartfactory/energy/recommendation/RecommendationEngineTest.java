@@ -16,6 +16,8 @@ import com.smartfactory.energy.ess.EssCommandHolder;
 import com.smartfactory.energy.event.EventLog;
 import com.smartfactory.energy.event.EventLogRepository;
 import com.smartfactory.energy.event.EventType;
+import com.smartfactory.energy.loadforecast.LoadForecastService;
+import com.smartfactory.energy.loadforecast.dto.LoadForecast;
 import com.smartfactory.energy.power.SitePowerMinute;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.recommendation.dto.EssPlanResponse;
@@ -49,6 +51,7 @@ import org.mockito.quality.Strictness;
 class RecommendationEngineTest {
 
     @Spy EssPlanner essPlanner = new EssPlanner();
+    @Mock LoadForecastService loadForecastService;
     @Mock SolarForecastService solarForecastService;
     @Mock EssSocState essSocState;
     @Mock EssCommandHolder essCommandHolder;
@@ -77,6 +80,17 @@ class RecommendationEngineTest {
                 slots.add(new SolarForecastSlot(from.plusMinutes(15L * i), 0.0, 0, null, null));
             }
             return slots;
+        });
+        // 부하 예측: 최근 기록 평균을 모든 칸에 (AI 서버 없이 대신 쓰는 예측과 같은 모양)
+        when(loadForecastService.forecast(any(), anyInt(), any())).thenAnswer(inv -> {
+            LocalDateTime from = inv.getArgument(0);
+            List<SitePowerMinute> rows = inv.getArgument(2);
+            double mean = rows.stream().mapToDouble(r -> r.getLoadKw().doubleValue()).average().orElse(0);
+            List<LoadForecast.Slot> slots = new ArrayList<>();
+            for (int i = 0; i < (int) inv.getArgument(1); i++) {
+                slots.add(new LoadForecast.Slot(from.plusMinutes(15L * i), mean, mean));
+            }
+            return new LoadForecast("테스트 예측", false, 0, slots);
         });
         when(recommendationRepository.findFirstByOrderByRecommendedAtDescRecommendationIdDesc()).thenReturn(Optional.empty());
         when(recommendationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));

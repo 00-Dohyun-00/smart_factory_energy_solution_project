@@ -16,6 +16,7 @@
 만드는 파일
   ai/forecast/production_plan.csv        생산계획 더미 (날짜, 시각, 계획 부하)
   frontend/src/api/fakeLoadForecast.json 1년치 96구간 예측값 (가짜 백엔드가 하루 계획에 씀)
+  ai/app/data/load_forecast_2018.json    같은 내용 (AI 서버 FastAPI가 GET /load-forecasts 로 돌려줌)
     - loadKwh     : 평균 예측 (요금 계산용)
     - peakLoadKwh : 상위 90% 예측 (방어선 판단용)
 
@@ -36,6 +37,8 @@ ROOT = Path(__file__).resolve().parents[2]  # 저장소 루트
 ENERGY_DATA = ROOT / "frontend" / "src" / "api" / "fakeEnergyData.json"
 PLAN_CSV = Path(__file__).resolve().parent / "production_plan.csv"
 FORECAST_JSON = ROOT / "frontend" / "src" / "api" / "fakeLoadForecast.json"
+# AI 서버(FastAPI)가 읽는 같은 내용의 파일. Docker 빌드가 ai 폴더만 보므로 따로 한 부 둠
+AI_SERVER_JSON = ROOT / "ai" / "app" / "data" / "load_forecast_2018.json"
 
 YEAR = 2018
 TRAIN_END_MONTH = 9  # 검증: 1~9월 학습, 10~12월 시험
@@ -207,8 +210,10 @@ def forecast_year(df):
         "loadKwh": [round(v / 4, 2) for v in predicted["mean"]],
         "peakLoadKwh": [round(v / 4, 2) for v in predicted["peak"]],
     }
-    FORECAST_JSON.write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")
-    print(f"\n1년치 예측 저장: {FORECAST_JSON.relative_to(ROOT)} ({len(df)}칸)")
+    for path in (FORECAST_JSON, AI_SERVER_JSON):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(output, ensure_ascii=False), encoding="utf-8")
+        print(f"\n1년치 예측 저장: {path.relative_to(ROOT)} ({len(df)}칸)")
 
 
 def main():

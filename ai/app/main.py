@@ -1,21 +1,18 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+from datetime import datetime
 
-# WATTever AI 서버 (15분 피크 예측 / ESS 추천).
-# 지금은 기본 뼈대만 있고, 실제 예측 모델은 아직 없습니다. Spring이 호출할 수 있게
-# 요청/응답 모양만 미리 잡아두고, 모델이 생기면 predict() 안쪽 로직만 바꾸면 됩니다.
+from fastapi import FastAPI, HTTPException, Query
+
+from app import load_forecast
+
+# WATTever AI 서버: 공장 부하 96구간 예측
+# 충전·방전 판단은 Spring 판단 엔진(최적화)이 하고, AI는 판단에 필요한 공장 부하만 예측합니다. (11/18 결정)
+# Spring(RecommendationEngine)이 1분마다 GET /load-forecasts 로 앞으로 24시간 부하 예측을 받아 계획에 씁니다.
 app = FastAPI(title="WATTever AI")
 
+# 서버를 켤 때 예측값 파일을 한 번만 읽어 둠
+DATA = load_forecast.load_data()
 
-class PredictRequest(BaseModel):
-    site_power_kw: float  # 지금 공장 전체 소비 kW
-    target_peak_kw: float  # 목표 피크 kW (setting에서 가져온 값)
-
-
-class PredictResponse(BaseModel):
-    predicted_avg_kw: float  # 15분 평균 예상 kW
-    action: str  # CHARGE / DISCHARGE / IDLE
-    reason: str
+MAX_SLOTS = 192  # 한 번에 줄 수 있는 최대 칸 수 (48시간)
 
 
 @app.get("/health")
@@ -23,11 +20,19 @@ def health():
     return {"status": "UP"}
 
 
-@app.post("/predict", response_model=PredictResponse)
-def predict(request: PredictRequest) -> PredictResponse:
-    # 아직 실제 모델이 없어서 규칙 기반 자리만 채워둔 상태입니다 (항상 대기 반환).
-    return PredictResponse(
-        predicted_avg_kw=request.site_power_kw,
-        action="IDLE",
-        reason="모델 미구현 - 기본값 반환",
-    )
+@app.get("/load-forecasts")
+def get_load_forecasts(
+    start: datetime = Query(description="시작 시각 (한국 시각, 예: 2026-11-19T16:15:00). 이 시각이 들어 있는 15분 칸부터"),
+    slots: int = Query(96, description="칸 수 (15분 단위, 기본 96칸 = 24시간)"),
+):
+    """
+    공장 부하 예측 (15분 칸마다 kW)
+    - load_kw: 평균 예측 (요금 계산용)
+    - peak_load_kw: 상위 90% 예측 (방어선 판단용, 피크를 낮게 보지 않게)
+    """
+    if slots < 1 or slots > MAX_SLOTS:
+        raise HTTPException(status_code=400, detail=f"slots는 1~{MAX_SLOTS} 사이여야 합니다.")
+    return {
+        "model": load_forecast.MODEL_NAME,
+        "slots": load_forecast.forecast(DATA, start, slots),
+    }
