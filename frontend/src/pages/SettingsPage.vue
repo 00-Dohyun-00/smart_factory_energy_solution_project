@@ -68,14 +68,13 @@ const GROUPS = [
 // 실시간 상태에 포함된 설비마다 환경설정 값을 한 칸씩 보여 줌.
 // 임계치는 settingsStore가 받은 설정값만 사용하고, 정격 전력은 기본값으로 사용하지 않음.
 const equipmentGroup = computed(() => {
-  const fields = (realtimeStore.status?.equipments ?? [])
-    .map((item) => ({
-      key: `equipment.${item.id}.max_kw`,
-      label: item.name,
-      unit: 'kW',
-      min: 1,
-      max: 100000,
-    }))
+  const fields = (realtimeStore.status?.equipments ?? []).map((item) => ({
+    key: `equipment.${item.id}.max_kw`,
+    label: item.name,
+    unit: 'kW',
+    min: 1,
+    max: 100000,
+  }))
   return {
     key: 'equipment',
     title: '설비 임계치',
@@ -140,6 +139,17 @@ watch(
     if (count && !Object.keys(draft.value).length) allGroups.value.forEach(resetGroup)
   },
   { immediate: true },
+)
+// 설비 목록(실시간 상태)이 설정값보다 늦게 오면 설비 임계치 칸이 비어 있으므로, 그때 채워 넣음
+// (빈칸으로 두면 기본값과 달라서 "바꾼 값"으로 잘못 보임)
+watch(
+  () => equipmentGroup.value.fields.length,
+  () => {
+    if (!Object.keys(draft.value).length) return // 아직 설정값을 받기 전 (위 watch가 채움)
+    for (const field of equipmentGroup.value.fields) {
+      if (!(field.key in draft.value)) draft.value[field.key] = saved.value[field.key]
+    }
+  },
 )
 const isChanged = (field) => !field.readOnly && draft.value[field.key] !== saved.value[field.key]
 const changedFields = (group) => group.fields.filter(isChanged)
