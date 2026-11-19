@@ -211,6 +211,11 @@ function makeTrendOption(lines, withTarget) {
     }
   })
 
+  // 누적 영역에는 빈 막대 계열(보이지 않음)을 하나 넣음.
+  // ECharts는 막대 계열이 있으면 가로축 양 끝을 막대 반 칸씩 넓히는데, 선 모양에는 ESS 막대가 있고 누적 영역에는
+  // 없어서 모양을 바꿀 때마다 가로축 시각 글자가 몇 px씩 움직였음 → 두 모양 모두 같은 여백이 되게 맞춤
+  if (stacked) series.push({ type: 'bar', data: [], silent: true, tooltip: { show: false } })
+
   // 요금 띠, "지금" 세로선, 목표 피크선은 첫 번째 선에 붙임
   const first = series[0]
   first.markArea = { silent: true, data: tariffAreas }
@@ -281,7 +286,9 @@ function makeTrendOption(lines, withTarget) {
   return {
     animation: false,
     // top: 범례 줄과 그래프 사이 공백 (28 → 22, 위쪽 "지금 HH:MM" 글자가 잘리지 않을 만큼만)
-    grid: { left: 52, right: 20, top: 22, bottom: 24 },
+    // outerBoundsMode 'none': 세로축 글자 폭(예: -500 ↔ -1000)에 따라 ECharts가 여백을 저절로 늘리지 않게 함.
+    // 선 ↔ 누적 영역을 바꿀 때 세로축 범위가 달라져도 그래프 칸(가로축 시각 위치)이 움직이지 않음
+    grid: { left: 52, right: 20, top: 22, bottom: 24, outerBoundsMode: 'none' },
     // 범례는 카드 제목 줄의 버튼으로 보여 줌 (그래프 위쪽의 "지금" 글자와 겹쳐 눌리지 않던 문제, 2026-11-18)
     // 그래프 안 범례는 숨기고, 버튼으로 끄고 켠 상태만 넘김
     legend: {
