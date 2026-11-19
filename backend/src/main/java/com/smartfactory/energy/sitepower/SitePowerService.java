@@ -13,6 +13,7 @@ import com.smartfactory.energy.power.PowerMinuteRepository;
 import com.smartfactory.energy.power.SitePowerMinute;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.simulator.RawLoadCursor;
 import com.smartfactory.energy.sitepower.dto.SitePowerLatestResponse;
 import com.smartfactory.energy.sitepower.dto.SitePowerLatestResponse.EquipmentPower;
 import com.smartfactory.energy.sitepower.dto.SitePowerLatestResponse.SourceRatio;
@@ -60,6 +61,7 @@ public class SitePowerService {
     private final WeatherRepository weatherRepository;
     private final TariffPeriodRepository tariffPeriodRepository;
     private final SettingRepository settingRepository;
+    private final RawLoadCursor rawLoadCursor;
 
     // ---------- 지금 상태 1건 (GET /api/site-powers/latest) ----------
 
@@ -79,6 +81,9 @@ public class SitePowerService {
         double gridKw = toDouble(latest.getGridKw());
         double chargeKw = essKw < 0 ? -essKw : 0;
         double dischargeKw = essKw > 0 ? essKw : 0;
+        // 지금 이 순간의 공장 부하: raw_factory_load를 "시각 → 행" 규칙(RawLoadCursor와 같은 식)으로 바로 읽음.
+        // site_power_minute은 1분 평균이라 1분에 한 번만 바뀌는데, 이 값은 시뮬레이터 실행 여부와 상관없이 매초 바뀜
+        double liveLoadKw = toDouble(rawLoadCursor.nextRow().getFactoryKw());
 
         // 3. 15분 피크
         LocalDateTime windowStart = quarterStart(now);
@@ -126,6 +131,7 @@ public class SitePowerService {
         return new SitePowerLatestResponse(
                 latest.getTs(), // 값과 같은 줄의 기록 시각 (시뮬레이터가 멈추면 이 시각에서 멈춰 있어 오래된 값임을 알 수 있음)
                 round1(loadKw),
+                round1(liveLoadKw),
                 round1(solarKw),
                 round1(chargeKw),
                 round1(dischargeKw),

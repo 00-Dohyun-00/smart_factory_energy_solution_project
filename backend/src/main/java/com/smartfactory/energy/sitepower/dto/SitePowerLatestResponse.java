@@ -8,7 +8,8 @@ import java.util.List;
  */
 public record SitePowerLatestResponse(
         LocalDateTime recordedAt,     // 기록 시각 (site_power_minute 최신 1줄의 ts)
-        Double loadKw,                // 공장 전체 사용 전력
+        Double loadKw,                // 공장 전체 사용 전력 (1분 평균, site_power_minute 값)
+        Double liveLoadKw,            // 지금 이 순간의 공장 부하 (raw_factory_load를 시각 규칙으로 바로 읽은 값, 매초 바뀜)
         Double solarKw,               // 태양광 발전
         Double chargeKw,              // 배터리 충전 전력 (충전 중이 아니면 0)
         Double dischargeKw,           // 배터리 방전 전력 (방전 중이 아니면 0)

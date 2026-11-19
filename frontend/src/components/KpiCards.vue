@@ -26,7 +26,15 @@ const settingsStore = useSettingsStore() // ESS 최대 출력, 잔량 하한·�
 // 그래서 카드에 그리는 값을 0.6초 동안 이전 값에서 새 값으로 옮겨 감.
 // 움직이는 동안만 사이 값을 지나가고, 끝나면 받은 값 그대로를 보여 줌 (값을 새로 만들지 않음)
 const MOVE_MS = 600
-const MOVING_FIELDS = ['loadKw', 'gridKw', 'solarKw', 'chargeKw', 'dischargeKw', 'socPercent']
+const MOVING_FIELDS = [
+  'loadKw',
+  'liveLoadKw',
+  'gridKw',
+  'solarKw',
+  'chargeKw',
+  'dischargeKw',
+  'socPercent',
+]
 const RATIO_FIELDS = ['gridPercent', 'solarPercent', 'essPercent'] // sourceRatio 안의 값
 
 const shown = ref(props.status) // 카드에 그리는 값 (움직이는 중이면 사이 값)
@@ -138,8 +146,10 @@ const kpis = computed(() => {
   const maxPowerKw = settingsStore.values['ess.max_power_kw']
 
   // 공장 소비전력: 눈금 끝까지 중 지금 위치를 공급원 비율대로 나눠 칠함
+  // liveLoadKw는 raw_factory_load를 그 순간 시각으로 바로 읽은 값이라 매초 바뀜 (loadKw는 1분 평균이라 1분에 한 번만 바뀜)
   const loadMax = target ? target * LOAD_SCALE : null
-  const loadFill = s && loadMax ? clamp(s.loadKw / loadMax) * 100 : 0
+  const loadNow = s?.liveLoadKw ?? s?.loadKw
+  const loadFill = s && loadMax ? clamp(loadNow / loadMax) * 100 : 0
   const gridEnd = s ? (loadFill * s.sourceRatio.gridPercent) / 100 : 0
   const solarEnd = s ? gridEnd + (loadFill * s.sourceRatio.solarPercent) / 100 : 0
 
@@ -156,7 +166,7 @@ const kpis = computed(() => {
       key: 'load',
       dot: 'mix', // 계기판이 한전 · 태양광 · ESS 세 색으로 칠해지므로 세 색을 나란히
       name: '공장 소비전력',
-      value: formatKw(s?.loadKw),
+      value: formatKw(loadNow),
       unit: 'kW',
       // 아랫줄: 각 공급원이 계기판에서 어떤 색인지 작은 네모로 함께 보여 줌
       legend: s
@@ -182,7 +192,7 @@ const kpis = computed(() => {
         segment(gridEnd, solarEnd, 'fill-solar'),
         segment(solarEnd, loadFill, 'fill-ess'),
       ],
-      needle: s && loadMax ? needle(s.loadKw / loadMax) : null,
+      needle: s && loadMax ? needle(loadNow / loadMax) : null,
     },
     {
       key: 'grid',
@@ -585,10 +595,13 @@ const kpis = computed(() => {
 .kpi-sub {
   align-self: stretch;
   white-space: pre-line; /* 글 안의 \n 에서 줄을 바꿈 */
-  height: 20.8px;
   overflow: hidden;
   font-size: 8.8px;
-  line-height: 10.4px; /* 두 줄(예: ESS 출력 비율 + 배터리실 온도)이 높이 20.8px에 딱 들어가게 */
+  /* line-height를 명시하지 않으면 한글 줄 높이가 브라우저마다 달라서, 목표 초과 안내나
+     ESS 출력 비율 + 배터리실 온도 같은 2줄 글이 height 안에 다 안 들어가고 잘렸음.
+     line-height를 직접 정해서 두 줄(예: 10.4px × 2 = 20.8px)이 height에 정확히 맞게 함 */
+  line-height: 10.4px;
+  height: 20.8px;
   color: var(--mute);
   text-align: center;
   /* 좁은 화면에서는 잘라 내지 않고 두 줄로 내려 씀 (공급원 비율이 길어서) */

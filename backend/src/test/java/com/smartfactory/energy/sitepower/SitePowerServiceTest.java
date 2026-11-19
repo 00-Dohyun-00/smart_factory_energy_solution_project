@@ -19,9 +19,11 @@ import com.smartfactory.energy.global.exception.NotFoundException;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
 import com.smartfactory.energy.power.PowerMinute;
 import com.smartfactory.energy.power.PowerMinuteRepository;
+import com.smartfactory.energy.power.RawFactoryLoad;
 import com.smartfactory.energy.power.SitePowerMinute;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.simulator.RawLoadCursor;
 import com.smartfactory.energy.sitepower.dto.SitePowerLatestResponse;
 import com.smartfactory.energy.sitepower.dto.SitePowerQuarterResponse;
 import com.smartfactory.energy.tariff.TariffPeriodRepository;
@@ -56,6 +58,7 @@ class SitePowerServiceTest {
     @Mock WeatherRepository weatherRepository;
     @Mock TariffPeriodRepository tariffPeriodRepository;
     @Mock SettingRepository settingRepository;
+    @Mock RawLoadCursor rawLoadCursor;
     @InjectMocks SitePowerService sitePowerService;
 
     // 가짜 DB 표: findInPeriod(start, end)는 이 목록에서 기간 안의 줄만 돌려줌
@@ -85,6 +88,9 @@ class SitePowerServiceTest {
         when(settingRepository.findById(anyString())).thenReturn(Optional.empty());
         when(settingRepository.findById("peak.target_kw")).thenReturn(Optional.of(setting("peak.target_kw", "목표 피크", "1800")));
         when(settingRepository.findById("peak.warn_ratio")).thenReturn(Optional.of(setting("peak.warn_ratio", "주의선", "97")));
+        // 지금 이 순간의 공장 부하 (raw_factory_load 기반). 이 테스트들은 그 값 자체를 검사하지 않아 아무 값이나 둠
+        when(rawLoadCursor.nextRow())
+                .thenReturn(new RawFactoryLoad(LocalDateTime.now(), LocalDateTime.now(), BigDecimal.ZERO));
     }
 
     @Test

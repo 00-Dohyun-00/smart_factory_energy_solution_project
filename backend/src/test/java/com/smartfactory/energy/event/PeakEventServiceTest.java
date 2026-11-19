@@ -134,7 +134,7 @@ class PeakEventServiceTest {
 
     // 테스트에 필요한 칸만 채운 지금 상태 응답 (목표 1800, 주의선 1746)
     private SitePowerLatestResponse latest(LocalDateTime recordedAt, double predictedKw, String peakStatus) {
-        return new SitePowerLatestResponse(recordedAt, 0.0, 0.0, 0.0, 0.0, 0.0, null, null, "STANDBY", null, null, 1,
+        return new SitePowerLatestResponse(recordedAt, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, null, null, "STANDBY", null, null, 1,
                 windowStart, windowStart.plusMinutes(15), 0, predictedKw, 1800.0, 1746.0, peakStatus, 0.0,
                 List.of(), null, null, null, null, null, List.of());
     }
