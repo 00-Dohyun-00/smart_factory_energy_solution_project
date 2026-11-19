@@ -73,8 +73,14 @@ const timerDash = computed(
   () => `${(remainingRatio.value * TIMER_LENGTH).toFixed(2)} ${TIMER_LENGTH.toFixed(2)}`,
 )
 
-// 구간 시작부터 지금까지 쌓인 값 (백엔드의 windowPoints, 0에서 시작해 15분 끝에 그 구간의 피크가 됨)
-const points = computed(() => props.status?.windowPoints ?? [])
+// 구간 시작부터 지금까지 쌓인 값 (백엔드의 windowPoints, 15분 끝에 그 구간의 피크가 됨)
+// 백엔드는 1분 뒤 점부터 주므로 맨 앞에 구간 시작 점(0분, 0 kW)을 붙임.
+// 안 붙이면 구간이 막 바뀌어 점이 1개뿐일 때 실선이 그려지지 않고, 선도 0이 아닌 1분 자리에서 시작했음
+const points = computed(() => {
+  if (!props.status) return []
+  const list = props.status.windowPoints ?? []
+  return list[0]?.minute === 0 ? list : [{ minute: 0, demandKw: 0 }, ...list]
+})
 // 지금 시점의 누적값 = 마지막 점
 const currentPoint = computed(() => points.value[points.value.length - 1] ?? null)
 

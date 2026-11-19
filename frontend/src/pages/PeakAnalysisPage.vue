@@ -159,6 +159,36 @@ const shortTime = (dateTime) => formatMonthDayTime(dateTime).slice(0, 11)
 // '2026-11-02' → '11-02'
 const dayLabel = (date) => date.slice(5)
 
+// 기간의 모든 날짜 목록. 예: ('2026-11-17', '2026-11-19') → ['2026-11-17', '2026-11-18', '2026-11-19']
+// 백엔드는 기록이 있는 날만 주므로, 그대로 그리면 기록 없는 날(예: 시뮬레이터가 꺼져 있던 날)이
+// 그래프에서 사라지고 앞뒤 날짜가 붙어 보였음 → 모든 날짜로 칸을 만들고 기록 없는 날은 비워 둠
+function datesBetween(from, to) {
+  const dates = []
+  const day = new Date(`${from}T00:00:00`)
+  const end = new Date(`${to}T00:00:00`)
+  while (day <= end) {
+    const month = String(day.getMonth() + 1).padStart(2, '0')
+    const date = String(day.getDate()).padStart(2, '0')
+    dates.push(`${day.getFullYear()}-${month}-${date}`)
+    day.setDate(day.getDate() + 1)
+  }
+  return dates
+}
+
+// 일별 그래프·히트맵에 쓰는 날짜별 목록: 기간의 모든 날짜, 기록이 없는 날은 값이 null (막대·칸 없이 빈자리)
+function fillDays(list, from, to) {
+  if (!list.length || !from || !to) return list
+  const byDate = Object.fromEntries(list.map((item) => [item.date, item]))
+  return datesBetween(from, to).map(
+    (date) => byDate[date] ?? { date, peakKw: null, expectedKw: null, kwh: null },
+  )
+}
+
+// 조회 기간의 모든 날짜 (기록 없는 날 포함)
+const dayRows = computed(() =>
+  fillDays(peak.value?.dailyPeaks ?? [], peak.value?.from, peak.value?.to),
+)
+
 // 목표를 넘은 구간이 전체 15분 구간의 몇 %인지 (표시용 비율: 백엔드 값 두 개를 나눈 것)
 const exceededPercent = computed(() =>
   summary.value?.windowCount
@@ -201,7 +231,7 @@ const peakAxisMin = computed(() => {
 
 const dailyOption = computed(() => {
   const target = targetKw.value
-  const days = peak.value.dailyPeaks
+  const days = dayRows.value
   return {
     animation: false,
     textStyle: { fontSize: 10 }, // 그래프 글자도 80% 크기로 (기본 12px)
@@ -211,7 +241,7 @@ const dailyOption = computed(() => {
       ...tooltipColors(),
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
-      valueFormatter: (value) => `${formatKw(value)} kW`,
+      valueFormatter: (value) => (value == null ? '기록 없음' : `${formatKw(value)} kW`),
     },
     xAxis: { type: 'category', data: days.map((item) => dayLabel(item.date)), ...axisStyle },
     yAxis: {
@@ -307,7 +337,7 @@ const hourRangeText = (range) => `${range.startHour}시~${range.endHour + 1}시`
 
 const heatOption = computed(() => {
   const target = targetKw.value
-  const dates = peak.value.dailyPeaks.map((item) => item.date)
+  const dates = dayRows.value.map((item) => item.date)
   const dayLabels = dates.map(dayLabel)
 
   // 히트맵 위에 테두리로 덧그리는 칸 묶음. x는 시각(0~23), y는 날짜 순번
