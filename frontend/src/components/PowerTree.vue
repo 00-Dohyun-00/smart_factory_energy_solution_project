@@ -28,14 +28,14 @@ const props = defineProps({
 // update:modelValue: 구역을 누름 / select-equipment: 설비 상자를 누름 (설비 id를 넘김. 고르기·풀기는 부모가 정함)
 const emit = defineEmits(['update:modelValue', 'select-equipment'])
 
-// 구역 이름. id는 설비의 zoneId와 같아야 함 (예: 브레이징로 BRZ-01 → zoneId 'Z2')
+// 구역 이름. id는 백엔드 구역 코드(zoneCode)와 같아야 함 (예: 브레이징로 BRZ-01 → 'Z2', 유틸리티는 'Z6')
 const ZONE_NAMES = [
   { id: 'Z1', name: '열교환기 가공' },
   { id: 'Z2', name: '브레이징' },
   { id: 'Z3', name: '사출' },
   { id: 'Z4', name: '모듈 조립' },
   { id: 'Z5', name: '검사' },
-  { id: 'U', name: '유틸리티' },
+  { id: 'Z6', name: '유틸리티' },
 ]
 const PCS_LABELS = { DISCHARGING: '방전 중', CHARGING: '충전 중', STANDBY: '대기' }
 // 설비 운전 상태. 피크 상태(● 정상 등)와 헷갈리지 않게 상태색(초록·주황·빨강)은 쓰지 않고
@@ -122,7 +122,7 @@ const sources = computed(() => {
 // 구역 6곳: 그 구역 설비들의 전력을 더하고, 공장 전체에서 차지하는 비율을 구함 (표시용 합계·비율)
 const zones = computed(() =>
   ZONE_NAMES.map((zone, index) => {
-    const equipments = (props.status?.equipments ?? []).filter((item) => item.zoneId === zone.id)
+    const equipments = (props.status?.equipments ?? []).filter((item) => item.zoneCode === zone.id)
     const totalKw = equipments.length
       ? equipments.reduce((sum, item) => sum + item.loadKw, 0)
       : null
