@@ -62,8 +62,10 @@ public class RecommendationService {
             }
         }
 
+        // 대기(IDLE) 추천은 이력에서 뺌 (명세 4-3: 너무 많아져서 빼도 됨. 최신 1건 조회에는 나옴)
         return recommendationRepository.findInPeriod(start, end)
                 .stream()
+                .filter(r -> r.getAction() != RecommendationAction.IDLE)
                 .map(r -> RecommendationResponse.from(r, resultPeaks.get(r.getIntervalStart())))
                 .toList();
     }
@@ -116,7 +118,8 @@ public class RecommendationService {
 
     // 추천의 action(충전/방전)과 power_kw로 ESS에 명령을 내림. 유지 시간은 decision_valid_minutes와
     // 그 추천의 15분 구간이 끝나는 시각 중 더 빨리 오는 쪽까지
-    private void applyToEss(Recommendation recommendation, LocalDateTime now) {
+    // 판단 엔진(RecommendationEngine)도 자동 모드에서 이 메서드로 적용함
+    void applyToEss(Recommendation recommendation, LocalDateTime now) {
         if (recommendation.getAction() == RecommendationAction.IDLE) {
             return;
         }
