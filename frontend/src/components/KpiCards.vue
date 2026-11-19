@@ -230,14 +230,14 @@ const kpis = computed(() => {
     },
     {
       key: 'ess',
-      // 충전 파랑 · 방전 주황 · 대기 회색 (계기판 안쪽 게이지와 같은 색)
+      // 이름 앞 색 = 건전지 막대 색: 충전 파랑 · 방전 주황 · 대기 청록 (대기일 때 회색이라 막대 색과 달랐음)
       dot: !s
         ? ''
         : charging
           ? 'fill-charge'
           : s.pcsStatus === 'DISCHARGING'
             ? 'fill-discharge'
-            : 'standby',
+            : 'fill-ess',
       name: 'ESS 충·방전',
       // 숫자 앞에 지금 무엇을 하는 중인지 적음 (방전 500 kW / 충전 300 kW / 대기 0.0 kW)
       prefix: s ? (PCS_SHORT[s.pcsStatus] ?? '') : '',
@@ -438,8 +438,8 @@ const kpis = computed(() => {
 .dot.fill-discharge {
   background: var(--gauge-discharge);
 }
-.dot.standby {
-  background: var(--mute);
+.dot.fill-ess {
+  background: var(--gauge-ess);
 }
 .stale .dot {
   background: var(--lost);
