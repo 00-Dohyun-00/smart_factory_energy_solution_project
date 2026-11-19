@@ -156,6 +156,21 @@ const shortTime = (dateTime) => formatMonthDayTime(dateTime).slice(0, 11)
 const highlightValue = (item) =>
   item.unit === 'kW' ? formatKw(item.value) : formatOneDecimal(item.value)
 
+// 눈에 띄는 구간의 "목표 대비" 칸: 목표 피크와 비교하는 값(15분 피크 · 한전 구매, kW)만 목표의 몇 %인지 (표시용 비율)
+// 배터리 잔량·온도·태양광처럼 목표 피크와 상관없는 값은 "—"
+function highlightTargetPercent(item) {
+  const comparable =
+    item.unit === 'kW' && (item.label.includes('피크') || item.label.includes('한전'))
+  if (!comparable || targetKw.value === null || item.value === null) return null
+  return (item.value / targetKw.value) * 100
+}
+// 눈에 띄는 구간의 "단계" 칸 (백엔드 level: CRITICAL = 목표 초과, 그 밖 = 정보)
+const HIGHLIGHT_LEVELS = {
+  CRITICAL: { shape: '■', label: '목표 초과', className: 'over' },
+  INFO: { shape: '○', label: '정보', className: '' },
+}
+const highlightLevel = (item) => HIGHLIGHT_LEVELS[item.level] ?? HIGHLIGHT_LEVELS.INFO
+
 function toggleFocus(at) {
   focusAt.value = focusAt.value === at ? '' : at
 }
@@ -453,7 +468,8 @@ const powerOption = computed(() => {
   // 목표 피크선은 한전 구매전력과 비교하는 선이라, 한전 구매를 켰을 때만 그림
   const target = trend.value.targetPeakKw
   const lines = shown.value.includes('grid')
-    ? [{ value: target, text: `목표 피크 ${formatKw(target)}`, color: COLOR.ink }]
+    ? // 목표 피크선은 공장 소비 선(먹색)과 구분되게 전용 자주색 (통합 화면의 목표 피크선과 같은 색)
+      [{ value: target, text: `목표 피크 ${formatKw(target)}`, color: COLOR.target }]
     : []
   if (series.length) series[0].markLine = markLines(lines, true)
 
@@ -1068,6 +1084,17 @@ const patternOption = computed(() => {
             </div>
             <!-- 목록이 카드보다 길면 카드 안에서만 스크롤 -->
             <ul class="highlights">
+              <!-- 칼럼 이름: 목록 안 첫 줄에 두고 위에 붙여 둠(sticky).
+                   목록 밖에 두면 스크롤바가 생길 때 목록만 좁아져 칸 위치가 어긋나기 때문 -->
+              <li class="highlight-head-row" aria-hidden="true">
+                <div class="highlight highlight-head">
+                  <span>시각</span>
+                  <span>구간</span>
+                  <span>단계</span>
+                  <span class="right-text">값</span>
+                  <span class="right-text">목표 대비</span>
+                </div>
+              </li>
               <li v-for="item in trend.highlights" :key="item.label">
                 <button
                   class="highlight"
@@ -1076,13 +1103,25 @@ const patternOption = computed(() => {
                   @click="toggleFocus(item.at)"
                 >
                   <span class="highlight-time num">{{ shortTime(item.at) }}</span>
-                  <span class="highlight-label">
-                    <span v-if="item.level === 'CRITICAL'" class="over" aria-hidden="true">■</span>
-                    {{ item.label }}
+                  <span class="highlight-label">{{ item.label }}</span>
+                  <span
+                    class="highlight-level"
+                    :class="highlightLevel(item).className"
+                    :title="highlightLevel(item).label"
+                  >
+                    <span aria-hidden="true">{{ highlightLevel(item).shape }}</span>
+                    <span class="level-text">{{ highlightLevel(item).label }}</span>
                   </span>
-                  <strong class="num" :class="{ over: item.level === 'CRITICAL' }">
+                  <strong class="num right-text" :class="{ over: item.level === 'CRITICAL' }">
                     {{ highlightValue(item) }} {{ item.unit }}
                   </strong>
+                  <span class="highlight-target num right-text">
+                    {{
+                      highlightTargetPercent(item) === null
+                        ? '—'
+                        : `${formatOneDecimal(highlightTargetPercent(item))}%`
+                    }}
+                  </span>
                 </button>
               </li>
             </ul>
@@ -1325,7 +1364,7 @@ const patternOption = computed(() => {
 }
 /* 남은 높이를 채우는 그래프(.fit)만 줄어들고, 제목 · 고정 높이 그래프 · 안내 글은 높이를 지킴 */
 .power-card > :not(.fit),
-.pattern-card > :not(.fit),
+.pattern-card > :not(.fit, .rank-scroll),
 .highlights-card > :not(.highlights) {
   flex-shrink: 0;
 }
@@ -1376,7 +1415,7 @@ const patternOption = computed(() => {
   font-size: 12px;
 }
 .highlights-card .highlight-time {
-  width: 78px;
+  width: auto;
 }
 .result-card .track {
   width: 60px;
@@ -1515,8 +1554,10 @@ const patternOption = computed(() => {
 }
 /* 시간대별 사용 패턴: 막대 간격 고르기 */
 /* 순위 보기 */
+/* 순위 목록: 카드의 남은 높이를 채우고, 넘치는 줄은 이 안에서 스크롤 (화면이 낮아도 잘리지 않게) */
 .rank-scroll {
-  max-height: 240px;
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
   scrollbar-color: var(--line-strong) transparent;
 }
@@ -1572,10 +1613,12 @@ const patternOption = computed(() => {
 }
 
 /* 눈에 띄는 구간 */
+/* 눈에 띄는 구간 한 줄: 시각 · 구간 · 단계 · 값 · 목표 대비 (칼럼 이름 줄과 같은 칸 폭) */
 .highlight {
-  display: flex;
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) 64px 72px 56px;
   align-items: baseline;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
   padding: 8px 8px 8px 4px;
   background: none;
@@ -1602,17 +1645,66 @@ const patternOption = computed(() => {
   font-weight: 700;
 }
 .highlight-label {
+  overflow: hidden;
   color: var(--ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .highlight strong {
-  margin-left: auto;
   white-space: nowrap;
+}
+.highlight .right-text {
+  text-align: right;
+}
+.highlight-level {
+  font-size: 11px;
+  color: var(--mute);
+  white-space: nowrap;
+}
+/* 단계 도형(○)과 글자(정보) 사이 띄움 */
+.level-text {
+  margin-left: 3px;
+}
+.highlight-level.over {
+  font-weight: 700;
+  color: var(--crit);
+}
+.highlight-target {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+/* 칼럼 이름 줄: 목록을 스크롤해도 위에 붙어 있음 */
+.highlight-head-row {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
+}
+/* 칼럼 이름 줄: 작은 회색 글자, 누를 수 없음 */
+.highlight.highlight-head {
+  padding-top: 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line-strong);
+  font-size: 11px;
+  color: var(--mute);
+  cursor: default;
+}
+.highlight.highlight-head:hover {
+  background: none;
 }
 
 /* 화면이 좁으면 오른쪽 열을 줄여 그래프 자리를 남김 */
 @media (max-width: 1600px) {
   .right {
     width: 400px;
+  }
+  /* 눈에 띄는 구간: 오른쪽 열이 좁아지므로 단계는 도형(■ · ○)만 보여 구간 이름 자리를 늘림 (글자는 마우스를 올리면 보임) */
+  .highlight {
+    grid-template-columns: 70px minmax(0, 1fr) 24px 66px 50px;
+    gap: 6px;
+  }
+  .highlight-level .level-text {
+    display: none;
   }
   .track {
     width: 48px;
