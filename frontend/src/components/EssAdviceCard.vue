@@ -161,7 +161,7 @@ const isIdleNow = computed(
 .advice {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 9.6px;
 }
 .head {
   display: flex;
@@ -170,9 +170,9 @@ const isIdleNow = computed(
 /* 모드 신호등 */
 .mode-signal {
   display: flex;
-  gap: 2px;
+  gap: 1.6px;
   margin-left: auto;
-  padding: 3px;
+  padding: 2.4px;
   background: var(--bg);
   border: 1px solid var(--line-strong);
   border-radius: 999px;
@@ -180,21 +180,21 @@ const isIdleNow = computed(
 .lamp-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 10px 3px 7px;
+  gap: 4.8px;
+  padding: 2.4px 8px 2.4px 5.6px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 10.4px;
   color: var(--faint);
   white-space: nowrap;
 }
 .lamp-item small {
-  font-size: 11px;
+  font-size: 8.8px;
   font-weight: 400;
 }
 /* 꺼진 등: 회색 */
 .lamp {
-  width: 11px;
-  height: 11px;
+  width: 8.8px;
+  height: 8.8px;
   border-radius: 50%;
   background: var(--line-strong);
 }
@@ -221,40 +221,40 @@ const isIdleNow = computed(
 .act-row {
   display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: 9.6px;
 }
 .act {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  font-size: 26px;
+  gap: 6.4px;
+  font-size: 20.8px;
   font-weight: 700;
   line-height: 1.1;
 }
 .power {
-  font-size: 48px;
+  font-size: 38.4px;
   line-height: 1;
 }
 .unit {
-  font-size: 16px;
+  font-size: 12.8px;
   font-weight: 400;
   color: var(--ink-2);
 }
 .act.idle {
-  font-size: 40px;
+  font-size: 32px;
   color: var(--ink-2);
 }
 .until {
-  font-size: 16px;
+  font-size: 12.8px;
   color: var(--ink-2);
 }
 /* 처리 상태: 지금 상태라 테두리 배지로 */
 .state {
   margin-left: auto;
-  padding: 2px 10px;
+  padding: 1.6px 8px;
   border: 1.5px solid var(--ok);
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 10.4px;
   font-weight: 700;
   color: var(--ok);
   white-space: nowrap;
@@ -267,10 +267,10 @@ const isIdleNow = computed(
 
 /* 하면 무엇이 좋은지: 카드에서 가장 먼저 읽히는 문장 */
 .benefit {
-  padding: 12px 14px;
+  padding: 9.6px 11.2px;
   background: var(--bg);
   border-left: 4px solid var(--ink);
-  font-size: 16px;
+  font-size: 12.8px;
   line-height: 1.5;
   color: var(--ink);
 }
@@ -287,7 +287,7 @@ const isIdleNow = computed(
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 3.2px;
   height: 100%;
   color: var(--faint);
   text-align: center;
@@ -312,9 +312,9 @@ const isIdleNow = computed(
   }
 }
 .idle-icon {
-  width: 52px;
-  height: 30px;
-  margin-bottom: 2px;
+  width: 41.6px;
+  height: 24px;
+  margin-bottom: 1.6px;
 }
 .idle-icon .outline {
   fill: none;
@@ -336,31 +336,31 @@ const isIdleNow = computed(
   stroke-linejoin: round;
 }
 .idle-title {
-  font-size: 14px;
+  font-size: 11.2px;
   font-weight: 700;
   color: var(--mute);
 }
 .idle-sub {
-  font-size: 12px;
+  font-size: 9.6px;
 }
 
 /* 버튼은 카드 맨 아래에 붙임 */
 .answer {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4.8px;
   margin-top: auto;
 }
 .buttons {
   display: flex;
-  gap: 8px;
+  gap: 6.4px;
 }
 .apply {
   flex: 1;
-  height: 46px;
+  height: 36.8px;
   background: var(--ink);
   border: 0;
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--card);
   transition: background-color 0.15s;
@@ -369,8 +369,8 @@ const isIdleNow = computed(
   background: var(--ink-2);
 }
 .skip {
-  height: 46px;
-  padding: 0 22px;
+  height: 36.8px;
+  padding: 0 17.6px;
   background: var(--card);
   border: 1px solid var(--line-strong);
   color: var(--ink-2);
@@ -385,12 +385,12 @@ const isIdleNow = computed(
   cursor: default;
 }
 .blocked {
-  font-size: 13px;
+  font-size: 10.4px;
   font-weight: 700;
   color: var(--ink-2);
 }
 .note {
-  font-size: 12px;
+  font-size: 9.6px;
   color: var(--mute);
 }
 </style>

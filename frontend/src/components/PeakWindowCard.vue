@@ -288,7 +288,7 @@ const chartOption = computed(() => {
 
       <!-- 오른쪽: 15분 흐름 그래프 -->
       <div class="right">
-        <Chart v-if="chartOption" :option="chartOption" :height="230" />
+        <Chart v-if="chartOption" :option="chartOption" :height="184" />
         <p v-else class="empty">
           {{ status ? '구간 흐름 값이 없습니다.' : '값을 기다리는 중입니다.' }}
         </p>
@@ -301,7 +301,7 @@ const chartOption = computed(() => {
 .window {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   /* 단계에 따라 바뀌는 색 */
   --state: var(--ink-2);
 }
@@ -319,7 +319,7 @@ const chartOption = computed(() => {
   --state: var(--crit);
   border: 2px solid var(--crit);
   /* 테두리가 1px 두꺼워진 만큼 안쪽 여백을 줄여 내용 위치를 유지 */
-  padding: 13px 15px;
+  padding: 10.4px 12px;
 }
 
 .head {
@@ -328,16 +328,16 @@ const chartOption = computed(() => {
 }
 .range {
   margin-left: auto;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--mute);
 }
 /* 스톱워치 아이콘: 테두리는 먹색, 남은 시간 부채꼴은 단계 색 */
 .timer {
   flex: none;
   align-self: center;
-  width: 22px;
-  height: 22px;
-  margin-left: 6px;
+  width: 17.6px;
+  height: 17.6px;
+  margin-left: 4.8px;
 }
 .timer-line {
   fill: none;
@@ -358,10 +358,11 @@ const chartOption = computed(() => {
 .body {
   display: flex;
   flex: 1;
-  gap: 32px;
+  gap: 25.6px;
 }
 
 /* 왼쪽 */
+/* 왼쪽 칸(숫자)을 넓혀 오른쪽 15분 그래프 폭을 조금 줄이고, 글자는 조금 키움 (2026-11-19) */
 .left {
   display: flex;
   flex-direction: column;
@@ -371,10 +372,10 @@ const chartOption = computed(() => {
 /* 단계 표시: 테두리만 둔 작은 표시 (큰 숫자보다 눈에 덜 띄게) */
 .chip {
   align-self: flex-start;
-  padding: 1px 8px;
+  padding: 0.8px 6.4px;
   border: 1px solid var(--state);
   border-radius: 3px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--state);
   white-space: nowrap;
@@ -382,15 +383,15 @@ const chartOption = computed(() => {
 .big {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  margin-top: 6px;
-  font-size: 56px;
+  gap: 4.8px;
+  margin-top: 4.8px;
+  font-size: 52px;
   font-weight: 700;
   line-height: 1.1;
   color: var(--state);
 }
 .unit {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 400;
   color: var(--mute);
 }
@@ -398,29 +399,29 @@ const chartOption = computed(() => {
 .stats {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 14px;
-  padding-top: 12px;
+  gap: 2px; /* 글자를 키운 만큼 줄 간격·위 여백을 줄여 카드 안에 들어가게 */
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px solid var(--line);
 }
 .stats div {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6.4px;
 }
 .stats dt {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--mute);
   white-space: nowrap;
 }
 .stats dd {
-  font-size: 20px;
+  font-size: 18.5px;
   font-weight: 700;
   white-space: nowrap;
 }
 .stats small {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 400;
   color: var(--mute);
 }
@@ -431,23 +432,23 @@ const chartOption = computed(() => {
   min-width: 0;
 }
 .empty {
-  padding-top: 40px;
+  padding-top: 32px;
   color: var(--mute);
 }
 
 /* 화면이 좁으면 왼쪽 칸과 큰 숫자를 줄여 그래프 자리를 남김 */
 @media (max-width: 1600px) {
   .body {
-    gap: 20px;
+    gap: 16px;
   }
   .left {
     width: 210px;
   }
   .big {
-    font-size: 46px;
+    font-size: 44px;
   }
   .stats dd {
-    font-size: 17px;
+    font-size: 16px;
   }
 }
 </style>

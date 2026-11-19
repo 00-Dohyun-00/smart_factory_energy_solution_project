@@ -381,23 +381,23 @@ const kpis = computed(() => {
 .kpi-wrap {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4.8px;
 }
 .stale-note {
-  font-size: 13px;
+  font-size: 10.4px;
   font-weight: 700;
   color: var(--lost);
 }
 .kpis {
   display: flex;
-  gap: 16px;
+  gap: 12.8px;
 }
 
 /* 이름 앞 색 네모: 계기판 게이지 색과 같은 변수 (값을 아직 못 받았으면 회색) */
 .dot {
   flex: none;
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   background: var(--line-strong);
 }
 .dot.mix {
@@ -437,18 +437,18 @@ const kpis = computed(() => {
   flex: 1;
   flex-direction: column;
   align-items: center;
-  gap: 1px;
+  gap: 0.8px;
   min-width: 0;
-  padding: 7px 10px 8px;
+  padding: 5.6px 8px 6.4px;
 }
 .kpi-top {
   display: flex;
   align-self: stretch;
   align-items: center;
-  gap: 6px;
+  gap: 4.8px;
 }
 .kpi-name {
-  font-size: 13px;
+  font-size: 10.4px;
   font-weight: 400;
   color: var(--ink-2);
   white-space: nowrap;
@@ -458,8 +458,8 @@ const kpis = computed(() => {
 .gauge {
   overflow: visible; /* 두꺼운 바깥 테가 그림 가장자리에서 잘리지 않게 */
   width: 100%;
-  max-width: 150px;
-  margin-top: 2px;
+  max-width: 120px;
+  margin-top: 1.6px;
 }
 /* 값이 바뀌면 원호가 바로 그 자리로 감 (움직이는 효과 없음, 2026-11-18)
    색은 color에 두고 stroke와 빛 번짐(drop-shadow)이 같은 색을 따라가게 함 */
@@ -535,9 +535,9 @@ const kpis = computed(() => {
   display: flex;
   justify-content: center;
   align-items: baseline;
-  gap: 6px;
-  margin-top: -4px;
-  font-size: 24px;
+  gap: 4.8px;
+  margin-top: -3.2px;
+  font-size: 19.2px;
   font-weight: 700;
   line-height: 1.2;
 }
@@ -551,20 +551,20 @@ const kpis = computed(() => {
 .kpi-prefix {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 14px;
+  gap: 2.4px;
+  font-size: 11.2px;
 }
 .kpi-unit {
-  font-size: 12px;
+  font-size: 9.6px;
   font-weight: 400;
   color: var(--ink-2);
 }
 .kpi-sub {
   align-self: stretch;
   white-space: pre-line; /* 글 안의 \n 에서 줄을 바꿈 */
-  height: 26px;
+  height: 20.8px;
   overflow: hidden;
-  font-size: 11px;
+  font-size: 8.8px;
   color: var(--mute);
   text-align: center;
   /* 좁은 화면에서는 잘라 내지 않고 두 줄로 내려 씀 (공급원 비율이 길어서) */
@@ -572,8 +572,8 @@ const kpis = computed(() => {
 }
 /* ESS 글자 앞 아이콘 */
 .prefix-icon {
-  width: 17px;
-  height: 17px;
+  width: 13.6px;
+  height: 13.6px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2.2;
@@ -600,13 +600,13 @@ const kpis = computed(() => {
   white-space: nowrap;
 }
 .legend-item + .legend-item {
-  margin-left: 10px; /* 항목 사이는 / 대신 공백으로 구분 */
+  margin-left: 8px; /* 항목 사이는 / 대신 공백으로 구분 */
 }
 .swatch {
   flex: none;
-  width: 9px;
-  height: 9px;
-  margin-right: 3px;
+  width: 7.2px;
+  height: 7.2px;
+  margin-right: 2.4px;
 }
 .swatch.fill-grid {
   background: var(--gauge-grid);
@@ -686,7 +686,7 @@ const kpis = computed(() => {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: start;
-  column-gap: 6px;
+  column-gap: 4.8px;
 }
 .side-left {
   text-align: right;
