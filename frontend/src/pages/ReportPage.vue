@@ -104,6 +104,43 @@ const report = computed(() => reportStore.report)
 // 백엔드가 기록이 모자라면 hasData가 true여도 일별 피크·히트맵을 null로 줄 때가 있음 → 빈 목록으로 보고 "기록 없음" 표시
 const dailyPeaks = computed(() => report.value?.dailyPeaks ?? [])
 const heatCells = computed(() => report.value?.heatmap ?? [])
+
+// 기간의 모든 날짜 목록. 예: ('2026-11-17', '2026-11-19') → ['2026-11-17', '2026-11-18', '2026-11-19']
+// 백엔드는 기록이 있는 날만 주므로, 그대로 그리면 기록 없는 날(예: 시뮬레이터가 꺼져 있던 날)이
+// 그래프에서 사라지고 앞뒤 날짜가 붙어 보였음 → 모든 날짜로 칸을 만들고 기록 없는 날은 비워 둠
+function datesBetween(from, to) {
+  const dates = []
+  const day = new Date(`${from}T00:00:00`)
+  const end = new Date(`${to}T00:00:00`)
+  while (day <= end) {
+    const month = String(day.getMonth() + 1).padStart(2, '0')
+    const date = String(day.getDate()).padStart(2, '0')
+    dates.push(`${day.getFullYear()}-${month}-${date}`)
+    day.setDate(day.getDate() + 1)
+  }
+  return dates
+}
+
+// 일별 그래프·히트맵에 쓰는 날짜별 목록: 기간의 모든 날짜, 기록이 없는 날은 값이 null (막대·칸 없이 빈자리)
+function fillDays(list, from, to) {
+  if (!list.length || !from || !to) return list
+  const byDate = Object.fromEntries(list.map((item) => [item.date, item]))
+  return datesBetween(from, to).map(
+    (date) => byDate[date] ?? { date, peakKw: null, expectedKw: null, kwh: null },
+  )
+}
+
+// 그래프용: 이 달 보고서 기간(periodStart ~ periodEnd)의 모든 날짜 (기록 없는 날 포함)
+const dayRows = computed(() =>
+  fillDays(dailyPeaks.value, report.value?.periodStart, report.value?.periodEnd),
+)
+const essDays = computed(() =>
+  fillDays(
+    report.value?.ess?.dailyDischarge ?? [],
+    report.value?.periodStart,
+    report.value?.periodEnd,
+  ),
+)
 // 목표 피크. 설정 값을 못 찾으면 null → 목표선·목표 판정을 그리지 않음
 const targetKw = computed(() => report.value?.targetPeakKw ?? null)
 const isOverTarget = (kw) => targetKw.value !== null && kw > targetKw.value
@@ -209,11 +246,11 @@ const peakOption = computed(() => {
       ...tooltipColors(),
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
-      valueFormatter: (value) => `${formatKw(value)} kW`,
+      valueFormatter: (value) => (value == null ? '기록 없음' : `${formatKw(value)} kW`),
     },
     xAxis: {
       type: 'category',
-      data: dailyPeaks.value.map((item) => dayLabel(item.date)),
+      data: dayRows.value.map((item) => dayLabel(item.date)),
       ...axisStyle,
     },
     yAxis: {
@@ -227,7 +264,7 @@ const peakOption = computed(() => {
         name: '방전하지 않았을 때 예상',
         type: 'bar',
         barWidth: '56%',
-        data: dailyPeaks.value.map((item) => item.expectedKw),
+        data: dayRows.value.map((item) => item.expectedKw),
         itemStyle: { color: COLOR.lineStrong },
       },
       {
@@ -237,7 +274,7 @@ const peakOption = computed(() => {
         barWidth: '56%',
         barGap: '-100%',
         itemStyle: { color: COLOR.grid },
-        data: dailyPeaks.value.map((item) => ({
+        data: dayRows.value.map((item) => ({
           value: item.peakKw,
           itemStyle: { color: isOverTarget(item.peakKw) ? COLOR.crit : COLOR.grid },
         })),
@@ -261,11 +298,11 @@ const peakOption = computed(() => {
 
 // ---- 피크가 몰리는 시간대 (날짜 × 시각 히트맵) ----
 // 세로로 긴 배치라 날짜 수에 맞춰 칸이 납작해지지 않게 높이를 잡음
-const heatHeight = computed(() => Math.max(240, dailyPeaks.value.length * 14 + 60))
+const heatHeight = computed(() => Math.max(240, dayRows.value.length * 14 + 60))
 
 const heatOption = computed(() => {
   const target = targetKw.value
-  const dates = dailyPeaks.value.map((item) => item.date)
+  const dates = dayRows.value.map((item) => item.date)
   const dayLabels = dates.map(dayLabel)
 
   return {
@@ -322,11 +359,11 @@ const essOption = computed(() => ({
     ...tooltipColors(),
     trigger: 'axis',
     axisPointer: { type: 'shadow' },
-    valueFormatter: (value) => `${formatInteger(value)} kWh`,
+    valueFormatter: (value) => (value == null ? '기록 없음' : `${formatInteger(value)} kWh`),
   },
   xAxis: {
     type: 'category',
-    data: report.value.ess.dailyDischarge.map((item) => dayLabel(item.date)),
+    data: essDays.value.map((item) => dayLabel(item.date)),
     ...axisStyle,
   },
   yAxis: {
@@ -339,7 +376,7 @@ const essOption = computed(() => ({
       name: '방전량',
       type: 'bar',
       barWidth: '56%',
-      data: report.value.ess.dailyDischarge.map((item) => item.kwh),
+      data: essDays.value.map((item) => item.kwh),
       itemStyle: { color: COLOR.ess },
     },
   ],

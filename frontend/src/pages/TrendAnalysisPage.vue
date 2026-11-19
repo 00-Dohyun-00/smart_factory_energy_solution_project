@@ -147,7 +147,47 @@ watch(
 
 // ---- 받은 결과 ----
 const trend = computed(() => analysisStore.trend)
-const points = computed(() => trend.value?.points ?? [])
+
+// ---- 기록이 없는 시간도 그래프 칸으로 남기기 ----
+// 백엔드는 기록이 있는 칸만 줌. 그대로 그리면 기록 없는 날(예: 시뮬레이터가 꺼져 있던 날)이 가로축에서 사라지고
+// 앞뒤 날짜가 붙어 보였음 (11-17 오후 바로 뒤에 11-19 값이 이어져, 11-17에 값이 떨어진 것처럼 보임).
+// 그래서 조회 기간의 모든 칸을 만들고, 기록이 없는 칸은 값을 비워 둠 (선이 끊기고 빈칸으로 보임)
+const STEP_MINUTES = { QUARTER: 15, HOUR: 60, DAY: 24 * 60 } // 간격별 칸 크기(분)
+const pad2 = (number) => String(number).padStart(2, '0')
+
+// Date → '2026-11-19T14:30:00' (백엔드 시각과 같은 모양)
+function toDateTime(date) {
+  const day = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+  return `${day}T${pad2(date.getHours())}:${pad2(date.getMinutes())}:00`
+}
+
+// 시각이 들어가는 칸의 시작 시각. 예: 15분 간격이면 '…T14:42:00' → '…T14:30:00'
+function slotStartOf(dateTime, interval) {
+  if (interval === 'DAY') return `${dateTime.slice(0, 10)}T00:00:00`
+  if (interval === 'HOUR') return `${dateTime.slice(0, 13)}:00:00`
+  const minute = Math.floor(Number(dateTime.slice(14, 16)) / 15) * 15
+  return `${dateTime.slice(0, 14)}${pad2(minute)}:00`
+}
+
+// 조회 기간(시작일 0시 ~ 종료일 끝)의 모든 칸에 받은 기록을 놓음. 기록이 없는 칸은 { recordedAt }만 있음
+function fillSlots(list, from, to, interval) {
+  const step = STEP_MINUTES[interval]
+  if (!list.length || !from || !to || !step) return list
+  const byStart = {}
+  for (const item of list) byStart[slotStartOf(item.recordedAt, interval)] = item
+  const slots = []
+  const end = new Date(`${to}T23:59:59`).getTime()
+  for (let time = new Date(`${from}T00:00:00`).getTime(); time <= end; time += step * 60000) {
+    const start = toDateTime(new Date(time))
+    slots.push(byStart[start] ?? { recordedAt: start })
+  }
+  return slots
+}
+
+// 그래프에 쓰는 칸 목록 (받은 기록이 하나도 없으면 빈 목록 → "기록이 없습니다" 안내)
+const points = computed(() =>
+  fillSlots(trend.value?.points ?? [], trend.value?.from, trend.value?.to, trend.value?.interval),
+)
 const summary = computed(() => trend.value?.summary ?? null)
 
 // 목표 피크. 설정 값을 못 찾으면 백엔드가 null로 줌 → 그때는 목표선과 "목표 초과/달성"을 그리지 않음
@@ -464,7 +504,7 @@ function lineSeries(name, field, color, width = 2) {
     name,
     type: 'line',
     showSymbol: false,
-    data: points.value.map((item) => item[field]),
+    data: points.value.map((item) => item[field] ?? null), // 기록 없는 칸은 비움
     lineStyle: { color, width },
     itemStyle: { color },
   }
@@ -480,7 +520,7 @@ const powerOption = computed(() => {
       name: 'ESS 방전(+) · 충전(−)',
       type: 'bar',
       barMaxWidth: 14,
-      data: points.value.map((item) => item.essKw),
+      data: points.value.map((item) => item.essKw ?? null),
       itemStyle: { color: COLOR.ess },
     })
   }
@@ -506,7 +546,10 @@ const powerOption = computed(() => {
       trigger: 'axis',
       // 값 목록 아래에 그 칸에 나온 추천을 함께 보여 줌
       formatter: (params) => {
+        if (!params.length) return ''
         const label = params[0].axisValue
+        // 기록이 없는 칸이면 값마다 "—"를 늘어놓지 않고 한 줄로 알림
+        if (params.every((item) => item.value == null)) return `${label}<br/>기록 없음`
         const rows = params.map(
           (item) => `${item.marker}${item.seriesName} <strong>${formatKw(item.value)} kW</strong>`,
         )
@@ -544,7 +587,7 @@ const socOption = computed(() => {
     tooltip: {
       ...tooltipColors(),
       trigger: 'axis',
-      valueFormatter: (value) => `${formatOneDecimal(value)} %`,
+      valueFormatter: (value) => (value == null ? '기록 없음' : `${formatOneDecimal(value)} %`),
     },
     xAxis: timeAxis(false),
     yAxis: { ...valueAxis, min: 0, max: 100, interval: 50 },
@@ -570,7 +613,7 @@ const tempOption = computed(() => {
     tooltip: {
       ...tooltipColors(),
       trigger: 'axis',
-      valueFormatter: (value) => `${formatOneDecimal(value)} ℃`,
+      valueFormatter: (value) => (value == null ? '기록 없음' : `${formatOneDecimal(value)} ℃`),
     },
     xAxis: timeAxis(true),
     // 세로축은 0부터가 아니라 지금 값에 맞춰 움직임: 가장 낮은 온도보다 2℃ 아래 ~ 가장 높은 온도(또는 온도 제한선)보다 1℃ 위
@@ -636,7 +679,9 @@ const stepLabel = (value) => PATTERN_STEPS.find((item) => item.value === value)?
 
 // 1시간 간격 값을 고른 간격으로 묶어 평균 냄 (그래프에 그리기 위한 표시용 평균)
 const patternBars = computed(() => {
-  const list = analysisStore.pattern?.points ?? []
+  // 기록 없는 시간도 막대 자리로 남김 (위 그래프와 같은 이유)
+  const pattern = analysisStore.pattern
+  const list = fillSlots(pattern?.points ?? [], pattern?.from, pattern?.to, 'HOUR')
   const groups = []
   for (const item of list) {
     const date = item.recordedAt.slice(0, 10) // '2026-11-18'
@@ -658,6 +703,7 @@ const patternBars = computed(() => {
   }
   const oneDay = periodDays.value <= 1
   return groups.map((group) => {
+    const values = group.values.filter((value) => value != null) // 기록 없는 시간은 평균에서 뺌
     const md = group.date.slice(5) // '11-18'
     let label = md
     if (activeStep.value === 'HOUR') label = oneDay ? `${group.hour}시` : `${md} ${group.hour}시`
@@ -665,7 +711,9 @@ const patternBars = computed(() => {
     return {
       label,
       hour: group.hour,
-      avgGridKw: group.values.reduce((sum, value) => sum + value, 0) / group.values.length,
+      avgGridKw: values.length
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : null, // 묶음 전체에 기록이 없으면 막대 없음
     }
   })
 })
@@ -735,7 +783,8 @@ const patternOption = computed(() => {
         name: `평균 한전 구매 (${stepLabel(activeStep.value)})`,
         type: 'bar',
         barCategoryGap: '25%',
-        data: bars.map((item) => Math.round(item.avgGridKw)),
+        // Math.round(null)은 0이 되므로 기록 없는 막대는 null 그대로 둠
+        data: bars.map((item) => (item.avgGridKw === null ? null : Math.round(item.avgGridKw))),
         itemStyle: { color: COLOR.grid },
         markArea: { silent: true, data: areas },
         markLine: target
