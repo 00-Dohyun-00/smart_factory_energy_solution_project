@@ -52,3 +52,11 @@ export function formatRemaining(seconds) {
   if (seconds === null || seconds === undefined) return EMPTY
   return `${Math.floor(seconds / 60)}분 ${seconds % 60}초`
 }
+
+// 지난 시간(분)을 읽기 쉽게: 5 → '5분', 130 → '2시간', 3000 → '2일'
+export function formatElapsedMinutes(minutes) {
+  if (minutes === null || minutes === undefined) return EMPTY
+  if (minutes < 60) return `${minutes}분`
+  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}시간`
+  return `${Math.floor(minutes / (60 * 24))}일`
+}
