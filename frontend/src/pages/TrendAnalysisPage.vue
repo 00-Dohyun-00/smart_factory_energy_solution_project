@@ -1622,11 +1622,11 @@ const patternOption = computed(() => {
 }
 .power-card {
   display: flex;
-  flex: 3;
+  flex: 2;
   flex-direction: column;
   min-height: 0;
 }
-/* 일별 최대 피크: 전력 카드 아래에 얇게 (전력 3 : 일별 1) */
+/* 일별 최대 피크: 전력 카드 아래에 (전력 2 : 일별 1. 2026-11-20에 3 : 1에서 일별 쪽을 키움, 사용자 요청) */
 .daily-card {
   display: flex;
   flex: 1;
