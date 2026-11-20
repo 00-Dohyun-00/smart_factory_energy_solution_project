@@ -180,7 +180,7 @@ public class SitePowerService {
                 todayPeakKw,
                 monthPeakKw,
                 tariffAt(now),
-                sourceRatio(loadKw, solarKw, dischargeKw),
+                sourceRatio(loadKw, solarKw, essKw),
                 todayEnergy(today),
                 equipments(latest.getTs())
         );
@@ -393,12 +393,14 @@ public class SitePowerService {
     // 공장 전력(loadKw)을 무엇으로 채웠는지 비율. 세 칸의 합은 100 (공장 전력이 0이면 모두 0)
     // 태양광 → 배터리 방전 → 한전 순으로 채움. grid_kw로 바로 나누면 충전 중일 때
     // 충전 전력까지 들어가고, 태양광이 남을 때는 100%를 넘어서 합이 100이 안 됨
-    private SourceRatio sourceRatio(double loadKw, double solarKw, double dischargeKw) {
+    private SourceRatio sourceRatio(double loadKw, double solarKw, double essKw) {
         if (loadKw <= 0) {
             return new SourceRatio(0.0, 0.0, 0.0);
         }
-        double solarUsed = Math.min(solarKw, loadKw);
-        double essUsed = Math.min(dischargeKw, loadKw - solarUsed);
+        double solarUsed = Math.min(Math.max(solarKw, 0), loadKw);
+        double essUsed = essKw > 0
+                ? Math.min(essKw, loadKw - solarUsed)
+                : Math.max(essKw, -loadKw);
         double solarPercent = round1(solarUsed * 100 / loadKw);
         double essPercent = round1(essUsed * 100 / loadKw);
         // 한전은 100에서 나머지를 뺌 (반올림 때문에 합이 99.9나 100.1이 되지 않게)

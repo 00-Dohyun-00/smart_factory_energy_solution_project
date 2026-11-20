@@ -166,9 +166,9 @@ class SitePowerServiceTest {
 
         SitePowerLatestResponse charging = sitePowerService.getLatest();
 
-        assertThat(charging.sourceRatio().gridPercent()).isEqualTo(70.0);
+        assertThat(charging.sourceRatio().gridPercent()).isEqualTo(90.0);
         assertThat(charging.sourceRatio().solarPercent()).isEqualTo(30.0);
-        assertThat(charging.sourceRatio().essPercent()).isEqualTo(0.0);
+        assertThat(charging.sourceRatio().essPercent()).isEqualTo(-20.0);
 
         // 공장 800, 태양광 1000 → 태양광이 다 채움 (100%를 넘지 않음)
         powerTable.add(power(lastMinute.plusSeconds(1), 0, 1000, 0, 800));
