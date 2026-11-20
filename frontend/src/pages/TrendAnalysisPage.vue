@@ -1,14 +1,13 @@
 <!--
   분석 > 추이 분석
-  조회 조건 → 기간 요약 → 왼쪽에 같은 시간 축을 쓰는 그래프 세 개(전력 · 배터리 잔량 · 온도와 날씨)
-  → 오른쪽에 시간대별 사용 패턴 · 추천 처리별 결과 · 눈에 띄는 구간
+  조회 조건 → 기간 요약 → 왼쪽에 전력 그래프 (배터리 잔량 · 온도 그래프는 2026-11-20에 뺌)
+  → 오른쪽에 시간대별 사용 패턴 (추천 처리별 결과 · 눈에 띄는 구간 카드는 2026-11-20에 뺌)
 
-  요약 숫자, 시간대별 평균, 처리별 결과는 백엔드가 계산해 준 값을 그대로 보여 줍니다.
+  요약 숫자, 시간대별 평균은 백엔드가 계산해 준 값을 그대로 보여 줍니다.
 -->
 <script setup>
 import { computed, ref, watch } from 'vue'
 import * as echarts from 'echarts'
-import Chart from '@/components/Chart.vue'
 import FitChart from '@/components/FitChart.vue'
 import { useThemeStore } from '@/stores/useThemeStore'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
@@ -44,8 +43,6 @@ const ITEMS = [
   { key: 'grid', label: '한전 구매' },
   { key: 'solar', label: '태양광' },
   { key: 'ess', label: 'ESS 충·방전' },
-  { key: 'soc', label: '배터리 잔량' },
-  { key: 'temp', label: '온도·날씨' },
 ]
 // 처리 상태는 색만으로 구분하지 않도록 도형 + 글자로 표시 (운영 로그 화면과 같은 표시)
 const STATUS_INFO = {
@@ -56,14 +53,6 @@ const STATUS_INFO = {
 // 그래프 위 추천 핀: 위의 처리 상태에 "추천 중"(아직 처리 전)을 더함
 const PIN_INFO = { ...STATUS_INFO, RECOMMENDED: { shape: '○', label: '추천 중' } }
 
-// "추천 처리별 결과"에서 볼 추천 종류 (토글)
-const STATUS_ACTIONS = [
-  { value: 'ALL', label: '전체' },
-  { value: 'DISCHARGE', label: '방전' },
-  { value: 'CHARGE', label: '충전' },
-  { value: 'IDLE', label: '대기' },
-]
-const statusAction = ref('ALL')
 const ACTION_LABELS = { CHARGE: '충전', DISCHARGE: '방전', IDLE: '대기' }
 // 요금 시간대 이름 (순위 보기에서 시각 옆에 적음)
 const PERIOD_LABELS = { PEAK: '최대부하', MID: '중간부하', LIGHT: '경부하' }
@@ -74,7 +63,7 @@ const preset = ref('week')
 const fromDate = ref('') // 예: '2026-11-10'
 const toDate = ref('')
 const shown = ref(ITEMS.map((item) => item.key)) // 켜져 있는 항목들
-const focusAt = ref('') // "눈에 띄는 구간"에서 고른 시각 (그래프에 세로선으로 표시)
+const focusAt = ref('') // 전력 그래프 위쪽 추천 기호를 눌러 고른 시각 (그래프에 세로 점선으로 표시)
 const hourlyView = ref('time') // 시간대별 사용 패턴 보기: time(시간 순 막대) | rank(많이 쓴 순위)
 // 시간대별 사용 패턴의 막대 간격: AUTO(기간에 맞춰 자동) | HOUR(1시간) | HOUR4(4시간) | DAY(1일)
 const patternStep = ref('AUTO')
@@ -239,56 +228,26 @@ const avgGridPercent = computed(() =>
 // '2026-11-11T09:30:00' → '11-11 09:30'
 const shortTime = (dateTime) => formatMonthDayTime(dateTime).slice(0, 11)
 
-// 눈에 띄는 구간의 값: 단위에 맞는 자릿수로
-const highlightValue = (item) =>
-  item.unit === 'kW' ? formatKw(item.value) : formatOneDecimal(item.value)
-
-// 눈에 띄는 구간의 "목표 대비" 칸: 목표 피크와 비교하는 값(15분 피크 · 한전 구매, kW)만 목표의 몇 %인지 (표시용 비율)
-// 배터리 잔량·온도·태양광처럼 목표 피크와 상관없는 값은 "—"
-function highlightTargetPercent(item) {
-  const comparable =
-    item.unit === 'kW' && (item.label.includes('피크') || item.label.includes('한전'))
-  if (!comparable || targetKw.value === null || item.value === null) return null
-  return (item.value / targetKw.value) * 100
-}
-// 눈에 띄는 구간의 "단계" 칸 (백엔드 level: CRITICAL = 목표 초과, 그 밖 = 정보)
-const HIGHLIGHT_LEVELS = {
-  CRITICAL: { shape: '■', label: '목표 초과', className: 'over' },
-  INFO: { shape: '○', label: '정보', className: '' },
-}
-const highlightLevel = (item) => HIGHLIGHT_LEVELS[item.level] ?? HIGHLIGHT_LEVELS.INFO
-
 function toggleFocus(at) {
   focusAt.value = focusAt.value === at ? '' : at
 }
-// 고른 "눈에 띄는 구간"의 내용 (그래프 세로선 위에 적음). 예: "11-11 09:30 최대 피크 1,617 kW"
+// 위쪽 추천 기호를 눌러 고른 칸의 내용 (그래프 세로선 위에 적음).
+// 예: "● 10:00 방전 500 kW" (추천이 여러 건이면 첫 건 + 외 N건)
 const focusText = computed(() => {
-  const item = trend.value?.highlights?.find((highlight) => highlight.at === focusAt.value)
-  if (item) return `${shortTime(item.at)} ${item.label} ${highlightValue(item)} ${item.unit}`.trim()
-  // 위쪽 추천 기호를 눌러 고른 칸: "● 10:00 방전 500 kW" (추천이 여러 건이면 첫 건 + 외 N건)
-  const pins = focusIsPin.value ? pinsByLabel.value[focusLabel.value] : null
+  const pins = focusLabel.value ? pinsByLabel.value[focusLabel.value] : null
   if (!pins) return ''
   const first = pins[0]
   const power = first.action === 'IDLE' ? '' : ` ${formatKw(first.powerKw)} kW`
   const more = pins.length > 1 ? ` 외 ${pins.length - 1}건` : ''
   return `${PIN_INFO[first.status].shape} ${formatHourMinute(first.decidedAt)} ${ACTION_LABELS[first.action]}${power}${more}`
 })
-// 지금 고른 시각이 "눈에 띄는 구간"이 아니라 위쪽 추천 기호로 고른 칸인지 (세로선을 점선으로 그림)
-const focusIsPin = computed(
-  () =>
-    !!focusAt.value &&
-    !trend.value?.highlights?.some((highlight) => highlight.at === focusAt.value),
-)
 
-// ---- 세 그래프의 마우스 점선 맞추기 ----
-// 한 그래프에 마우스를 올리면 나오는 세로 점선(과 툴팁)을 전력 · 배터리 잔량 · 온도 그래프에 같은 시각으로 함께 보여 줌.
-// 마우스가 올라간 그래프의 시각 칸 번호를 받아, 나머지 그래프에 "그 칸의 툴팁을 보여 줘"(showTip)라고 알림.
-// 점선은 각 그래프 칸 안에만 그려져서, 그래프 사이(제목 · 여백)에는 보이지 않음.
+// ---- 전력 그래프의 추천 기호 누르기 ----
 // 그래프는 공통 차트(Chart.vue)가 만들므로, 여기서는 이미 만들어진 그래프를 찾아 마우스 알림만 연결함
+// (예전에는 배터리 잔량 · 온도 그래프와 마우스 점선을 맞추는 연결도 했으나, 두 그래프를 없애 빠짐 — 2026-11-20)
 const chartsBox = ref(null)
-let syncing = false // 다른 그래프에 알리는 중이면 true (알림이 서로 되돌아오며 반복되지 않게)
 
-// 지금 화면에 있는 세 그래프 (위에서부터 순서대로)
+// 지금 화면에 있는 그래프 (전력 그래프 하나)
 function chartInstances() {
   return [...(chartsBox.value?.querySelectorAll('[_echarts_instance_]') ?? [])]
     .map((element) => echarts.getInstanceByDom(element))
@@ -300,30 +259,6 @@ function linkCharts() {
   for (const instance of chartInstances()) {
     if (instance.trendLinked) continue
     instance.trendLinked = true
-    // 이 그래프의 점선이 움직이면 같은 칸을 나머지 그래프에도 보여 줌
-    instance.on('updateAxisPointer', (event) => {
-      const index = event.axesInfo?.[0]?.value
-      if (syncing || index === undefined) return
-      syncing = true
-      for (const other of chartInstances()) {
-        if (other === instance) continue
-        // 그 칸에 값이 있는 선을 골라 알림 (값이 비어 있는 선을 고르면 툴팁·점선이 나오지 않음. 예: 바깥 기온이 없는 날)
-        const series = other.getOption().series ?? []
-        const seriesIndex = series.findIndex((item) => {
-          const point = item.data?.[index]
-          return point !== null && point !== undefined && (point.value ?? point) !== null
-        })
-        if (seriesIndex >= 0)
-          other.dispatchAction({ type: 'showTip', seriesIndex, dataIndex: index })
-      }
-      syncing = false
-    })
-    // 마우스가 이 그래프를 벗어나면 나머지 그래프의 점선·툴팁도 숨김
-    instance.getZr().on('globalout', () => {
-      for (const other of chartInstances()) {
-        if (other !== instance) other.dispatchAction({ type: 'hideTip' })
-      }
-    })
     // 전력 그래프 위쪽의 추천 기호: 마우스를 올리면 손가락 모양, 누르면 그 칸에 점선을 고정하고 값을 보여 줌
     instance.getZr().on('mousemove', (event) => {
       if (pinIndexAt(instance, event) !== null) instance.getZr().setCursorStyle('pointer')
@@ -377,12 +312,7 @@ const labels = computed(() =>
   ),
 )
 
-// 날짜('11-10') → 날씨, 날짜 → 몇 번째 날인지
-const weatherByDate = computed(() => {
-  const result = {}
-  for (const item of trend.value?.weather ?? []) result[item.date.slice(5)] = item.text
-  return result
-})
+// 날짜('11-10') → 몇 번째 날인지
 // 날짜 순번은 그래프 가로축 칸(labels)의 날짜에서 구함.
 // (날씨 목록에서 구하면, 날씨 기록이 없는 기간에는 순번이 비어 가로축 날짜가 모두 사라졌음 — 이슈 #25)
 const dayNumbers = computed(() => {
@@ -394,16 +324,11 @@ const dayNumbers = computed(() => {
   }
   return result
 })
-// 바깥 기온 기록이 하나라도 있는지 (없으면 온도 그래프 범례에서 "바깥 기온"을 뺌)
-const hasOutsideTemp = computed(() => points.value.some((item) => item.outsideTempC != null))
-// 날씨 정보가 있는지 (없으면 온도 그래프 가로축을 한 줄로 적어 아래 여백을 줄임)
-const hasWeather = computed(() => (trend.value?.weather ?? []).length > 0)
-
 // 날짜가 많으면 가로축 글자가 겹치므로 며칠에 하나씩만 적음
 const dayStep = computed(() => Math.ceil(Object.keys(dayNumbers.value).length / 10) || 1)
 
-// 세 그래프가 같이 쓰는 가로축. withWeather = true면 날짜 아래에 날씨도 적음
-function timeAxis(withWeather) {
+// 전력 그래프의 가로축 (시각)
+function timeAxis() {
   return {
     type: 'category',
     data: labels.value,
@@ -422,9 +347,7 @@ function timeAxis(withWeather) {
       },
       formatter: (value) => {
         if (isSingleDay.value && !isDaily.value) return value.slice(6) // 하루만 보면 시각
-        const date = value.slice(0, 5)
-        const weather = weatherByDate.value[date]
-        return withWeather && weather ? `${date}\n${weather}` : date
+        return value.slice(0, 5) // 날짜
       },
     },
     // 날짜가 바뀌는 곳에 세로선. 글자를 적는 날에만 그음
@@ -464,7 +387,7 @@ function slotLabelOf(at) {
   return found
 }
 
-// "눈에 띄는 구간"에서 고른 시각이 그래프의 어느 칸인지
+// 추천 기호를 눌러 고른 시각이 그래프의 어느 칸인지
 const focusLabel = computed(() => (focusAt.value ? slotLabelOf(focusAt.value) : null))
 
 // ---- 추천 핀 ----
@@ -483,37 +406,6 @@ const pinsByLabel = computed(() => {
     result[label].push(item)
   }
   return result
-})
-
-// ---- 추천 처리별 결과 (토글로 고른 종류) ----
-// 조회 기간의 추천 이력(그래프 위 기호와 같은 목록)을 처리 상태별로 셈.
-// 목표 달성 · 실제 피크는 추천마다 백엔드가 준 resultStatus · resultPeakKw를 그대로 모아 건수와 평균만 냄 (결과가 아직 없는 추천은 뺌)
-const statusRows = computed(() => {
-  if (!trend.value) return []
-  const from = `${trend.value.from}T00:00:00`
-  const to = `${trend.value.to}T23:59:59`
-  const list = historyStore.decisions.filter(
-    (item) =>
-      item.decidedAt >= from &&
-      item.decidedAt <= to &&
-      (statusAction.value === 'ALL' || item.action === statusAction.value),
-  )
-  return Object.keys(STATUS_INFO).map((status) => {
-    const items = list.filter((item) => item.status === status)
-    const withResult = items.filter((item) => item.resultStatus)
-    const defendedCount = withResult.filter((item) => item.resultStatus === 'DEFENDED').length
-    const peaks = items.map((item) => item.resultPeakKw).filter((value) => value != null)
-    return {
-      status,
-      count: items.length,
-      resultCount: withResult.length,
-      defendedCount,
-      defendedPercent: withResult.length ? (defendedCount / withResult.length) * 100 : 0,
-      avgResultPeakKw: peaks.length
-        ? peaks.reduce((sum, value) => sum + value, 0) / peaks.length
-        : null,
-    }
-  })
 })
 
 // 핀에 적는 기호: 그 칸에 나온 추천들의 처리 상태 (같은 기호는 한 번만)
@@ -536,9 +428,9 @@ function pinTooltip(label) {
 }
 
 // 기준선(가로), 추천 기호, 고른 시각(세로)을 그리는 설정
-// 전력 · 배터리 잔량 · 온도 그래프의 오른쪽 여백 (세 그래프의 가로축을 맞추려고 같은 값을 씀.
-// 배터리 잔량 · 온도의 기준선 이름표를 이 자리에 적음)
-const GRID_RIGHT = 58
+// 전력 그래프의 오른쪽 여백. 예전에는 배터리 잔량 · 온도 그래프의 기준선 이름표(상한 · 제한) 자리로 58px를 비웠으나,
+// 두 그래프를 없애 그래프 칸을 넓힘 (목표 피크 이름표는 그래프 안쪽에 적음)
+const GRID_RIGHT = 20
 // 전력 그래프 칸의 위쪽 여백 (이 위에 추천 기호 띠 20px가 들어감. 범례는 제목 줄로 옮김)
 const POWER_GRID_TOP = 24
 
@@ -555,15 +447,14 @@ function markLines(lines, withPins = false) {
         width: 1.5,
         type: item.dashed ? 'dashed' : 'solid',
       },
-      // outside: true면 이름표를 그래프 안이 아니라 선 끝 오른쪽 바깥에 적음 (그래프 오른쪽 여백 자리)
       // below: true면 이름표를 선 아래에 적음 (선 위쪽이 그래프 맨 위의 추천 기호 띠와 겹칠 때)
       label: {
         formatter: item.text,
-        position: item.outside ? 'end' : item.below ? 'insideEndBottom' : 'insideEndTop',
+        position: item.below ? 'insideEndBottom' : 'insideEndTop',
         color: item.color,
         fontWeight: 'bold',
-        fontSize: item.outside ? 11 : 12,
-        distance: item.outside ? 4 : 5,
+        fontSize: 12,
+        distance: 5,
       },
     }))
   // 추천은 세로선을 긋지 않고(선이 많으면 그래프가 지저분해짐) 그래프 위쪽 띠에 기호만 적음.
@@ -586,7 +477,7 @@ function markLines(lines, withPins = false) {
   if (focusLabel.value) {
     data.push({
       xAxis: focusLabel.value,
-      lineStyle: { color: COLOR.ink, width: 2, type: focusIsPin.value ? 'dashed' : 'solid' },
+      lineStyle: { color: COLOR.ink, width: 2, type: 'dashed' },
       // 세로선 위쪽 끝(그래프 위 여백)에 적음. 작은 그래프의 위 여백(16px)에도 들어가게 11px,
       // 바탕을 칠해 다른 선 · 글자와 겹쳐도 읽히게 함
       label: {
@@ -636,20 +527,6 @@ function cursorSeries() {
 }
 // 툴팁 목록에서 보이지 않는 선을 뺌
 const realParams = (params) => params.filter((item) => item.seriesName !== CURSOR_NAME)
-// 배터리 잔량 · 온도 그래프의 툴팁: 칸 전체에 기록이 없으면 한 줄로 "기록 없음"
-function rowsTooltip(format) {
-  return (params) => {
-    if (!params.length) return ''
-    const label = params[0].axisValue
-    const list = realParams(params)
-    if (list.every((item) => item.value == null)) return `${label}<br/>기록 없음`
-    const rows = list.map(
-      (item) =>
-        `${item.marker}${item.seriesName} <strong>${item.value == null ? '기록 없음' : format(item.value)}</strong>`,
-    )
-    return `${label}<br/>${rows.join('<br/>')}`
-  }
-}
 
 // ---- 전력 (kW) ----
 // 공장 소비 = 한전 구매 + 태양광 + ESS(방전 +, 충전 −) 이므로, 공장이 쓴 전기를 "어디서 채웠는지" 쌓아서 그림.
@@ -657,7 +534,6 @@ function rowsTooltip(format) {
 // - 0 아래: ESS 충전 (배터리로 들어간 만큼)
 // - 한전 구매가 맨 아래 층이라, 그 윗선을 목표 피크선과 바로 비교할 수 있음
 // (예전에는 선 3개 + 막대를 겹쳐 그려, 선이 서로 얽혀 무엇이 큰지 알기 어려웠음)
-const powerItems = computed(() => shown.value.filter((key) => key !== 'soc' && key !== 'temp'))
 
 const ESS_DISCHARGE = 'ESS 방전'
 const ESS_CHARGE = 'ESS 충전(−)'
@@ -806,7 +682,7 @@ const powerOption = computed(() => {
       },
     },
     // 충전(0 아래)이 있으면 가로축 선이 그래프 가운데(0)로 올라오므로, 가로축은 항상 맨 아래에 둠
-    xAxis: { ...timeAxis(false), axisLine: { onZero: false, lineStyle: { color: COLOR.line } } },
+    xAxis: { ...timeAxis(), axisLine: { onZero: false, lineStyle: { color: COLOR.line } } },
     yAxis: [
       {
         ...valueAxis,
@@ -826,76 +702,6 @@ const powerOption = computed(() => {
       CURSOR_AXIS,
     ],
     series,
-  }
-})
-
-// ---- 배터리 잔량 (%) ----
-const socOption = computed(() => {
-  const series = lineSeries('배터리 잔량', 'socPercent', COLOR.ess, 2.5)
-  series.markLine = markLines([
-    {
-      value: trend.value.socLowLimit,
-      text: `하한 ${trend.value.socLowLimit}%`,
-      color: COLOR.mute,
-      dashed: true,
-      outside: true,
-    },
-    {
-      value: trend.value.socHighLimit,
-      text: `상한 ${trend.value.socHighLimit}%`,
-      color: COLOR.mute,
-      dashed: true,
-      outside: true,
-    },
-  ])
-  return {
-    animation: false,
-    grid: { left: 52, right: GRID_RIGHT, top: 16, bottom: 22 },
-    tooltip: {
-      ...tooltipColors(),
-      trigger: 'axis',
-      formatter: rowsTooltip((value) => `${formatOneDecimal(value)} %`),
-    },
-    xAxis: timeAxis(false),
-    yAxis: [{ ...valueAxis, min: 0, max: 100, interval: 50 }, CURSOR_AXIS],
-    series: [series, cursorSeries()],
-  }
-})
-
-// ---- 온도 (℃) · 날씨 ----
-const tempOption = computed(() => {
-  const room = lineSeries('배터리실 온도', 'roomTempC', COLOR.warn, 2.5)
-  const outside = lineSeries('바깥 기온', 'outsideTempC', COLOR.grid)
-  const limit = trend.value.roomTempLimitC
-  // 이름표는 그래프 밖 오른쪽에 짧게 ("선택" 글자와 겹치지 않게)
-  room.markLine = markLines([
-    { value: limit, text: `제한 ${limit}℃`, color: COLOR.crit, outside: true },
-  ])
-  return {
-    animation: false,
-    // 가로축에 날짜와 날씨를 두 줄로 적으므로 아래 여백을 넉넉히 둠
-    // 그래프 높이가 낮아(84px) 범례는 그래프 안이 아니라 제목 줄에 글자로 둠 (선이 그려질 칸을 확보)
-    grid: { left: 52, right: GRID_RIGHT, top: 16, bottom: hasWeather.value ? 34 : 20 },
-    legend: { show: false },
-    tooltip: {
-      ...tooltipColors(),
-      trigger: 'axis',
-      formatter: rowsTooltip((value) => `${formatOneDecimal(value)} ℃`),
-    },
-    xAxis: timeAxis(true),
-    // 세로축은 0부터가 아니라 지금 값에 맞춰 움직임: 가장 낮은 온도보다 2℃ 아래 ~ 가장 높은 온도(또는 온도 제한선)보다 1℃ 위
-    // (칸이 낮아 0부터 그리면 선이 바닥에 붙어 변화가 안 보이기 때문. 온도 제한선은 항상 보이게 범위에 넣음)
-    yAxis: [
-      {
-        ...valueAxis,
-        // 눈금이 20 · 30 · 40처럼 읽기 쉽게 5℃ 단위로 맞춤
-        min: (value) => Math.floor((value.min - 2) / 5) * 5,
-        max: (value) => Math.ceil((Math.max(value.max, limit ?? value.max) + 1) / 5) * 5,
-        splitNumber: 2,
-      },
-      CURSOR_AXIS,
-    ],
-    series: [outside, room, cursorSeries()],
   }
 })
 
@@ -1083,7 +889,7 @@ const patternOption = computed(() => {
       <span class="crumb-parent">분석</span>
       <span class="crumb-parent" aria-hidden="true">›</span>
       <h1 class="crumb-title">추이 분석</h1>
-      <p class="crumb-note">전력, 배터리, 온도·날씨를 같은 시간 축에 놓고 봅니다</p>
+      <p class="crumb-note">공장이 쓴 전기를 한전 · 태양광 · ESS 중 어디서 채웠는지 봅니다</p>
     </div>
 
     <!-- 조회 조건 -->
@@ -1120,7 +926,7 @@ const patternOption = computed(() => {
         />
       </div>
 
-      <!-- 보기: 오른쪽 끝에 두 줄(3개씩)로 둬서, 왼쪽 메뉴가 펼쳐진 좁은 화면에서도 아래로 내려가지 않게 함 -->
+      <!-- 보기: 오른쪽 끝에 두 줄(2개씩)로 둬서, 왼쪽 메뉴가 펼쳐진 좁은 화면에서도 아래로 내려가지 않게 함 -->
       <div class="field view-field">
         <span class="field-label">보기</span>
         <div class="checks">
@@ -1210,14 +1016,9 @@ const patternOption = computed(() => {
       </dl>
 
       <div class="main">
-        <!-- 왼쪽: 같은 시간 축을 쓰는 그래프 세 개 -->
-        <!--
-          전력이 이 화면의 주인공이라 크게, 배터리 잔량·온도는 보조라 작게 그림 (2026-11-18 UI 피드백)
-          세 그래프는 그대로 위아래로 두어 가로축(시각)을 맞춤.
-          전력은 따로 카드 하나, 배터리 잔량과 온도·날씨는 보조 그래프라 카드 하나를 함께 씀
-        -->
+        <!-- 왼쪽: 전력 그래프 하나가 높이를 모두 씀 (배터리 잔량 · 온도 그래프는 2026-11-20에 뺌) -->
         <div ref="chartsBox" class="charts" @mouseenter="linkCharts">
-          <section v-if="powerItems.length" class="card power-card">
+          <section v-if="shown.length" class="card power-card">
             <h2 class="chart-title main-chart">
               전력 <small>kW</small>
               <span v-if="showPins" class="chart-note">
@@ -1242,39 +1043,12 @@ const patternOption = computed(() => {
               key: 켜 둔 항목이 바뀌면 그래프를 새로 만듦.
               Chart.vue는 이전 설정에 새 설정을 덮어쓰는 방식이라, 선의 개수가 줄면 꺼 둔 선이 남기 때문
             -->
-            <!-- 남은 높이를 채움 (배터리 잔량 · 온도 그래프를 뺀 나머지) -->
+            <!-- 카드의 남은 높이를 채움 -->
             <FitChart
-              :key="`${powerItems.join()}-${showPins}`"
+              :key="`${shown.join()}-${showPins}`"
               :option="powerOption"
               :min-height="100"
             />
-          </section>
-
-          <!-- 보조 그래프 카드: 배터리 잔량 + 온도·날씨 -->
-          <section v-if="shown.includes('soc') || shown.includes('temp')" class="card sub-card">
-            <template v-if="shown.includes('soc')">
-              <h2 class="chart-title sub-chart">
-                배터리 잔량 <small>%</small>
-                <span class="chart-note">점선은 잔량 하한과 상한</span>
-              </h2>
-              <Chart :option="socOption" :height="70" />
-            </template>
-
-            <template v-if="shown.includes('temp')">
-              <h2 class="chart-title sub-chart">
-                온도 <small>℃</small> · 날씨
-                <span class="chart-note">날짜 아래에 그날 날씨</span>
-                <!-- 범례 (그래프 선 색과 같음) -->
-                <span class="temp-legend">
-                  <span class="legend-swatch room" aria-hidden="true"></span>배터리실 온도
-                  <!-- 바깥 기온 기록이 하나도 없으면 선이 없으므로 범례에서도 뺌 (이슈 #25) -->
-                  <template v-if="hasOutsideTemp">
-                    <span class="legend-swatch outside" aria-hidden="true"></span>바깥 기온
-                  </template>
-                </span>
-              </h2>
-              <Chart :option="tempOption" :height="84" />
-            </template>
           </section>
 
           <p v-if="!shown.length" class="card state">"보기"에서 볼 항목을 하나 이상 골라 주세요.</p>
@@ -1365,117 +1139,6 @@ const patternOption = computed(() => {
               <p class="foot-note">한전 구매가 많은 시간부터 {{ RANK_COUNT }}개 (시각별 평균)</p>
             </template>
           </section>
-
-          <section class="card result-card">
-            <div class="card-head">
-              <h2 class="card-title">추천 처리별 결과</h2>
-              <!-- 볼 추천 종류: 전체 / 방전 / 충전 / 대기 -->
-              <div class="presets status-actions" role="group" aria-label="추천 종류">
-                <button
-                  v-for="item in STATUS_ACTIONS"
-                  :key="item.value"
-                  :class="{ active: statusAction === item.value }"
-                  :aria-pressed="statusAction === item.value"
-                  @click="statusAction = item.value"
-                >
-                  {{ item.label }}
-                </button>
-              </div>
-            </div>
-            <!-- 칸 폭 고정: 토글을 바꿔 값이 "—"가 되어도 글자 위치가 움직이지 않게 -->
-            <table class="table status-table">
-              <colgroup>
-                <col class="col-status" />
-                <col class="col-count" />
-                <col />
-                <col class="col-peak" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>처리</th>
-                  <th class="right-text">건수</th>
-                  <th>목표 달성</th>
-                  <th class="right-text">평균 실제 피크</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="item in statusRows" :key="item.status">
-                  <td>
-                    <strong>
-                      <span aria-hidden="true">{{ STATUS_INFO[item.status].shape }}</span>
-                      {{ STATUS_INFO[item.status].label }}
-                    </strong>
-                  </td>
-                  <td class="right-text num">{{ item.count }}</td>
-                  <td class="num">
-                    <template v-if="item.resultCount">
-                      <span class="track" aria-hidden="true">
-                        <span class="bar" :style="{ width: `${item.defendedPercent}%` }"></span>
-                      </span>
-                      {{ item.defendedCount }}건 ({{ formatOneDecimal(item.defendedPercent) }}%)
-                    </template>
-                    <template v-else>—</template>
-                  </td>
-                  <td class="right-text num">
-                    <strong :class="{ over: isOverTarget(item.avgResultPeakKw) }">
-                      {{ formatKw(item.avgResultPeakKw) }}
-                      <template v-if="item.avgResultPeakKw !== null">kW</template>
-                    </strong>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-
-          <section class="card highlights-card">
-            <div class="card-head">
-              <h2 class="card-title">눈에 띄는 구간</h2>
-              <span class="note">누르면 그래프에 그 시각을 표시</span>
-            </div>
-            <!-- 목록이 카드보다 길면 카드 안에서만 스크롤 -->
-            <ul class="highlights">
-              <!-- 칼럼 이름: 목록 안 첫 줄에 두고 위에 붙여 둠(sticky).
-                   목록 밖에 두면 스크롤바가 생길 때 목록만 좁아져 칸 위치가 어긋나기 때문 -->
-              <li class="highlight-head-row" aria-hidden="true">
-                <div class="highlight highlight-head">
-                  <span>시각</span>
-                  <span>구간</span>
-                  <span>단계</span>
-                  <span class="right-text">값</span>
-                  <span class="right-text">목표 대비</span>
-                </div>
-              </li>
-              <li v-for="item in trend.highlights" :key="item.label">
-                <button
-                  class="highlight"
-                  :class="{ active: focusAt === item.at }"
-                  :aria-pressed="focusAt === item.at"
-                  @click="toggleFocus(item.at)"
-                >
-                  <span class="highlight-time num">{{ shortTime(item.at) }}</span>
-                  <span class="highlight-label">{{ item.label }}</span>
-                  <span
-                    class="highlight-level"
-                    :class="highlightLevel(item).className"
-                    :title="highlightLevel(item).label"
-                  >
-                    <span aria-hidden="true">{{ highlightLevel(item).shape }}</span>
-                    <span class="level-text">{{ highlightLevel(item).label }}</span>
-                  </span>
-                  <strong class="num right-text" :class="{ over: item.level === 'CRITICAL' }">
-                    {{ highlightValue(item) }} {{ item.unit }}
-                  </strong>
-                  <span class="highlight-target num right-text">
-                    {{
-                      highlightTargetPercent(item) === null
-                        ? '—'
-                        : `${formatOneDecimal(highlightTargetPercent(item))}%`
-                    }}
-                  </span>
-                </button>
-              </li>
-            </ul>
-          </section>
         </div>
       </div>
     </template>
@@ -1512,7 +1175,7 @@ const patternOption = computed(() => {
 }
 .checks {
   display: grid;
-  grid-template-columns: repeat(3, auto);
+  grid-template-columns: repeat(2, auto); /* 항목 4개 → 두 줄(2개씩) */
   gap: 2px 14px;
 }
 .checks .check {
@@ -1625,7 +1288,7 @@ const patternOption = computed(() => {
   gap: 16px;
   min-height: 0;
 }
-/* 왼쪽: 전력 카드가 남은 높이를 채우고, 아래에 보조 그래프 카드(배터리 잔량 · 온도) */
+/* 왼쪽: 전력 카드가 높이를 모두 채움 */
 .charts {
   display: flex;
   flex: 1;
@@ -1640,15 +1303,6 @@ const patternOption = computed(() => {
   flex-direction: column;
   min-height: 0;
 }
-.sub-card {
-  flex: none;
-  padding-top: 9px;
-  padding-bottom: 6px;
-}
-/* 배터리 잔량 아래의 온도 제목: 위 간격(가로축 숫자와 구분선 사이)을 절반으로 */
-.sub-card .chart-title:not(:first-child) {
-  margin-top: 4px; /* 예전 10px → 숫자 아래 여백(약 2px)과 합쳐 예전 간격의 절반 정도 */
-}
 .chart-title {
   display: flex;
   align-items: baseline;
@@ -1659,13 +1313,9 @@ const patternOption = computed(() => {
   font-size: 15px;
   font-weight: 700;
 }
-/* 주 그래프(전력)는 제목을 크게, 보조 그래프(배터리 잔량·온도)는 작고 옅게 */
+/* 전력 그래프 제목은 크게 */
 .chart-title.main-chart {
   font-size: 18px;
-}
-.chart-title.sub-chart {
-  font-size: 13px;
-  color: var(--ink-2);
 }
 .chart-title:first-child {
   margin-top: 0;
@@ -1676,26 +1326,6 @@ const patternOption = computed(() => {
   font-size: 12px;
   font-weight: 400;
   color: var(--mute);
-}
-.temp-legend {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--legend-text);
-}
-.legend-swatch {
-  width: 10px;
-  height: 3px;
-  margin-left: 8px;
-}
-.legend-swatch.room {
-  background: var(--warn);
-}
-.legend-swatch.outside {
-  background: var(--src-grid);
 }
 .chart-note {
   margin-left: 8px;
@@ -1714,62 +1344,16 @@ const patternOption = computed(() => {
 }
 /* 남은 높이를 채우는 그래프(.fit)만 줄어들고, 제목 · 고정 높이 그래프 · 안내 글은 높이를 지킴 */
 .power-card > :not(.fit),
-.pattern-card > :not(.fit, .rank-scroll),
-.highlights-card > :not(.highlights) {
+.pattern-card > :not(.fit, .rank-scroll) {
   flex-shrink: 0;
 }
-/* 오른쪽 카드 세로: 예전 높이 비율(사용 패턴 346 : 눈에 띄는 구간 251)대로 남은 높이를 나눔
-   추천 처리별 결과는 표 3줄이라 줄일 수 없어서 내용 높이 그대로 */
+/* 오른쪽 열에는 시간대별 사용 패턴 카드 하나만 있어 남은 높이를 모두 씀
+   (추천 처리별 결과 · 눈에 띄는 구간 카드는 2026-11-20에 뺌) */
 .pattern-card {
   display: flex;
-  flex: 346 1 0;
+  flex: 1 1 0;
   flex-direction: column;
   min-height: 0;
-}
-.result-card {
-  flex: none;
-}
-/* 추천 처리별 결과: 세로를 최대한 줄임 (제목 줄 · 표 줄 간격) */
-.right .result-card {
-  padding-top: 6px;
-  padding-bottom: 4px;
-}
-.result-card .card-head {
-  margin-bottom: 0;
-}
-.right .result-card .table th {
-  padding-top: 1px;
-  padding-bottom: 1px;
-  font-size: 10.5px;
-}
-.right .result-card .table td {
-  padding-top: 1px;
-  padding-bottom: 1px;
-  font-size: 11px;
-  line-height: 1.4;
-}
-/* 추천 처리별 결과 · 눈에 띄는 구간: 글자를 한 단계 작게 */
-.result-card .card-title,
-.highlights-card .card-title {
-  font-size: 14px;
-}
-.result-card .note,
-.highlights-card .note {
-  font-size: 11px;
-}
-.result-card .table th {
-  font-size: 11px;
-}
-.result-card .table td,
-.highlights-card .highlight {
-  font-size: 12px;
-}
-.highlights-card .highlight-time {
-  width: auto;
-}
-.result-card .track {
-  width: 60px;
-  height: 6px;
 }
 /* 오른쪽 카드는 세로 여백을 줄여 그래프 · 목록이 쓸 높이를 확보 (가로 여백은 그대로) */
 .right .card {
@@ -1783,90 +1367,16 @@ const patternOption = computed(() => {
   font-size: 11px;
   line-height: 1.35;
 }
-.right .table th {
-  padding-top: 3px;
-  padding-bottom: 3px;
-}
-.right .table td {
-  padding-top: 3px;
-  padding-bottom: 3px;
-}
-.right .highlight {
-  padding-top: 5px;
-  padding-bottom: 5px;
-}
 
-.highlights-card {
-  display: flex;
-  flex: 251 1 0;
-  flex-direction: column;
-  min-height: 0;
-}
-.highlights {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto; /* 카드 안에서만 세로 스크롤 */
-}
 .card-head {
   display: flex;
   align-items: baseline;
   gap: 12px;
   margin-bottom: 8px;
 }
-/* 추천 처리별 결과의 종류 토글: 카드 제목 줄 오른쪽에 작게 */
-.status-actions {
-  margin-left: auto;
-}
-.status-actions button {
-  height: 24px;
-  padding: 0 8px;
-  font-size: 12px;
-}
-.note {
-  margin-left: auto;
-  font-size: 13px;
-  color: var(--mute);
-}
 .foot-note {
   font-size: 12px;
   color: var(--mute);
-}
-
-/* 추천 처리별 결과 표 */
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.table th {
-  padding: 6px 12px 6px 0;
-}
-.table td {
-  padding: 5px 12px 5px 0;
-  border-bottom: 1px solid var(--line);
-  white-space: nowrap;
-}
-.table tr:last-child td {
-  border-bottom: 0;
-}
-.table th:last-child,
-.table td:last-child {
-  padding-right: 0;
-}
-.table .right-text {
-  text-align: right;
-}
-/* 추천 처리별 결과: 칸 폭을 정해 두어 값이 바뀌어도 칸이 넓어지거나 좁아지지 않음 */
-.status-table {
-  table-layout: fixed;
-}
-.status-table .col-status {
-  width: 70px;
-}
-.status-table .col-count {
-  width: 48px;
-}
-.status-table .col-peak {
-  width: 92px;
 }
 .pin-toggle {
   margin-left: auto;
@@ -2019,116 +1529,10 @@ const patternOption = computed(() => {
   color: var(--ink-2);
 }
 
-.track {
-  display: inline-block;
-  width: 80px;
-  height: 8px;
-  margin-right: 8px;
-  background: var(--line);
-  vertical-align: middle;
-}
-.bar {
-  display: block;
-  height: 100%;
-  background: var(--ok);
-}
-
-/* 눈에 띄는 구간 */
-/* 눈에 띄는 구간 한 줄: 시각 · 구간 · 단계 · 값 · 목표 대비 (칼럼 이름 줄과 같은 칸 폭) */
-.highlight {
-  display: grid;
-  grid-template-columns: 74px minmax(0, 1fr) 64px 72px 56px;
-  align-items: baseline;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 8px 8px 4px;
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-left: 4px solid transparent;
-  color: var(--ink);
-  text-align: left;
-}
-.highlights li:last-child .highlight {
-  border-bottom: 0;
-}
-.highlight:hover {
-  background: var(--bg);
-}
-/* 그래프에 표시 중인 구간 */
-.highlight.active {
-  background: var(--bg);
-  border-left-color: var(--ink);
-}
-.highlight-time {
-  flex: none;
-  width: 92px;
-  font-weight: 700;
-}
-.highlight-label {
-  overflow: hidden;
-  color: var(--ink-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.highlight strong {
-  white-space: nowrap;
-}
-.highlight .right-text {
-  text-align: right;
-}
-.highlight-level {
-  font-size: 11px;
-  color: var(--mute);
-  white-space: nowrap;
-}
-/* 단계 도형(○)과 글자(정보) 사이 띄움 */
-.level-text {
-  margin-left: 3px;
-}
-.highlight-level.over {
-  font-weight: 700;
-  color: var(--crit);
-}
-.highlight-target {
-  color: var(--ink-2);
-  white-space: nowrap;
-}
-/* 칼럼 이름 줄: 목록을 스크롤해도 위에 붙어 있음 */
-.highlight-head-row {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--card);
-}
-/* 칼럼 이름 줄: 작은 회색 글자, 누를 수 없음 */
-.highlight.highlight-head {
-  padding-top: 0;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--line-strong);
-  font-size: 11px;
-  color: var(--mute);
-  cursor: default;
-}
-.highlight.highlight-head:hover {
-  background: none;
-}
-
 /* 화면이 좁으면 오른쪽 열을 줄여 그래프 자리를 남김 */
 @media (max-width: 1600px) {
   .right {
     width: 400px;
-  }
-  /* 눈에 띄는 구간: 오른쪽 열이 좁아지므로 단계는 도형(■ · ○)만 보여 구간 이름 자리를 늘림 (글자는 마우스를 올리면 보임) */
-  .highlight {
-    grid-template-columns: 70px minmax(0, 1fr) 24px 66px 50px;
-    gap: 6px;
-  }
-  .highlight-level .level-text {
-    display: none;
-  }
-  .track {
-    width: 48px;
   }
 }
 </style>
