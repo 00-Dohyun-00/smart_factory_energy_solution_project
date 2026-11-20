@@ -42,6 +42,7 @@ public class SettingService {
 
     private final SettingRepository settingRepository;
     private final SettingHistoryRepository settingHistoryRepository;
+    private final SettingCache settingCache;
 
     // 기준값 전체 조회 (키 이름 순)
     public List<SettingResponse> findAll() {
@@ -90,6 +91,8 @@ public class SettingService {
             setting.changeValue(newValues.get(key), now, OPERATOR);
             settingHistoryRepository.save(new SettingHistory(now, key, oldValue, newValues.get(key), OPERATOR));
         }
+        // 값을 바꿀 때만 캐시를 다시 읽음 (그 밖에는 매초·매분 도는 작업이 DB를 다시 안 읽고 이 캐시만 봄)
+        settingCache.refresh();
 
         return findAll();
     }

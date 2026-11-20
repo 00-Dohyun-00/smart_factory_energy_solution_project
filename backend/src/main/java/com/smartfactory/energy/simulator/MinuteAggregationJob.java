@@ -1,7 +1,7 @@
 package com.smartfactory.energy.simulator;
 
 import com.smartfactory.energy.equipment.Equipment;
-import com.smartfactory.energy.equipment.EquipmentRepository;
+import com.smartfactory.energy.equipment.EquipmentCache;
 import com.smartfactory.energy.equipment.EquipmentRole;
 import com.smartfactory.energy.ess.EssStatusMinute;
 import com.smartfactory.energy.ess.EssStatusMinuteRepository;
@@ -38,13 +38,12 @@ public class MinuteAggregationJob {
 
     private final SimClock simClock;
     private final MinuteBuffer minuteBuffer;
-    private final EquipmentRepository equipmentRepository;
+    private final EquipmentCache equipmentCache;
     private final PowerMinuteRepository powerMinuteRepository;
     private final SitePowerMinuteRepository sitePowerMinuteRepository;
     private final EssStatusMinuteRepository essStatusMinuteRepository;
     private final EssSocState essSocState;
-
-    private List<String> loadEquipmentIds;
+    private final LatestSiteStatus latestSiteStatus;
 
     @Scheduled(cron = "0 * * * * *")
     public void aggregateAndSave() {
@@ -76,7 +75,9 @@ public class MinuteAggregationJob {
             log.debug("site_power_minute {} 이미 있어서 건너뜀", ts);
             return;
         }
-        sitePowerMinuteRepository.save(new SitePowerMinute(ts, gridKw, solarKw, essKw, loadKw));
+        // 방금 저장한 값을 메모리에 들고 있어서, SitePowerService가 이번 분 "최신 1행"을 DB에서 다시 안 읽어도 됨
+        latestSiteStatus.setSitePowerMinute(
+                sitePowerMinuteRepository.save(new SitePowerMinute(ts, gridKw, solarKw, essKw, loadKw)));
     }
 
     private void savePowerMinute(LocalDateTime ts, BigDecimal loadKw) {
@@ -127,16 +128,15 @@ public class MinuteAggregationJob {
         BigDecimal batteryTemp = BigDecimal.valueOf(23)
                 .add(BigDecimal.valueOf(ThreadLocalRandom.current().nextDouble(-0.5, 0.5)))
                 .setScale(2, RoundingMode.HALF_UP);
-        essStatusMinuteRepository.save(new EssStatusMinute(ts, essSocState.get(), batteryTemp));
+        latestSiteStatus.setEssStatusMinute(
+                essStatusMinuteRepository.save(new EssStatusMinute(ts, essSocState.get(), batteryTemp)));
     }
 
+    // EquipmentCache가 이미 서버 시작 때부터 메모리에 들고 있어서, 여기서 따로 캐시하지 않음
     private List<String> loadEquipmentIds() {
-        if (loadEquipmentIds == null) {
-            loadEquipmentIds = equipmentRepository.findByEquipmentRole(EquipmentRole.LOAD).stream()
-                    .map(Equipment::getEquipmentId)
-                    .toList();
-        }
-        return loadEquipmentIds;
+        return equipmentCache.findByEquipmentRole(EquipmentRole.LOAD).stream()
+                .map(Equipment::getEquipmentId)
+                .toList();
     }
 
     private BigDecimal avgOf(List<BigDecimal> values) {

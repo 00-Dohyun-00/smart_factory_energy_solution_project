@@ -1,18 +1,19 @@
 package com.smartfactory.energy.sitepower;
 
 import com.smartfactory.energy.equipment.Equipment;
-import com.smartfactory.energy.equipment.EquipmentRepository;
+import com.smartfactory.energy.equipment.EquipmentCache;
 import com.smartfactory.energy.equipment.EquipmentRole;
 import com.smartfactory.energy.ess.EssStatusMinute;
 import com.smartfactory.energy.ess.EssStatusMinuteRepository;
 import com.smartfactory.energy.global.exception.NotFoundException;
-import com.smartfactory.energy.power.DemandInterval15m;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
+import com.smartfactory.energy.power.EnergyTotals;
 import com.smartfactory.energy.power.PowerMinute;
 import com.smartfactory.energy.power.PowerMinuteRepository;
 import com.smartfactory.energy.power.SitePowerMinute;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
+import com.smartfactory.energy.simulator.LatestSiteStatus;
 import com.smartfactory.energy.simulator.RawLoadCursor;
 import com.smartfactory.energy.sitepower.dto.SitePowerLatestResponse;
 import com.smartfactory.energy.sitepower.dto.SitePowerLatestResponse.EquipmentPower;
@@ -24,7 +25,7 @@ import com.smartfactory.energy.sitepower.dto.SitePowerLatestResponse.WeatherNow;
 import com.smartfactory.energy.sitepower.dto.SitePowerLatestResponse.WindowPoint;
 import com.smartfactory.energy.sitepower.dto.SitePowerQuarterResponse;
 import com.smartfactory.energy.tariff.TariffPeriod;
-import com.smartfactory.energy.tariff.TariffPeriodRepository;
+import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.tariff.TariffPeriodType;
 import com.smartfactory.energy.tariff.TariffSeason;
 import com.smartfactory.energy.weather.Weather;
@@ -57,19 +58,45 @@ public class SitePowerService {
     private final EssStatusMinuteRepository essStatusMinuteRepository;
     private final DemandInterval15mRepository demandInterval15mRepository;
     private final PowerMinuteRepository powerMinuteRepository;
-    private final EquipmentRepository equipmentRepository;
+    private final EquipmentCache equipmentCache;
     private final WeatherRepository weatherRepository;
-    private final TariffPeriodRepository tariffPeriodRepository;
-    private final SettingRepository settingRepository;
+    private final TariffPeriodCache tariffPeriodCache;
+    private final SettingCache settingCache;
     private final RawLoadCursor rawLoadCursor;
+    private final LatestSiteStatus latestSiteStatus;
+
+    // 탭 여러 개가 동시에 폴링해도 DB는 1초에 한 번만 조회하도록 응답을 짧게 캐시
+    private static final long LATEST_CACHE_NANOS = 1_000_000_000L;
+    private volatile SitePowerLatestResponse cachedLatest;
+    private volatile long cachedLatestAtNanos;
 
     // ---------- 지금 상태 1건 (GET /api/site-powers/latest) ----------
 
     public SitePowerLatestResponse getLatest() {
-        // 1. 최신 1분 기록. 하나도 없으면 404
-        SitePowerMinute latest = sitePowerMinuteRepository.findFirstByOrderByTsDesc()
-                .orElseThrow(() -> new NotFoundException("아직 전력 기록이 없습니다."));
-        EssStatusMinute ess = essStatusMinuteRepository.findFirstByOrderByTsDesc().orElse(null);
+        SitePowerLatestResponse cached = cachedLatest;
+        if (cached != null && System.nanoTime() - cachedLatestAtNanos < LATEST_CACHE_NANOS) {
+            return cached;
+        }
+        SitePowerLatestResponse response = computeLatest();
+        cachedLatest = response;
+        cachedLatestAtNanos = System.nanoTime();
+        return response;
+    }
+
+    // "1초 캐시" 때문에 테스트에서 바로 다음 호출이 이전 값을 그대로 돌려주는 걸 막기 위해 둔 메서드 (운영 코드는 안 부름)
+    void clearLatestCacheForTest() {
+        cachedLatest = null;
+    }
+
+    private SitePowerLatestResponse computeLatest() {
+        // 1. 최신 1분 기록. 이 서버가 시뮬레이터를 돌리는 중이면 방금 집계한 값을 메모리에서 그대로 쓰고(DB 안 읽음),
+        //    아니면 DB에서 최신 1행을 읽음. 하나도 없으면 404
+        SitePowerMinute latest = latestSiteStatus.sitePowerMinute()
+                .orElseGet(() -> sitePowerMinuteRepository.findFirstByOrderByTsDesc()
+                        .orElseThrow(() -> new NotFoundException("아직 전력 기록이 없습니다.")));
+        EssStatusMinute ess = latestSiteStatus.essStatusMinute()
+                .or(essStatusMinuteRepository::findFirstByOrderByTsDesc)
+                .orElse(null);
 
         LocalDateTime now = LocalDateTime.now().withNano(0);
         LocalDate today = now.toLocalDate();
@@ -120,13 +147,12 @@ public class SitePowerService {
             defenseKw = Math.ceil((predictedKw - targetPeakKw) * 15 / remainingMinutes);
         }
 
-        // 4. 오늘·이번 달 최대 피크 (15분이 다 찬 구간만)
-        List<DemandInterval15m> monthIntervals = completeIntervals(
-                today.withDayOfMonth(1).atStartOfDay(), today.plusDays(1).atStartOfDay());
-        Double todayPeakKw = maxPeak(monthIntervals.stream()
-                .filter(d -> d.getIntervalStart().toLocalDate().equals(today))
-                .toList());
-        Double monthPeakKw = maxPeak(monthIntervals);
+        // 4. 오늘·이번 달 최대 피크 (15분이 다 찬 구간만, SQL MAX 1행씩만 받음)
+        LocalDateTime todayStart = today.atStartOfDay();
+        LocalDateTime monthStart = today.withDayOfMonth(1).atStartOfDay();
+        LocalDateTime tomorrowStart = today.plusDays(1).atStartOfDay();
+        Double todayPeakKw = round1OrNull(demandInterval15mRepository.maxActualAvgKw(todayStart, tomorrowStart));
+        Double monthPeakKw = round1OrNull(demandInterval15mRepository.maxActualAvgKw(monthStart, tomorrowStart));
 
         return new SitePowerLatestResponse(
                 latest.getTs(), // 값과 같은 줄의 기록 시각 (시뮬레이터가 멈추면 이 시각에서 멈춰 있어 오래된 값임을 알 수 있음)
@@ -196,16 +222,16 @@ public class SitePowerService {
 
     // ---------- 작은 도우미 메서드 ----------
 
-    // 오늘 0시부터 지금까지 누적 kWh (1분 kW ÷ 60을 더함)
+    // 오늘 0시부터 지금까지 누적 kWh. 1,440행을 가져와 더하지 않고 SQL SUM 1행만 받아서 60으로 나눔
     private TodayEnergy todayEnergy(LocalDate today) {
         LocalDateTime start = today.atStartOfDay();
         LocalDateTime end = today.plusDays(1).atStartOfDay();
-        List<SitePowerMinute> rows = sitePowerMinuteRepository.findInPeriod(start, end);
+        EnergyTotals totals = sitePowerMinuteRepository.sumEnergy(start, end);
         return new TodayEnergy(
-                round1(rows.stream().mapToDouble(r -> toDouble(r.getGridKw())).sum() / 60),
-                round1(rows.stream().mapToDouble(r -> toDouble(r.getSolarKw())).sum() / 60),
-                round1(rows.stream().mapToDouble(r -> Math.max(toDouble(r.getEssKw()), 0)).sum() / 60),
-                round1(rows.stream().mapToDouble(r -> Math.max(-toDouble(r.getEssKw()), 0)).sum() / 60)
+                round1(toDouble(totals.gridKwSum()) / 60),
+                round1(toDouble(totals.solarKwSum()) / 60),
+                round1(toDouble(totals.dischargeKwSum()) / 60),
+                round1(toDouble(totals.chargeKwSum()) / 60)
         );
     }
 
@@ -215,7 +241,7 @@ public class SitePowerService {
         for (PowerMinute p : powerMinuteRepository.findByTs(ts)) {
             powerById.put(p.getEquipmentId(), p);
         }
-        return equipmentRepository.findByEquipmentRole(EquipmentRole.LOAD).stream()
+        return equipmentCache.findByEquipmentRole(EquipmentRole.LOAD).stream()
                 .sorted(Comparator.comparing(Equipment::getEquipmentId))
                 .map(e -> {
                     PowerMinute p = powerById.get(e.getEquipmentId());
@@ -235,7 +261,7 @@ public class SitePowerService {
 
     // 지금 요금 시간대와 오늘 시간대표
     private Tariff tariffAt(LocalDateTime now) {
-        List<TariffPeriod> periods = tariffPeriodRepository.findBySeason(seasonOf(now.toLocalDate())).stream()
+        List<TariffPeriod> periods = tariffPeriodCache.findBySeason(seasonOf(now.toLocalDate())).stream()
                 .sorted(Comparator.comparing(TariffPeriod::getStartTime))
                 .toList();
         if (periods.isEmpty()) {
@@ -302,21 +328,9 @@ public class SitePowerService {
         return "STANDBY";
     }
 
-    // 15분이 다 찬 구간만 (진행 중인 구간은 아직 결과가 아님)
-    private List<DemandInterval15m> completeIntervals(LocalDateTime start, LocalDateTime end) {
-        return demandInterval15mRepository.findInPeriod(start, end).stream()
-                .filter(d -> d.getMinuteCount() != null && d.getMinuteCount() >= 15)
-                .filter(d -> d.getActualAvgKw() != null)
-                .toList();
-    }
-
-    // 구간들 중 최대 피크. 없으면 null
-    private Double maxPeak(List<DemandInterval15m> intervals) {
-        if (intervals.isEmpty()) {
-            return null;
-        }
-        double max = intervals.stream().mapToDouble(d -> d.getActualAvgKw().doubleValue()).max().getAsDouble();
-        return round1(max);
+    // SQL MAX 결과를 소수 1자리로. 구간이 없으면 null
+    private Double round1OrNull(BigDecimal value) {
+        return value == null ? null : round1(value.doubleValue());
     }
 
     // 15분 단위로 내림 (예: 14:07 → 14:00)
@@ -325,11 +339,9 @@ public class SitePowerService {
         return hour.plusMinutes((time.getMinute() / 15) * 15L);
     }
 
-    // setting 테이블의 값을 숫자로 읽음. 없으면 null
+    // setting 값을 메모리 캐시에서 숫자로 읽음 (DB는 안 읽음). 없으면 null
     private Double settingNumber(String key) {
-        return settingRepository.findById(key)
-                .map(setting -> Double.valueOf(setting.getValue()))
-                .orElse(null);
+        return settingCache.getNumber(key);
     }
 
     // 그 시각이 요금 시간대 안에 있는지. 끝 시각 00:00이나 23:59 이후는 하루 끝(24시)으로 봄

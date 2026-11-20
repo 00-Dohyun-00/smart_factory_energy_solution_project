@@ -10,7 +10,7 @@ import com.smartfactory.energy.global.exception.NotFoundException;
 import com.smartfactory.energy.power.DemandInterval15m;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
 import com.smartfactory.energy.recommendation.dto.RecommendationResponse;
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -38,7 +38,7 @@ public class RecommendationService {
     private final RecommendationRepository recommendationRepository;
     private final DemandInterval15mRepository demandInterval15mRepository;
     private final EventLogRepository eventLogRepository;
-    private final SettingRepository settingRepository;
+    private final SettingCache settingCache;
     private final EssCommandHolder essCommandHolder;
 
     // 기간 안의 추천 이력 (최신 순)
@@ -135,9 +135,8 @@ public class RecommendationService {
 
     // 추천 적용을 ESS에 유지하는 시간(분). setting에 없으면 15분
     private int decisionValidMinutes() {
-        return settingRepository.findById("operation.decision_valid_minutes")
-                .map(setting -> (int) Double.parseDouble(setting.getValue()))
-                .orElse(15);
+        Double value = settingCache.getNumber("operation.decision_valid_minutes");
+        return value == null ? 15 : value.intValue();
     }
 
     // 이벤트 문장. 예: "방전 500 kW 적용 (운영자)", "피크 방어 추천을 넘김 (운영자)"

@@ -1,7 +1,7 @@
 package com.smartfactory.energy.zone;
 
 import com.smartfactory.energy.equipment.Equipment;
-import com.smartfactory.energy.equipment.EquipmentRepository;
+import com.smartfactory.energy.equipment.EquipmentCache;
 import com.smartfactory.energy.equipment.EquipmentRole;
 import com.smartfactory.energy.global.exception.NotFoundException;
 import com.smartfactory.energy.power.PowerMinute;
@@ -24,7 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ZoneDetailService {
 
     private final ZoneRepository zoneRepository;
-    private final EquipmentRepository equipmentRepository;
+    private final EquipmentCache equipmentCache;
     private final PowerMinuteRepository powerMinuteRepository;
 
     // 구역 상세 (zoneCode 예: Z2)
@@ -36,7 +36,7 @@ public class ZoneDetailService {
                 .orElseThrow(() -> new NotFoundException("없는 구역입니다: " + zoneCode));
 
         // 2. 그 구역의 생산 설비 (사용 중인 것만)
-        List<String> equipmentIds = equipmentRepository.findAll().stream()
+        List<String> equipmentIds = equipmentCache.findAll().stream()
                 .filter(e -> zone.getZoneCode().equals(e.getZoneCode()))
                 .filter(e -> e.getEquipmentRole() == EquipmentRole.LOAD)
                 .map(Equipment::getEquipmentId)

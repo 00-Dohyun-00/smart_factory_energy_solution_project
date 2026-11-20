@@ -8,7 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.smartfactory.energy.TestData;
 import com.smartfactory.energy.equipment.Equipment;
-import com.smartfactory.energy.equipment.EquipmentRepository;
+import com.smartfactory.energy.equipment.EquipmentCache;
 import com.smartfactory.energy.equipment.EquipmentRole;
 import com.smartfactory.energy.global.exception.NotFoundException;
 import com.smartfactory.energy.power.PowerMinute;
@@ -33,7 +33,7 @@ import org.mockito.quality.Strictness;
 class ZoneDetailServiceTest {
 
     @Mock ZoneRepository zoneRepository;
-    @Mock EquipmentRepository equipmentRepository;
+    @Mock EquipmentCache equipmentCache;
     @Mock PowerMinuteRepository powerMinuteRepository;
     @InjectMocks ZoneDetailService zoneDetailService;
 
@@ -44,7 +44,7 @@ class ZoneDetailServiceTest {
         Zone noCode = new Zone(null, "이름만"); // 구역 코드가 빈 줄이 있어도 오류가 나면 안 됨
         Zone z2 = new Zone("Z2", "브레이징");
         when(zoneRepository.findAll()).thenReturn(List.of(noCode, z2));
-        when(equipmentRepository.findAll()).thenReturn(List.of(
+        when(equipmentCache.findAll()).thenReturn(List.of(
                 equipment("Z2-FURN", "Z2", EquipmentRole.LOAD),
                 equipment("Z2-PUMP", "Z2", EquipmentRole.LOAD),
                 equipment("Z1-PRESS", "Z1", EquipmentRole.LOAD)  // 다른 구역

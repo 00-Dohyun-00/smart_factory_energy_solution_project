@@ -3,7 +3,6 @@ package com.smartfactory.energy.analysis;
 import static com.smartfactory.energy.TestData.dayTariffs;
 import static com.smartfactory.energy.TestData.interval;
 import static com.smartfactory.energy.TestData.recommendation;
-import static com.smartfactory.energy.TestData.setting;
 import static com.smartfactory.energy.TestData.tariff;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -16,14 +15,13 @@ import com.smartfactory.energy.recommendation.RecommendationAction;
 import com.smartfactory.energy.recommendation.RecommendationReasonType;
 import com.smartfactory.energy.recommendation.RecommendationRepository;
 import com.smartfactory.energy.recommendation.RecommendationStatus;
-import com.smartfactory.energy.setting.SettingRepository;
-import com.smartfactory.energy.tariff.TariffPeriodRepository;
+import com.smartfactory.energy.setting.SettingCache;
+import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.tariff.TariffPeriodType;
 import com.smartfactory.energy.tariff.TariffSeason;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,17 +38,17 @@ class PeakAnalysisServiceTest {
 
     @Mock DemandInterval15mRepository demandInterval15mRepository;
     @Mock RecommendationRepository recommendationRepository;
-    @Mock SettingRepository settingRepository;
-    @Mock TariffPeriodRepository tariffPeriodRepository;
+    @Mock SettingCache settingCache;
+    @Mock TariffPeriodCache tariffPeriodCache;
     @InjectMocks PeakAnalysisService peakAnalysisService;
 
     static final LocalDate DAY = LocalDate.of(2026, 11, 10); // 11월 = 겨울 요금
 
     @BeforeEach
     void setUp() {
-        when(settingRepository.findById("peak.target_kw")).thenReturn(Optional.of(setting("peak.target_kw", "목표 피크", "1800")));
+        when(settingCache.getNumber("peak.target_kw")).thenReturn(1800.0);
         when(recommendationRepository.findInPeriod(any(), any())).thenReturn(List.of());
-        when(tariffPeriodRepository.findBySeason(TariffSeason.WINTER)).thenReturn(dayTariffs(TariffSeason.WINTER));
+        when(tariffPeriodCache.findBySeason(TariffSeason.WINTER)).thenReturn(dayTariffs(TariffSeason.WINTER));
     }
 
     @Test
@@ -108,7 +106,7 @@ class PeakAnalysisServiceTest {
 
     @Test
     void 피크가_잦은_시간대가_하루_끝까지면_끝_시각은_24시() {
-        when(tariffPeriodRepository.findBySeason(TariffSeason.WINTER)).thenReturn(List.of(
+        when(tariffPeriodCache.findBySeason(TariffSeason.WINTER)).thenReturn(List.of(
                 tariff(TariffSeason.WINTER, TariffPeriodType.OFF_PEAK, "00:00", "22:00", 100),
                 tariff(TariffSeason.WINTER, TariffPeriodType.ON_PEAK, "22:00", "23:59:59", 200)
         ));
@@ -126,7 +124,7 @@ class PeakAnalysisServiceTest {
 
     @Test
     void 요금표가_없으면_피크가_잦은_시간대는_null() {
-        when(tariffPeriodRepository.findBySeason(TariffSeason.WINTER)).thenReturn(List.of());
+        when(tariffPeriodCache.findBySeason(TariffSeason.WINTER)).thenReturn(List.of());
         when(demandInterval15mRepository.findInPeriod(any(), any()))
                 .thenReturn(List.of(interval(LocalDateTime.of(2026, 11, 10, 9, 0), 1500, 1500, 15)));
 

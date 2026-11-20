@@ -12,11 +12,10 @@ import com.smartfactory.energy.power.SitePowerMinute;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.recommendation.dto.EssPlanResponse;
 import com.smartfactory.energy.recommendation.dto.RecommendationResponse;
-import com.smartfactory.energy.setting.Setting;
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
 import com.smartfactory.energy.simulator.EssSocState;
 import com.smartfactory.energy.tariff.TariffPeriod;
-import com.smartfactory.energy.tariff.TariffPeriodRepository;
+import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.tariff.TariffPeriodType;
 import com.smartfactory.energy.tariff.TariffSeason;
 import com.smartfactory.energy.weather.SolarForecastService;
@@ -29,7 +28,6 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -71,8 +69,8 @@ public class RecommendationEngine {
     private final EssSocState essSocState;
     private final EssCommandHolder essCommandHolder;
     private final SitePowerMinuteRepository sitePowerMinuteRepository;
-    private final TariffPeriodRepository tariffPeriodRepository;
-    private final SettingRepository settingRepository;
+    private final TariffPeriodCache tariffPeriodCache;
+    private final SettingCache settingCache;
     private final RecommendationRepository recommendationRepository;
     private final RecommendationService recommendationService;
     private final EventLogRepository eventLogRepository;
@@ -97,10 +95,12 @@ public class RecommendationEngine {
         EssLimits limits = limitsOf(settings);
         double socPercent = essSocState.get().doubleValue();
         LocalDateTime windowStart = quarterStartOf(now);
+        // 요금표는 서버 시작 때 캐시된 걸 한 번만 읽어서 계획·저장 양쪽에 그대로 씀 (중복 조회 제거)
+        List<TariffPeriod> periods = tariffPeriodCache.findAll();
 
         // 2. 24시간 계획 (부하는 AI 서버 예측, 안 되면 최근 1시간 평균)
         LoadForecast loadForecast = loadForecastService.forecast(windowStart, HORIZON_SLOTS, history);
-        List<PlanInput> inputs = planInputsOf(windowStart, loadForecast);
+        List<PlanInput> inputs = planInputsOf(windowStart, loadForecast, periods);
         EssPlanner.PlanResult plan = essPlanner.plan(inputs, socPercent, limits);
         latestPlan = planResponseOf(now, socPercent, plan, inputs, limits, loadForecast.method());
 
@@ -109,15 +109,14 @@ public class RecommendationEngine {
         EssPlanner.Advice advice = essPlanner.decide(plan, info, inputs.get(0).netKw(), limits);
 
         // 4. 저장
-        saveIfChanged(now, windowStart, advice, info, inputs, limits, settings);
+        saveIfChanged(now, windowStart, advice, info, inputs, limits, settings, periods);
     }
 
     // ---------- 계획에 넣을 값 ----------
 
     // 지금 15분 칸부터 96칸: 예상 부하 − 예상 태양광, 단가
-    List<PlanInput> planInputsOf(LocalDateTime windowStart, LoadForecast loadForecast) {
+    List<PlanInput> planInputsOf(LocalDateTime windowStart, LoadForecast loadForecast, List<TariffPeriod> periods) {
         List<SolarForecastSlot> solar = solarForecastService.forecastFrom(windowStart, HORIZON_SLOTS);
-        List<TariffPeriod> periods = tariffPeriodRepository.findAll();
 
         List<PlanInput> inputs = new ArrayList<>();
         for (int i = 0; i < HORIZON_SLOTS; i++) {
@@ -156,7 +155,7 @@ public class RecommendationEngine {
     // 같은 구간에서 피크 방어가 나왔으면 그 구간이 끝날 때까지 유지 (방전 → 대기 → 방전 깜빡임 방지)
     private void saveIfChanged(LocalDateTime now, LocalDateTime windowStart, EssPlanner.Advice advice,
                                EssPlanner.NowInfo info, List<PlanInput> inputs, EssLimits limits,
-                               Map<String, String> settings) {
+                               Map<String, String> settings, List<TariffPeriod> periods) {
         Optional<Recommendation> latest = recommendationRepository.findFirstByOrderByRecommendedAtDescRecommendationIdDesc();
         if (latest.isPresent()) {
             Recommendation last = latest.get();
@@ -180,12 +179,12 @@ public class RecommendationEngine {
                 : advice.action() == RecommendationAction.CHARGE ? -1 : 0;
         double asIsKw = info.predictedOf(currentEssKw());
         double afterKw = info.predictedOf(sign * powerKw);
-        TariffPeriod period = periodAt(tariffPeriodRepository.findAll(), now);
+        TariffPeriod period = periodAt(periods, now);
         String description = essPlanner.explain(
                 advice, asIsKw, afterKw, info.socPercent(), essPlanner.peakRiskOf(inputs, limits),
                 period != null ? periodLabel(period.getPeriodType()) : "",
                 period != null ? period.getUnitPrice().doubleValue() : 0,
-                onPeakPrice(now.toLocalDate()),
+                onPeakPrice(now.toLocalDate(), periods),
                 Math.max(0, -inputs.get(0).netKw()),
                 now.toLocalDate(), limits);
 
@@ -261,13 +260,9 @@ public class RecommendationEngine {
                 .orElse(0.0);
     }
 
-    // setting 전체를 키 → 값으로
+    // setting 전체를 키 → 값으로 (메모리 캐시, DB는 안 읽음)
     private Map<String, String> settingValues() {
-        Map<String, String> values = new HashMap<>();
-        for (Setting setting : settingRepository.findAll()) {
-            values.put(setting.getSettingKey(), setting.getValue());
-        }
-        return values;
+        return settingCache.values();
     }
 
     // 환경 설정 값. 없으면 설정 화면 기본값
@@ -311,10 +306,10 @@ public class RecommendationEngine {
     }
 
     // 그 날짜 계절의 최대부하 단가
-    private double onPeakPrice(LocalDate date) {
+    private double onPeakPrice(LocalDate date, List<TariffPeriod> periods) {
         TariffSeason season = seasonOf(date);
-        return tariffPeriodRepository.findBySeason(season).stream()
-                .filter(p -> p.getPeriodType() == TariffPeriodType.ON_PEAK)
+        return periods.stream()
+                .filter(p -> p.getSeason() == season && p.getPeriodType() == TariffPeriodType.ON_PEAK)
                 .mapToDouble(p -> p.getUnitPrice().doubleValue())
                 .max()
                 .orElse(0);

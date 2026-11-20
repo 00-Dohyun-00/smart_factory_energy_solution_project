@@ -6,7 +6,7 @@ import com.smartfactory.energy.ess.EssStatusMinute;
 import com.smartfactory.energy.ess.EssStatusMinuteRepository;
 import com.smartfactory.energy.power.DemandInterval15m;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
-import com.smartfactory.energy.power.SitePowerMinute;
+import com.smartfactory.energy.power.HourlyPowerTotals;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.recommendation.Recommendation;
 import com.smartfactory.energy.recommendation.RecommendationReasonType;
@@ -20,9 +20,9 @@ import com.smartfactory.energy.report.dto.ReportResponse;
 import com.smartfactory.energy.report.dto.ReportSolar;
 import com.smartfactory.energy.report.dto.ReportSummary;
 import com.smartfactory.energy.report.dto.ReportTariffUsage;
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
 import com.smartfactory.energy.tariff.TariffPeriod;
-import com.smartfactory.energy.tariff.TariffPeriodRepository;
+import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.tariff.TariffPeriodType;
 import com.smartfactory.energy.tariff.TariffSeason;
 import java.math.BigDecimal;
@@ -51,8 +51,8 @@ public class ReportService {
     private final DemandInterval15mRepository demandInterval15mRepository;
     private final EssStatusMinuteRepository essStatusMinuteRepository;
     private final RecommendationRepository recommendationRepository;
-    private final TariffPeriodRepository tariffPeriodRepository;
-    private final SettingRepository settingRepository;
+    private final TariffPeriodCache tariffPeriodCache;
+    private final SettingCache settingCache;
     private final PeakAnalysisService peakAnalysisService;
 
     // 월간 성적표
@@ -71,13 +71,13 @@ public class ReportService {
         LocalDateTime start = periodStart.atStartOfDay();
         LocalDateTime end = periodEnd.plusDays(1).atStartOfDay();
 
-        // 3. 그 달 기록 꺼내기. 1분 전력 기록이 없으면 hasData=false
-        List<SitePowerMinute> powers = sitePowerMinuteRepository.findInPeriod(start, end);
-        if (powers.isEmpty()) {
+        // 3. 1분 기록을 그대로 가져오지 않고, 1시간 단위로 SQL이 더한 합계만 받음
+        //    (요금 시간대가 항상 정시에 바뀌어서, 시간 단위로 묶어도 분 단위와 요금 계산이 같게 나옴)
+        List<HourlyPowerTotals> hourlyTotals = sitePowerMinuteRepository.hourlyTotals(start, end);
+        if (hourlyTotals.isEmpty()) {
             return ReportResponse.empty(month, targetPeakKw);
         }
         List<DemandInterval15m> intervals = completeIntervals(start, end);
-        List<EssStatusMinute> essList = essStatusMinuteRepository.findInPeriod(start, end);
         List<Recommendation> recommendations = recommendationRepository.findInPeriod(start, end);
 
         // 15분 구간 시작 시각 → 실제 피크
@@ -92,10 +92,10 @@ public class ReportService {
         // 5. 화면 구역별로 만들기
         ReportSummary summary = makeSummary(recommendations, resultPeaks, targetPeakKw, peak);
         Double monthPeakKw = peak.hasData() ? peak.summary().maxPeakKw() : null;
-        ReportBill bill = makeBill(yearMonth, powers, monthPeakKw, targetPeakKw);
+        ReportBill bill = makeBill(yearMonth, hourlyTotals, monthPeakKw, targetPeakKw);
         List<ReportExceeded> exceeded = makeExceeded(intervals, recommendations, targetPeakKw);
-        ReportEss ess = makeEss(powers, essList, recommendations, resultPeaks, targetPeakKw);
-        ReportSolar solar = makeSolar(powers);
+        ReportEss ess = makeEss(hourlyTotals, start, end, recommendations, resultPeaks, targetPeakKw);
+        ReportSolar solar = makeSolar(hourlyTotals);
 
         // 15분이 다 찬 구간이 아직 없으면 피크 분석이 null을 주므로 빈 목록으로 바꿈 (화면은 "기록 없음" 표시)
         return new ReportResponse(month, true, periodStart, periodEnd, targetPeakKw, summary,
@@ -139,25 +139,28 @@ public class ReportService {
 
     // ---------- 전기요금 (bill) ----------
 
-    private ReportBill makeBill(YearMonth yearMonth, List<SitePowerMinute> powers, Double monthPeakKw,
+    private ReportBill makeBill(YearMonth yearMonth, List<HourlyPowerTotals> hourlyTotals, Double monthPeakKw,
                                 Double targetPeakKw) {
         Double basePrice = settingNumber("tariff.base_charge");
-        List<TariffPeriod> periods = tariffPeriodRepository.findBySeason(seasonOf(yearMonth.atDay(1)));
+        List<TariffPeriod> periods = tariffPeriodCache.findBySeason(seasonOf(yearMonth.atDay(1)));
 
-        // 요금 시간대별 kWh와 요금
+        // 요금 시간대별 kWh와 요금. 시간 단위 합계를 그 시간의 요금 시간대 하나로 그대로 분류
+        // (요금 시간대가 항상 정시에 바뀌므로, 한 시간 안의 모든 분이 같은 시간대임)
         Map<TariffPeriodType, Double> kwhByType = new EnumMap<>(TariffPeriodType.class);
         Map<TariffPeriodType, Double> chargeByType = new EnumMap<>(TariffPeriodType.class);
         for (TariffPeriodType type : TariffPeriodType.values()) {
             kwhByType.put(type, 0.0);
             chargeByType.put(type, 0.0);
         }
-        for (SitePowerMinute p : powers) {
-            TariffPeriod period = periodAt(periods, p.getTs().toLocalTime());
+        long totalRows = 0;
+        for (HourlyPowerTotals hour : hourlyTotals) {
+            totalRows += hour.getRowCount();
+            TariffPeriod period = periodAt(periods, hour.getBucket().toLocalTime());
             if (period == null) {
                 continue;
             }
-            // 1분 동안 산 전력량 = kW ÷ 60. 태양광이 남아 0보다 작으면 산 것이 없음
-            double kwh = Math.max(0, p.getGridKw().doubleValue()) / 60;
+            // 1시간 합계 kW ÷ 60 = 그 시간 동안 산 전력량(kWh). 태양광이 남아 0보다 작은 분은 이미 SQL에서 0으로 처리됨
+            double kwh = toDouble(hour.getGridKwSum()) / 60;
             kwhByType.merge(period.getPeriodType(), kwh, Double::sum);
             chargeByType.merge(period.getPeriodType(), kwh * period.getUnitPrice().doubleValue(), Double::sum);
         }
@@ -176,7 +179,7 @@ public class ReportService {
 
         // 월말 예상: 실제 기록된 시간 기준 하루 평균 전력량요금 × 그 달 날수 + 기본요금
         // (달력 날짜로 나누면 기록이 빈 날이나 진행 중인 오늘도 하루로 세서 낮게 나옴)
-        double recordedDays = powers.size() / 1440.0; // 1분 기록 1440개 = 하루
+        double recordedDays = totalRows / 1440.0; // 1분 기록 1440개 = 하루
         long monthEndEstimate = Math.round(energyCharge / recordedDays * yearMonth.lengthOfMonth()) + baseCharge;
 
         // 시간대별 비중. 마지막 칸은 100에서 앞 칸들을 뺀 값 (합이 100.1%처럼 어긋나지 않게)
@@ -208,22 +211,19 @@ public class ReportService {
     private Long lastMonthTotal(YearMonth lastMonth, Double basePrice) {
         LocalDateTime start = lastMonth.atDay(1).atStartOfDay();
         LocalDateTime end = lastMonth.plusMonths(1).atDay(1).atStartOfDay();
-        List<SitePowerMinute> powers = sitePowerMinuteRepository.findInPeriod(start, end);
-        if (powers.isEmpty()) {
+        List<HourlyPowerTotals> hourlyTotals = sitePowerMinuteRepository.hourlyTotals(start, end);
+        if (hourlyTotals.isEmpty()) {
             return null;
         }
-        List<TariffPeriod> periods = tariffPeriodRepository.findBySeason(seasonOf(lastMonth.atDay(1)));
+        List<TariffPeriod> periods = tariffPeriodCache.findBySeason(seasonOf(lastMonth.atDay(1)));
         double energyCharge = 0;
-        for (SitePowerMinute p : powers) {
-            TariffPeriod period = periodAt(periods, p.getTs().toLocalTime());
+        for (HourlyPowerTotals hour : hourlyTotals) {
+            TariffPeriod period = periodAt(periods, hour.getBucket().toLocalTime());
             if (period != null) {
-                energyCharge += Math.max(0, p.getGridKw().doubleValue()) / 60 * period.getUnitPrice().doubleValue();
+                energyCharge += toDouble(hour.getGridKwSum()) / 60 * period.getUnitPrice().doubleValue();
             }
         }
-        Double lastPeakKw = completeIntervals(start, end).stream()
-                .map(d -> d.getActualAvgKw().doubleValue())
-                .max(Double::compare)
-                .orElse(null);
+        Double lastPeakKw = toDoubleOrNull(demandInterval15mRepository.maxActualAvgKw(start, end));
         return Math.round(energyCharge) + baseCharge(lastPeakKw, basePrice);
     }
 
@@ -271,28 +271,31 @@ public class ReportService {
 
     // ---------- ESS 운용 (ess) ----------
 
-    private ReportEss makeEss(List<SitePowerMinute> powers, List<EssStatusMinute> essList,
-                              List<Recommendation> recommendations,
-                              Map<LocalDateTime, Double> resultPeaks, Double targetPeakKw) {
+    private ReportEss makeEss(List<HourlyPowerTotals> hourlyTotals, LocalDateTime start, LocalDateTime end,
+                              List<Recommendation> recommendations, Map<LocalDateTime, Double> resultPeaks,
+                              Double targetPeakKw) {
         // 날짜별 방전량. 충·방전량은 site_power_minute.ess_kw(+ 방전/- 충전)에서 계산 (효율 적용 전 값)
         Map<LocalDate, Double> dischargeByDate = new TreeMap<>();
         double dischargeKwh = 0;
         double chargeKwh = 0;
-        for (SitePowerMinute p : powers) {
-            double discharge = p.getEssKw().max(BigDecimal.ZERO).doubleValue() / 60;
-            double charge = p.getEssKw().negate().max(BigDecimal.ZERO).doubleValue() / 60;
-            dischargeByDate.merge(p.getTs().toLocalDate(), discharge, Double::sum);
+        for (HourlyPowerTotals hour : hourlyTotals) {
+            double discharge = toDouble(hour.getDischargeKwSum()) / 60;
+            double charge = toDouble(hour.getChargeKwSum()) / 60;
+            dischargeByDate.merge(hour.getBucket().toLocalDate(), discharge, Double::sum);
             dischargeKwh += discharge;
             chargeKwh += charge;
         }
 
-        double socSum = 0;
-        Double socMin = null;
-        for (EssStatusMinute e : essList) {
-            double soc = e.getSoc().doubleValue();
-            socSum += soc;
-            socMin = socMin == null ? soc : Math.min(socMin, soc);
-        }
+        // 효율 = (방전량 + 기간 중 저장량 변화) ÷ 충전량. 저장량 변화 = (마지막 SOC − 처음 SOC) ÷ 100 × 배터리 용량
+        EssStatusMinute firstEss = essStatusMinuteRepository
+                .findFirstByTsGreaterThanEqualAndTsLessThanOrderByTsAsc(start, end).orElse(null);
+        EssStatusMinute lastEss = essStatusMinuteRepository
+                .findFirstByTsGreaterThanEqualAndTsLessThanOrderByTsDesc(start, end).orElse(null);
+        Double capacityKwh = settingNumber("ess.capacity_kwh");
+        double storageChangeKwh = storageChangeKwh(firstEss, lastEss, capacityKwh);
+        Double efficiency = chargeKwh == 0 ? null : round1((dischargeKwh + storageChangeKwh) * 100 / chargeKwh);
+
+        var socTotals = essStatusMinuteRepository.socTotals(start, end);
 
         List<ReportDailyDischarge> dailyDischarge = new ArrayList<>();
         for (LocalDate date : dischargeByDate.keySet()) {
@@ -312,29 +315,35 @@ public class ReportService {
             }
         }
 
-        Double capacityKwh = settingNumber("ess.capacity_kwh");
         return new ReportEss(
                 dailyDischarge,
                 round1(dischargeKwh),
                 round1(chargeKwh),
-                chargeKwh == 0 ? null : round1(dischargeKwh * 100 / chargeKwh),
+                efficiency,
                 capacityKwh == null || capacityKwh == 0 ? null : round1(dischargeKwh / capacityKwh),
-                essList.isEmpty() ? null : round1(socSum / essList.size()),
-                socMin == null ? null : round1(socMin),
+                socTotals.avgSoc() == null ? null : round1(socTotals.avgSoc()),
+                toDoubleOrNull(socTotals.minSoc()),
                 blockedCount
         );
     }
 
+    // 기간 중 배터리에 더 쌓이거나 빠진 양 (kWh). 처음·마지막 기록이나 용량 설정이 없으면 0
+    private double storageChangeKwh(EssStatusMinute firstEss, EssStatusMinute lastEss, Double capacityKwh) {
+        if (firstEss == null || lastEss == null || capacityKwh == null) {
+            return 0;
+        }
+        return (toDouble(lastEss.getSoc()) - toDouble(firstEss.getSoc())) / 100 * capacityKwh;
+    }
+
     // ---------- 태양광·탄소 (solar) ----------
 
-    private ReportSolar makeSolar(List<SitePowerMinute> powers) {
+    private ReportSolar makeSolar(List<HourlyPowerTotals> hourlyTotals) {
         double generationKwh = 0;
         double selfUseKwh = 0;
-        for (SitePowerMinute p : powers) {
-            double solarKw = p.getSolarKw().doubleValue();
-            generationKwh += solarKw / 60;
-            // 공장에서 바로 쓴 양 = 1분마다 min(태양광, 공장 소비)
-            selfUseKwh += Math.min(solarKw, p.getLoadKw().doubleValue()) / 60;
+        for (HourlyPowerTotals hour : hourlyTotals) {
+            generationKwh += toDouble(hour.getSolarKwSum()) / 60;
+            // 공장에서 바로 쓴 양 = SQL이 분마다 min(태양광, 공장 소비)을 구해서 더한 값
+            selfUseKwh += toDouble(hour.getMinSolarLoadKwSum()) / 60;
         }
         Double emissionFactor = settingNumber("carbon.emission_factor");
         return new ReportSolar(
@@ -402,11 +411,9 @@ public class ReportService {
                 .toList();
     }
 
-    // setting 테이블의 값을 숫자로 읽음. 없으면 null
+    // setting 값을 메모리 캐시에서 숫자로 읽음 (DB는 안 읽음). 없으면 null
     private Double settingNumber(String key) {
-        return settingRepository.findById(key)
-                .map(setting -> Double.valueOf(setting.getValue()))
-                .orElse(null);
+        return settingCache.getNumber(key);
     }
 
     // 그 시각이 들어가는 요금 시간대. 끝 시각 00:00은 하루 끝(24시)으로 봄
@@ -458,6 +465,14 @@ public class ReportService {
             case SKIPPED, EXPIRED -> "IGNORED";
             case PENDING -> "RECOMMENDED";
         };
+    }
+
+    private double toDouble(BigDecimal value) {
+        return value == null ? 0 : value.doubleValue();
+    }
+
+    private Double toDoubleOrNull(BigDecimal value) {
+        return value == null ? null : value.doubleValue();
     }
 
     // 소수 1자리로 반올림 (예: 12.345 → 12.3)

@@ -64,7 +64,13 @@ const menus = [
     ],
   },
   { label: '보고서', children: [{ label: '월간 성적표', to: '/report' }] },
-  { label: '운영 로그', children: [{ label: '추천 이력', to: '/logs' }] },
+  {
+    label: '운영 로그',
+    children: [
+      { label: '추천 이력', to: '/logs' },
+      { label: '전력 이력', to: '/logs/power' },
+    ],
+  },
 ]
 
 // 왼쪽 메뉴 전체를 접었는지. 접으면 좁은 띠만 남고 본문이 넓어짐

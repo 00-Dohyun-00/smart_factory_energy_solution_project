@@ -2,9 +2,7 @@ package com.smartfactory.energy.report;
 
 import static com.smartfactory.energy.TestData.dayTariffs;
 import static com.smartfactory.energy.TestData.interval;
-import static com.smartfactory.energy.TestData.powers;
 import static com.smartfactory.energy.TestData.recommendation;
-import static com.smartfactory.energy.TestData.setting;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,8 +11,9 @@ import static org.mockito.Mockito.when;
 
 import com.smartfactory.energy.analysis.PeakAnalysisService;
 import com.smartfactory.energy.ess.EssStatusMinuteRepository;
+import com.smartfactory.energy.ess.EssSocTotals;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
-import com.smartfactory.energy.power.SitePowerMinute;
+import com.smartfactory.energy.power.HourlyPowerTotals;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.recommendation.Recommendation;
 import com.smartfactory.energy.recommendation.RecommendationAction;
@@ -23,15 +22,14 @@ import com.smartfactory.energy.recommendation.RecommendationRepository;
 import com.smartfactory.energy.recommendation.RecommendationStatus;
 import com.smartfactory.energy.report.dto.ReportResponse;
 import com.smartfactory.energy.report.dto.ReportTariffUsage;
-import com.smartfactory.energy.setting.SettingRepository;
-import com.smartfactory.energy.tariff.TariffPeriodRepository;
+import com.smartfactory.energy.setting.SettingCache;
+import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.tariff.TariffSeason;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,8 +47,8 @@ class ReportServiceTest {
     @Mock DemandInterval15mRepository demandInterval15mRepository;
     @Mock EssStatusMinuteRepository essStatusMinuteRepository;
     @Mock RecommendationRepository recommendationRepository;
-    @Mock TariffPeriodRepository tariffPeriodRepository;
-    @Mock SettingRepository settingRepository;
+    @Mock TariffPeriodCache tariffPeriodCache;
+    @Mock SettingCache settingCache;
     ReportService reportService;
 
     // 오늘 날짜에 흔들리지 않게 "지난달"로 시험함
@@ -61,21 +59,67 @@ class ReportServiceTest {
     void setUp() {
         // 성적표는 피크 분석 계산을 그대로 씀 → 진짜 PeakAnalysisService에 같은 가짜 Repository를 넣음
         PeakAnalysisService peakAnalysisService = new PeakAnalysisService(
-                demandInterval15mRepository, recommendationRepository, settingRepository, tariffPeriodRepository);
+                demandInterval15mRepository, recommendationRepository, settingCache, tariffPeriodCache);
         reportService = new ReportService(sitePowerMinuteRepository, demandInterval15mRepository,
-                essStatusMinuteRepository, recommendationRepository, tariffPeriodRepository, settingRepository,
+                essStatusMinuteRepository, recommendationRepository, tariffPeriodCache, settingCache,
                 peakAnalysisService);
 
-        when(settingRepository.findById(anyString())).thenReturn(Optional.empty());
-        when(settingRepository.findById("peak.target_kw")).thenReturn(Optional.of(setting("peak.target_kw", "목표 피크", "1800")));
-        when(settingRepository.findById("tariff.base_charge")).thenReturn(Optional.of(setting("tariff.base_charge", "기본요금", "8000")));
+        when(settingCache.getNumber(anyString())).thenReturn(null);
+        when(settingCache.getNumber("peak.target_kw")).thenReturn(1800.0);
+        when(settingCache.getNumber("tariff.base_charge")).thenReturn(8000.0);
         for (TariffSeason season : TariffSeason.values()) {
-            when(tariffPeriodRepository.findBySeason(season)).thenReturn(dayTariffs(season));
+            when(tariffPeriodCache.findBySeason(season)).thenReturn(dayTariffs(season));
         }
-        when(essStatusMinuteRepository.findInPeriod(any(), any())).thenReturn(List.of());
+        when(essStatusMinuteRepository.socTotals(any(), any())).thenReturn(new EssSocTotals(null, null));
         when(recommendationRepository.findInPeriod(any(), any())).thenReturn(List.of());
         when(demandInterval15mRepository.findInPeriod(any(), any())).thenReturn(List.of());
-        when(sitePowerMinuteRepository.findInPeriod(any(), any())).thenReturn(List.of());
+        when(sitePowerMinuteRepository.hourlyTotals(any(), any())).thenReturn(List.of());
+    }
+
+    // hourlyTotals()가 돌려줄 가짜 1시간 합계 1줄 (테스트용 구현)
+    private record HourlyRow(LocalDateTime bucket, Long rowCount, BigDecimal gridKwSum, BigDecimal solarKwSum,
+                              BigDecimal dischargeKwSum, BigDecimal chargeKwSum, BigDecimal minSolarLoadKwSum)
+            implements HourlyPowerTotals {
+        @Override
+        public LocalDateTime getBucket() {
+            return bucket;
+        }
+
+        @Override
+        public Long getRowCount() {
+            return rowCount;
+        }
+
+        @Override
+        public BigDecimal getGridKwSum() {
+            return gridKwSum;
+        }
+
+        @Override
+        public BigDecimal getSolarKwSum() {
+            return solarKwSum;
+        }
+
+        @Override
+        public BigDecimal getDischargeKwSum() {
+            return dischargeKwSum;
+        }
+
+        @Override
+        public BigDecimal getChargeKwSum() {
+            return chargeKwSum;
+        }
+
+        @Override
+        public BigDecimal getMinSolarLoadKwSum() {
+            return minSolarLoadKwSum;
+        }
+    }
+
+    // 1시간 동안 gridKw가 일정했다고 보고 더한 합계 1줄 (태양광·ESS는 0)
+    private static HourlyRow hourlyRow(LocalDateTime hour, int minutes, double gridKw) {
+        return new HourlyRow(hour, (long) minutes, BigDecimal.valueOf(gridKw * minutes),
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
     }
 
     @Test
@@ -118,7 +162,7 @@ class ReportServiceTest {
     @Test
     void 목표를_넘은_구간의_처리_상태는_나중_추천보다_적용을_먼저_봄() {
         givenMonthData();
-        when(settingRepository.findById("peak.target_kw")).thenReturn(Optional.of(setting("peak.target_kw", "목표 피크", "1100")));
+        when(settingCache.getNumber("peak.target_kw")).thenReturn(1100.0);
         LocalDateTime w1300 = DAY.atTime(13, 0);
         when(recommendationRepository.findInPeriod(any(), any())).thenReturn(List.of(
                 defense(1, w1300.plusMinutes(1), RecommendationStatus.APPLIED),
@@ -158,13 +202,13 @@ class ReportServiceTest {
 
     // 지난달 10일: 01시 600kW 30분(경부하), 09시 1000kW 30분(중간), 13시 1200kW 30분(최대)
     private void givenMonthData() {
-        List<SitePowerMinute> rows = new ArrayList<>();
-        rows.addAll(powers(DAY.atTime(1, 0), 30, 600));
-        rows.addAll(powers(DAY.atTime(9, 0), 30, 1000));
-        rows.addAll(powers(DAY.atTime(13, 0), 30, 1200));
         LocalDateTime monthStart = MONTH.atDay(1).atStartOfDay();
-        when(sitePowerMinuteRepository.findInPeriod(monthStart, MONTH.plusMonths(1).atDay(1).atStartOfDay()))
-                .thenReturn(rows);
+        LocalDateTime monthEnd = MONTH.plusMonths(1).atDay(1).atStartOfDay();
+        when(sitePowerMinuteRepository.hourlyTotals(monthStart, monthEnd)).thenReturn(List.of(
+                hourlyRow(DAY.atTime(1, 0), 30, 600),
+                hourlyRow(DAY.atTime(9, 0), 30, 1000),
+                hourlyRow(DAY.atTime(13, 0), 30, 1200)
+        ));
         when(demandInterval15mRepository.findInPeriod(any(), any())).thenReturn(List.of(
                 interval(DAY.atTime(1, 0), 600, 600, 15),
                 interval(DAY.atTime(1, 15), 600, 600, 15),

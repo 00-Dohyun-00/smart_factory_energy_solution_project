@@ -12,15 +12,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class TariffPeriodService {
 
-    private final TariffPeriodRepository tariffPeriodRepository;
+    private final TariffPeriodCache tariffPeriodCache;
 
     // 요금 시간대표 조회. season이 없으면 전체, 있으면 그 계절만 (계절 → 시작 시각 순)
     public List<TariffPeriodResponse> findAll(String season) {
         List<TariffPeriod> periods;
         if (season == null || season.isBlank()) {
-            periods = tariffPeriodRepository.findAll();
+            periods = tariffPeriodCache.findAll();
         } else {
-            periods = tariffPeriodRepository.findBySeason(toSeason(season));
+            periods = tariffPeriodCache.findBySeason(toSeason(season));
         }
 
         return periods.stream()

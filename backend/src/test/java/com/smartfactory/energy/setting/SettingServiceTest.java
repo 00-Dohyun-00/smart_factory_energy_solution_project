@@ -28,6 +28,7 @@ class SettingServiceTest {
 
     @Mock SettingRepository settingRepository;
     @Mock SettingHistoryRepository settingHistoryRepository;
+    @Mock SettingCache settingCache;
     @InjectMocks SettingService settingService;
 
     Setting target;
