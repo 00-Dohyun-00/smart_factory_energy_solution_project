@@ -253,10 +253,6 @@ const kpis = computed(() => {
       prefix: s ? (PCS_SHORT[s.pcsStatus] ?? '') : '',
       prefixIcon: s?.pcsStatus ?? '', // 글자 앞 아이콘 (대기 · 방전 · 충전)
       value: formatKw(essKw),
-      essLegend: [
-        { label: 'ESS 충전', className: 'fill-charge hatched' },
-        { label: 'ESS 방전', className: 'fill-discharge' },
-      ],
       unit: 'kW',
       // 숫자(대기 0.0 kW) 바로 옆에 최대 출력 (아랫줄을 배터리실 온도에 크게 쓰려고 옮김)
       valueNote: s ? `최대 출력 ${maxPowerKw ? formatKw(maxPowerKw) : '—'} kW` : '',
@@ -301,12 +297,6 @@ const kpis = computed(() => {
           aria-hidden="true"
         >
           <!-- 세로로 세운 건전지 (2026-11-19). 꼭지는 위쪽 -->
-          <defs>
-            <pattern id="ess-charge-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(25)">
-              <rect width="6" height="6" fill="var(--gauge-charge)" opacity="0.28" />
-              <line x1="0" y1="0" x2="0" y2="6" stroke="var(--gauge-charge)" stroke-width="2" opacity="0.9" />
-            </pattern>
-          </defs>
           <rect class="battery-body" x="44" y="9" width="32" height="58" rx="5" />
           <rect class="battery-cap" x="53" y="3" width="14" height="5" rx="1.5" />
           <!-- 안쪽 칸(바탕) + 잔량 막대: 아래에서부터 잔량만큼 이어서 차오름 (칸 나눔 없음) -->
@@ -383,12 +373,6 @@ const kpis = computed(() => {
           </span>
         </p>
         <!-- ESS: '왼쪽 충전' | '오른쪽 방전'. 양쪽 칸 폭을 같게(1fr) 두어 '|'가 언제나 정확히 가운데 -->
-        <p v-else-if="kpi.essLegend" class="kpi-sub kpi-ess-legend">
-          <span v-for="item in kpi.essLegend" :key="item.label" class="legend-item">
-            <span class="swatch" :class="item.className" aria-hidden="true"></span>
-            {{ item.label }}
-          </span>
-        </p>
         <p v-else-if="kpi.sides" class="kpi-sub kpi-sides">
           <span class="side-left">{{ kpi.sides[0] }}</span>
           <span class="side-bar" aria-hidden="true">|</span>
@@ -677,16 +661,6 @@ const kpis = computed(() => {
 .swatch.fill-ess {
   background: var(--gauge-ess);
 }
-.swatch.fill-charge.hatched {
-  background: repeating-linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--gauge-charge) 38%, var(--card)) 0 3px,
-    var(--gauge-charge) 3px 5px
-  );
-}
-.swatch.fill-discharge {
-  background: var(--gauge-discharge);
-}
 /* 온도계 아이콘 */
 .thermo {
   width: 10px;
@@ -731,9 +705,6 @@ const kpis = computed(() => {
 .battery.discharge .battery-arrow {
   color: var(--gauge-discharge);
   fill: var(--gauge-discharge);
-}
-.battery.charge .battery-level {
-  fill: url(#ess-charge-hatch);
 }
 .battery-soc {
   font-size: 14px;
