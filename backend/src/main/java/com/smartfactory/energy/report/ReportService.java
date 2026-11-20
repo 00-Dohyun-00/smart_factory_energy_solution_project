@@ -269,7 +269,7 @@ public class ReportService {
                 .toList();
     }
 
-    // ---------- ESS 운용 (ess) ----------
+    // ---------- ESS 운용 기록 (ess) ----------
 
     private ReportEss makeEss(List<HourlyPowerTotals> hourlyTotals, LocalDateTime start, LocalDateTime end,
                               List<Recommendation> recommendations, Map<LocalDateTime, Double> resultPeaks,

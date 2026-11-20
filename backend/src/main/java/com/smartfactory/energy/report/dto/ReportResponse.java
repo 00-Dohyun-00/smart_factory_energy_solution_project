@@ -19,7 +19,7 @@ public record ReportResponse(
         List<PeakHeatmapCell> heatmap,  // 날짜 × 시각 히트맵 (피크 분석과 같은 모양)
         ReportBill bill,                // 전기요금 추정
         List<ReportExceeded> exceeded,  // 목표를 넘은 15분 구간 (최신 순)
-        ReportEss ess,                  // ESS 운용
+        ReportEss ess,                  // ESS 운용 기록
         ReportSolar solar               // 태양광·탄소
 ) {
 

@@ -3,7 +3,7 @@ package com.smartfactory.energy.report.dto;
 import java.util.List;
 
 /**
- * ESS 운용 결과.
+ * ESS 운용 기록 결과.
  */
 public record ReportEss(
         List<ReportDailyDischarge> dailyDischarge, // 날짜별 방전량
