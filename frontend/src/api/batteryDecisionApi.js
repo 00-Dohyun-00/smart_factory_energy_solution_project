@@ -6,7 +6,7 @@ import { api } from '@/api/client'
 // 추천이 없으면 백엔드가 204(본문 없음)를 주고, api()가 null을 돌려줌
 export const getLatestBatteryDecision = () => api('/recommendations/latest')
 
-// 기간 안의 추천 이력, 최신 순 (명세 8번: GET /api/recommendations?from=&to=, 최대 62일)
+// 기간 안의 추천 이력, 최신 순 (명세 8번: GET /api/recommendations?from=&to=, 최대 121일)
 export const getBatteryDecisions = (from, to) => api(`/recommendations?from=${from}&to=${to}`)
 
 // 추천 적용 / 넘기기 (명세 3번: PATCH /api/recommendations/{id}, status: 'APPLIED' 또는 'IGNORED')

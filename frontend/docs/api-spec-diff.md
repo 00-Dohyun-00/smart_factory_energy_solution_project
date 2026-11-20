@@ -21,9 +21,9 @@
 | 5 | `GET /api/site-powers/today` | `getTodayBatteryStatuses` | 통합 오늘 그래프 | 연결됨 (11-19) |
 | 6 | `GET /api/site-powers/recent` | — | — | 화면에서 안 씀 (백엔드에도 없음) |
 | 7 | `GET /api/zones/{zoneCode}` (`Z1`~`Z6`) | `getZoneRecent` | 설비 모니터링 구역 상세 | 연결됨 (11-19) |
-| 8 | `GET /api/recommendations?from=&to=` (최대 62일) | `getBatteryDecisions` | 추천 이력, 추이 분석 | 연결됨 (11-17) |
+| 8 | `GET /api/recommendations?from=&to=` (최대 121일) | `getBatteryDecisions` | 추천 이력, 추이 분석 | 연결됨 (11-17) |
 | 9 | `GET /api/reports?month=` | `getReport` | 월간 성적표 | 연결됨 (11-18) |
-| 10 | `GET /api/analyses/trend?from=&to=&interval=` (최대 62일) | `getTrendAnalysis` | 추이 분석 | 연결됨 (11-18) |
+| 10 | `GET /api/analyses/trend?from=&to=&interval=` (최대 121일) | `getTrendAnalysis` | 추이 분석 | 연결됨 (11-18) |
 | 11 | `GET /api/settings` | `getSettings` | 왼쪽 메뉴, 환경 설정 | 연결됨 (11-18) |
 | 12 | `PUT /api/settings` 본문 `[{ key, value }]` | `updateSettings` | 환경 설정 | 연결됨 (11-18) |
 | 13 | `GET /api/setting-histories?from=&to=` | `getSettingHistories` | 환경 설정 | 연결됨 (11-18) |
@@ -87,7 +87,7 @@
 
 ### 1-8. 공통
 
-- **기간 제한:** 기간 조회 API(8, 10, 피크 분석)는 최대 62일이다. 화면이 요청 전에 막고 "기간은 최대 62일까지 조회할 수 있습니다."를 보여 준다.
+- **기간 제한:** 기간 조회 API는 8, 10번이 최대 121일(동절기를 한 번에 보려고 2026-11-20에 늘림), 피크 분석이 최대 62일이다. 화면이 요청 전에 막고 "기간은 최대 N일까지 조회할 수 있습니다."를 보여 준다.
 - **오류 응답:** `{ "status", "message" }`. 화면은 `message`를 그대로 보여 준다.
 - **폴링:** 갱신 주기는 설정 `operation.poll_seconds`(공용 DB 값)를 쓴다. 숫자가 아니거나 1보다 작으면 5초를 쓰고, 앞 요청이 끝나기 전에는 다음 요청을 건너뛴다.
 - **[적용]·[넘기기]:** 공용 DB에 바로 기록되고, 적용하면 시뮬레이터에 ESS 명령이 내려간다.

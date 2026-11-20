@@ -29,7 +29,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class RecommendationService {
 
     // 한 번에 조회할 수 있는 최대 기간 (일)
-    private static final int MAX_DAYS = 62;
+    // 추이 분석 화면에서 동절기(11월 1일 ~ 2월 말, 윤년이면 121일)를 한 번에 보려고 62 → 121로 늘림
+    private static final int MAX_DAYS = 121;
 
     // 로그인이 없어서 화면에서 적용/넘기면 처리자는 항상 "운영자"
     private static final String OPERATOR = "운영자";
