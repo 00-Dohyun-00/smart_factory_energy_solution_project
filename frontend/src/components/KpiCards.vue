@@ -1,5 +1,5 @@
 <!--
-  KPI 카드 4개: 공장 소비전력 · 한전 구매전력 · 태양광 발전량 · ESS 충·방전(잔량 · 배터리실 온도 포함)
+  KPI 카드 4개: 공장 총 소비전력 · 구매전력 · 태양광 발전량 · ESS 충·방전(잔량 · 배터리실 온도 포함)
   (배터리 잔량 카드는 ESS 건전지와 겹쳐서 뺐음, 2026-11-19)
   왼쪽부터 "공장 소비 = 한전 + 태양광 + ESS" 순서로 읽히게 놓았습니다.
   멀리서도 한눈에 보이도록 숫자 위에 반원 계기판(바늘)을 그립니다.
@@ -88,8 +88,8 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
 const PCS_SHORT = { DISCHARGING: '방전', CHARGING: '충전', STANDBY: '대기' }
 
 // 계기판 눈금 끝(최대값)을 목표 피크의 몇 배로 잡을지. 화면에 그리는 범위일 뿐 판단 기준이 아님
-const LOAD_SCALE = 1.5 // 공장 소비전력
-const GRID_SCALE = 1.2 // 한전 구매전력
+const LOAD_SCALE = 1.5 // 공장 총 소비전력
+const GRID_SCALE = 1.2 // 구매전력
 
 // 0~1 사이로 자름 (눈금 밖의 값은 바늘을 끝에 둠)
 function clamp(ratio) {
@@ -131,7 +131,7 @@ function needle(ratio) {
   }
 }
 
-// 한전 구매전력이 목표 피크의 몇 %인지 (표시용 비율: 백엔드 값 두 개를 나눈 것)
+// 구매전력이 목표 피크의 몇 %인지 (표시용 비율: 백엔드 값 두 개를 나눈 것)
 const gridPercent = computed(() =>
   shown.value ? (shown.value.gridKw / shown.value.targetPeakKw) * 100 : null,
 )
@@ -145,7 +145,7 @@ const kpis = computed(() => {
   const essKw = s ? (charging ? s.chargeKw : s.dischargeKw) : null
   const maxPowerKw = settingsStore.values['ess.max_power_kw']
 
-  // 공장 소비전력: 눈금 끝까지 중 지금 위치를 공급원 비율대로 나눠 칠함
+  // 공장 총 소비전력: 눈금 끝까지 중 지금 위치를 공급원 비율대로 나눠 칠함
   // liveLoadKw는 raw_factory_load를 그 순간 시각으로 바로 읽은 값이라 매초 바뀜 (loadKw는 1분 평균이라 1분에 한 번만 바뀜)
   const loadMax = target ? target * LOAD_SCALE : null
   const loadNow = s?.liveLoadKw ?? s?.loadKw
@@ -153,19 +153,19 @@ const kpis = computed(() => {
   const gridEnd = s ? (loadFill * s.sourceRatio.gridPercent) / 100 : 0
   const solarEnd = s ? gridEnd + (loadFill * s.sourceRatio.solarPercent) / 100 : 0
 
-  // 한전 구매전력: 정상 · 주의 · 경고 띠 (기준선은 백엔드가 준 값)
+  // 구매전력: 정상 · 주의 · 경고 띠 (기준선은 백엔드가 준 값)
   const gridMax = target ? target * GRID_SCALE : null
   const warnAt = s && gridMax ? (s.warnKw / gridMax) * 100 : 0
   const targetAt = s && gridMax ? (target / gridMax) * 100 : 0
 
-  // 한전 구매전력이 있는 구간
+  // 구매전력이 있는 구간
   const gridClass = s ? zoneClass(s.gridKw, s.warnKw, target) : ''
 
   return [
     {
       key: 'load',
       dot: 'mix', // 계기판이 한전 · 태양광 · ESS 세 색으로 칠해지므로 세 색을 나란히
-      name: '공장 소비전력',
+      name: '공장 총 소비전력',
       value: formatKw(loadNow),
       unit: 'kW',
       // 아랫줄: 각 공급원이 계기판에서 어떤 색인지 작은 네모로 함께 보여 줌
@@ -197,7 +197,7 @@ const kpis = computed(() => {
     {
       key: 'grid',
       dot: gridClass, // 지금 구간 색 (정상 초록 · 주의 주황 · 목표 초과 빨강)
-      name: '한전 구매전력',
+      name: '구매전력',
       value: formatKw(s?.gridKw),
       unit: 'kW',
       // 이 카드는 지금 이 순간의 값이라, 순간적으로 목표를 넘어도 피크(15분 평균) 경고는 아님
@@ -248,7 +248,7 @@ const kpis = computed(() => {
           : s.pcsStatus === 'DISCHARGING'
             ? 'fill-discharge'
             : 'fill-ess',
-      name: '배터리 잔량 (SOC)', // 잔량 건전지가 주인공이라 이름을 바꿈 (충·방전 상태와 kW는 아래에 그대로)
+      name: 'ESS 잔량', // 잔량 건전지가 주인공이라 이름을 바꿈 (충·방전 상태와 kW는 아래에 그대로)
       // 숫자 앞에 지금 무엇을 하는 중인지 적음 (방전 500 kW / 충전 300 kW / 대기 0.0 kW)
       prefix: s ? (PCS_SHORT[s.pcsStatus] ?? '') : '',
       prefixIcon: s?.pcsStatus ?? '', // 글자 앞 아이콘 (대기 · 방전 · 충전)
@@ -637,7 +637,7 @@ const kpis = computed(() => {
 .kpi-prefix.standby .prefix-icon {
   color: var(--mute);
 }
-/* 공장 소비전력 아랫줄: 공급원마다 계기판 색 네모 */
+/* 공장 총 소비전력 아랫줄: 공급원마다 계기판 색 네모 */
 .legend-item {
   display: inline-flex; /* 네모 + 이름 + % 를 한 덩어리로 (중간에서 줄이 바뀌지 않음) */
   align-items: center;

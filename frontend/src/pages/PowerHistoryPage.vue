@@ -25,8 +25,8 @@ const router = useRouter()
 // 표에 보일 줄 고르기
 const ROW_FILTERS = [
   { value: 'ALL', label: '전체' },
-  { value: 'EXCEEDED', label: '피크 초과만' },
-  { value: 'EVENT', label: '이벤트 있는 구간만' },
+  { value: 'EXCEEDED', label: '피크 초과' },
+  { value: 'EVENT', label: '이벤트 구간' },
 ]
 // 단계는 색만으로 구분하지 않도록 도형 + 글자로 표시 (위쪽 상태 표시줄과 같은 표시)
 const LEVEL_INFO = {
@@ -54,7 +54,7 @@ const fromDate = ref('') // 예: '2026-11-14'
 const toDate = ref('')
 // 추이 그래프의 빨간 점을 눌러 들어오면 그 15분 구간의 시작 (예: '2026-11-19T14:15:00'). 표에서 강조함
 const focusAt = ref('')
-// 기본은 "이벤트 있는 구간만" (기록이 없는 시간까지 다 보이면 표가 너무 길어짐)
+// 기본은 "이벤트 구간" (기록이 없는 시간까지 다 보이면 표가 너무 길어짐)
 const rowFilter = ref('EVENT')
 
 // 한 번에 조회할 수 있는 최대 기간 (15분 구간이 하루 96줄이라 7일이면 672줄. 백엔드 이벤트 · 설비별 전력 API도 최대 7일)
@@ -236,7 +236,7 @@ const rows = computed(() =>
 
 const isFocus = (row) => row.start === focusAt.value
 
-// 조건 초기화: 오늘 · 이벤트 있는 구간만
+// 조건 초기화: 오늘 · 이벤트 구간
 function resetFilters() {
   rowFilter.value = 'EVENT'
   clearFocus()

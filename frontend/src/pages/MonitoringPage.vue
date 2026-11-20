@@ -1,6 +1,6 @@
 <!--
   모니터링 > 통합
-  1줄: KPI 5개 (공장 소비전력 · 한전 구매전력 · 태양광 발전량 · ESS 충·방전 · 배터리 잔량)
+  1줄: KPI 5개 (공장 총 소비전력 · 구매전력 · 태양광 발전량 · ESS 충·방전 · 배터리 잔량)
   2줄: 예상 피크(15분 흐름 그래프) · ESS 추천
   3줄: 오늘 공장 소비 / 오늘 한전 구매 그래프 · 이벤트 로그(종류·단계 필터, 줄을 누르면 왼쪽 그래프에 표시)
 -->
@@ -357,7 +357,7 @@ function toggleSeries(name) {
 
 // 그래프 모양: 'line'(선) / 'stack'(누적 영역: 한전 구매 · 태양광을 쌓아 칠함)
 const CHART_STYLES = [
-  { value: 'line', label: '선' },
+  { value: 'line', label: '라인' }, // 선
   { value: 'stack', label: '누적 영역' },
 ]
 const chartStyle = ref('line')
@@ -402,7 +402,7 @@ const trendOption = computed(() => makeTrendOption(TREND_LINES.value, true))
       </p>
       <!-- 자동 모드일 때 멀리서도 보이게 제목 줄에 크게 표시 (실제 제어가 아니라 시뮬레이션) -->
       <p v-if="settingsStore.values['operation.auto_mode'] === true" class="mode-band">
-        <strong>자동 모드 (시뮬레이션)</strong>
+        <strong>자동 모드</strong>
         <span class="mode-sub">추천을 자동으로 적용 중</span>
       </p>
     </div>
@@ -438,7 +438,7 @@ const trendOption = computed(() => makeTrendOption(TREND_LINES.value, true))
       <div class="trends">
         <section class="card trend">
           <div class="card-head trend-head">
-            <h2 class="card-title">오늘의 전력 추이</h2>
+            <h2 class="card-title">금일 전력 추이</h2>
             <!-- 그래프 모양: 선 / 누적 영역 (제목 줄 오른쪽 끝) -->
             <div class="presets style-switch" role="group" aria-label="그래프 모양">
               <button
@@ -452,9 +452,7 @@ const trendOption = computed(() => makeTrendOption(TREND_LINES.value, true))
               </button>
             </div>
             <!-- 안내 글은 다음 줄로 (제목 줄에 버튼이 많아 한 줄에 두면 글자가 끼임) -->
-            <span class="note trend-note"
-              >15분 평균 (kW) · 회색 띠는 요금 비싼 시간 · ESS는 방전 +, 충전 −</span
-            >
+            <span class="note trend-note">15분 평균 (kW)</span>
             <!-- 범례: 그래프 바로 위 줄. 누르면 그 선을 끄고 켬 (끈 선은 흐리게) -->
             <div class="legend-buttons">
               <button
@@ -499,13 +497,13 @@ const trendOption = computed(() => makeTrendOption(TREND_LINES.value, true))
           <h2 class="card-title">이벤트 로그</h2>
           <div class="event-filters">
             <select v-model="eventCategory" class="filter" aria-label="종류">
-              <option value="ALL">종류 전체</option>
+              <option value="ALL">종류</option>
               <option v-for="(label, key) in EVENT_CATEGORIES" :key="key" :value="key">
                 {{ label }}
               </option>
             </select>
             <select v-model="eventLevel" class="filter" aria-label="단계">
-              <option value="ALL">단계 전체</option>
+              <option value="ALL">단계</option>
               <option v-for="(info, key) in EVENT_INFO" :key="key" :value="key">
                 {{ info.shape }} {{ info.label }}
               </option>

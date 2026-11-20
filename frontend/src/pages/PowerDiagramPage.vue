@@ -41,7 +41,7 @@ const STATE_INFO = {
 const zoneInAddress = route.query.zone
 const selectedZone = ref(ZONE_LABELS[zoneInAddress] ? zoneInAddress : 'Z2')
 const status = computed(() => realtimeStore.status)
-// "이 구역의 설비"에서 고른 설비 id (안 골랐으면 빈 글자). 원그래프에서 그 설비 조각을 강조함
+// "설비"에서 고른 설비 id (안 골랐으면 빈 글자). 원그래프에서 그 설비 조각을 강조함
 const selectedEquipment = ref('')
 
 // 게이지를 보는 방식 (설비와 구역 모두)
@@ -413,7 +413,7 @@ const equipmentShareOption = computed(() => {
           </div>
           <!-- 다음 줄 오른쪽: 안내 글 + 차단기 범례 -->
           <div class="head-right">
-            <span class="note">구역을 누르면 설비가 펼쳐집니다</span>
+            <!-- <span class="note">구역을 누르면 설비가 펼쳐집니다</span> -->
             <!-- 범례: 선 위의 작은 네모는 차단기 기호 (도면 표기, 상태 정보는 없음) -->
             <span class="legend"><span class="box" aria-hidden="true"></span>차단기</span>
           </div>
@@ -501,7 +501,7 @@ const equipmentShareOption = computed(() => {
         </p>
         <div v-else class="empty spinner-box"><LoadingSpinner /></div>
 
-        <!-- 오늘 최대 · 평균 · 사용량: "이 구역의 설비" 위 (최근 1시간 그래프 바로 아래) -->
+        <!-- 오늘 최대 · 평균 · 사용량: "설비" 위 (최근 1시간 그래프 바로 아래) -->
         <dl class="today">
           <div>
             <dt>오늘 최대</dt>
@@ -524,7 +524,7 @@ const equipmentShareOption = computed(() => {
         </dl>
         <!-- 위쪽에 진한 구분선: 구역 요약(위)과 설비 목록(아래) 영역을 나눔 -->
         <h3 class="sub-title equipment-title">
-          이 구역의 설비 <span class="sub-note">누르면 원그래프에 강조</span>
+          <!-- 설비 <span class="sub-note">누르면 원그래프에 강조</span> -->
         </h3>
         <!-- 보기 방식(상대값·절대값)을 바꿔도 칸 높이가 같아서 위 그래프와 원그래프 크기·위치가 변하지 않음 -->
         <div class="equipment-area">
@@ -833,7 +833,7 @@ const equipmentShareOption = computed(() => {
   font-size: 12.3px;
   font-weight: 700;
 }
-/* "이 구역의 설비" 위 구분선은 다른 제목보다 진하고 두껍게 (구역 영역과 설비 영역을 나눔) */
+/* "설비" 위 구분선은 다른 제목보다 진하고 두껍게 (구역 영역과 설비 영역을 나눔) */
 .sub-title.equipment-title {
   border-top: 2px solid var(--line-strong);
 }

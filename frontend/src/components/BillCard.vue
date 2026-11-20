@@ -121,7 +121,7 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
         </tr>
         <tr v-for="item in bill.byTariff" :key="item.period">
           <td>전력량요금 · {{ item.label }}</td>
-          <td class="sub">쓴 만큼</td>
+          <td class="sub">실사용량</td>
           <td class="right num">{{ formatInteger(item.kwh) }} kWh</td>
           <td class="right num sub">{{ formatOneDecimal(item.percent) }}%</td>
           <td class="right num">
@@ -142,13 +142,13 @@ const totalKwh = computed(() => props.bill.byTariff.reduce((sum, item) => sum + 
       기본요금 계산 방식은 아직 팀에서 확인 필요.
       화면에 "(확인 필요)"라고 적으면 인쇄물에도 찍히므로 여기 주석으로만 남김
     -->
-    <p class="foot">
+    <!-- <p class="foot">
       기본요금은 이 달 최대 피크로 계산했습니다.
       <template v-if="bill.baseChargeOverTarget > 0">
         목표 피크를 지켰다면 {{ formatManwon(bill.baseChargeOverTarget) }}만원 적었을 것으로
         추정됩니다.
       </template>
-    </p>
+    </p> -->
   </section>
 </template>
 

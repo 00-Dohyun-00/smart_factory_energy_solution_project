@@ -815,7 +815,7 @@ export async function fakeGetDecisions(from, to) {
 }
 
 // 설비별 전력: 기준 전력을 비중대로 나누고, 브레이징로와 사출기에는 변동분을 더함
-// (설비 전력을 모두 더하면 그 시각 공장 소비전력과 같음)
+// (설비 전력을 모두 더하면 그 시각 공장 총 소비전력과 같음)
 function equipmentsAt(time) {
   const seconds = time.getTime() / 1000
   const baseKw = baseLoadAt(time)
@@ -958,7 +958,7 @@ function dayInputs(dateKey) {
       middle,
       loadKw,
       solarKw,
-      netKw: loadKw - solarKw, // ESS가 없을 때의 한전 구매전력 (실제)
+      netKw: loadKw - solarKw, // ESS가 없을 때의 구매전력 (실제)
       planNetKw: forecastLoadKwOfTime(start, 'mean') - solarKw, // AI 예측으로 본 값 (요금 계산용)
       planPeakNetKw: forecastLoadKwOfTime(start, 'peak') - solarKw, // 상위 90% 예측 (방어선 판단용)
       period,
@@ -968,7 +968,7 @@ function dayInputs(dateKey) {
   return inputs
 }
 
-// 오늘 이미 끝난 15분 구간 중 가장 높았던 한전 구매전력 (0시 첫 구간 중이면 null)
+// 오늘 이미 끝난 15분 구간 중 가장 높았던 구매전력 (0시 첫 구간 중이면 null)
 function todayPeakOf(now) {
   const slot = now.getHours() * 4 + Math.floor(now.getMinutes() / 15)
   const ended = simulateDay(dateKeyOf(now)).slice(0, slot)
@@ -1521,14 +1521,14 @@ export async function fakeGetTrendAnalysis(from, to, interval) {
     }
     highlights.push({
       at: minGrid.recordedAt,
-      label: '한전 구매전력 최저',
+      label: '구매전력 최저',
       value: Math.round(minGrid.gridKw),
       unit: 'kW',
       level: 'INFO',
     })
   }
 
-  // 4) 시각(0~23시)별 평균 한전 구매전력과 그 시각의 요금 시간대
+  // 4) 시각(0~23시)별 평균 구매전력과 그 시각의 요금 시간대
   const hourly = []
   for (let hour = 0; hour < 24; hour++) {
     const list = raw.filter((item) => item.hour === hour)

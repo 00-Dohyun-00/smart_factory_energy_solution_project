@@ -153,7 +153,7 @@ onBeforeUnmount(() => {
 // 처리자 표시: 명세는 자동일 때 "자동 모드"를 보냄 → 실제 제어가 아니라는 뜻으로 "(시뮬레이션)"을 붙임
 function handlerText(appliedBy) {
   if (!appliedBy) return '—'
-  return appliedBy === '자동 모드' ? '자동 모드 (시뮬레이션)' : appliedBy
+  return appliedBy === '자동 모드' ? '자동 모드' : appliedBy
 }
 
 // ---- 표에 보여 줄 목록 (행동, 상태, 검색어로 거름) ----

@@ -87,7 +87,7 @@ const sources = computed(() => {
   return [
     {
       key: 'grid',
-      name: '한전 수전',
+      name: '구매 전력',
       centerX: 205,
       kw: status?.gridKw ?? null,
       sub: '',
@@ -96,7 +96,7 @@ const sources = computed(() => {
     },
     {
       key: 'solar',
-      name: '태양광 인버터',
+      name: '태양광 발전량',
       centerX: 595,
       kw: status?.solarKw ?? null,
       sub: '',
@@ -105,7 +105,7 @@ const sources = computed(() => {
     },
     {
       key: 'ess',
-      name: 'ESS (PCS)',
+      name: 'ESS',
       centerX: 985,
       kw: status ? (charging ? status.chargeKw : status.dischargeKw) : null,
       sub: status
@@ -442,7 +442,7 @@ function unitX(left, text, charWidth) {
         :x2="Math.max(selected.centerX, children[children.length - 1].centerX)"
         :y2="ZONE_Y + zoneHeight + 48"
       />
-      <!-- 설비 상자 (누르면 선택, 다시 누르면 풀림. 오른쪽 "이 구역의 설비"와 같은 선택을 씀) -->
+      <!-- 설비 상자 (누르면 선택, 다시 누르면 풀림. 오른쪽 "설비"와 같은 선택을 씀) -->
       <g
         v-for="item in children"
         :key="item.id"

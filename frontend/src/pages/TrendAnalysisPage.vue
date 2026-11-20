@@ -51,7 +51,7 @@ const STATUS_INFO = {
   AUTO: { shape: '◇', label: '자동' },
   IGNORED: { shape: '✕', label: '넘김' },
 }
-// "피크가 높았던 구간" 표의 "그때의 추천 처리" 기호: 위의 처리 상태에 "추천 중"(아직 처리 전)을 더함
+// "피크가 높았던 구간" 표의 "추천 처리" 기호: 위의 처리 상태에 "추천 중"(아직 처리 전)을 더함
 // (전력 그래프 위 추천 기호 기능은 2026-11-20에 뺌, 사용자 요청)
 const PIN_INFO = { ...STATUS_INFO, RECOMMENDED: { shape: '○', label: '추천 중' } }
 
@@ -568,7 +568,7 @@ const powerOption = computed(() => {
   }
   if (has('load')) series.push(lineSeries('공장 소비', 'loadKw', COLOR.ink))
 
-  // 목표 피크선은 한전 구매전력과 비교하는 선이라, 한전 구매를 켰을 때만 그림
+  // 목표 피크선은 구매전력과 비교하는 선이라, 한전 구매를 켰을 때만 그림
   const target = trend.value.targetPeakKw
   const lines = has('grid')
     ? // 목표 피크선은 공장 소비 선(먹색)과 구분되게 전용 자주색 (통합 화면의 목표 피크선과 같은 색)
@@ -1048,7 +1048,7 @@ const patternOption = computed(() => {
       <h1 class="crumb-title">추이 분석</h1>
       <!-- 조회 중 안내는 제목 옆에 둠: 조회 조건 카드 안에 두면 1366 화면에서 자리가 모자라 "보기"가 아랫줄로 밀렸음 -->
       <p v-if="analysisStore.loading" class="loading-note">불러오는 중입니다.</p>
-      <p class="crumb-note">공장이 쓴 전기를 한전 · 태양광 · ESS 중 어디서 채웠는지 봅니다</p>
+      <!-- <p class="crumb-note">공장이 쓴 전기를 한전 · 태양광 · ESS 중 어디서 채웠는지 봅니다</p> -->
     </div>
 
     <!-- 조회 조건 -->
@@ -1152,7 +1152,7 @@ const patternOption = computed(() => {
           </p>
         </div>
         <div>
-          <dt>평균 한전 구매전력</dt>
+          <dt>평균 구매전력</dt>
           <dd>
             <span class="num">{{ formatKw(summary.avgGridKw) }}</span> <small>kW</small>
           </dd>
@@ -1209,7 +1209,8 @@ const patternOption = computed(() => {
               <span class="power-legend">
                 <span class="power-legend-item">
                   <span class="power-swatch expected" aria-hidden="true"></span>
-                  방전하지 않았을 때 예상 (위로 남는 부분 = 저감량)
+                  <!-- 방전하지 않았을 때 예상 (위로 남는 부분 = 저감량)  -->
+                  저감량
                 </span>
                 <span class="power-legend-item">
                   <span class="power-swatch actual" aria-hidden="true"></span>
@@ -1296,7 +1297,7 @@ const patternOption = computed(() => {
                     patternStep === 'AUTO' ? ', 자동' : ''
                   }}).
                 </span>
-                <span class="foot-line">그래프를 끌거나 아래 막대로 좌우로 옮겨 봅니다.</span>
+                <!-- <span class="foot-line">그래프를 끌거나 아래 막대로 좌우로 옮겨 봅니다.</span> -->
                 <span v-if="activeStep === 'HOUR'" class="foot-line">
                   회색 띠는 최대부하 시간대입니다.
                 </span>
@@ -1352,9 +1353,10 @@ const patternOption = computed(() => {
             </p>
             <template v-else>
               <p class="mode-note">
-                <span v-if="windowMode === 'top'"
+                <!-- <span v-if="windowMode === 'top'"
                   >15분 구간 피크가 높은 순 · 누르면 그래프에 표시</span
-                >
+                > -->
+                <span v-if="windowMode === 'top'">15분 구간 피크가 높은 순</span>
                 <span v-else>
                   평균 <span class="num">{{ formatKw(heatAverageKw) }}</span> kW보다 높은 시각 ·
                   누르면 그래프에 표시
@@ -1370,7 +1372,7 @@ const patternOption = computed(() => {
                       <th class="rank-col">순위</th>
                       <th>대상 시간</th>
                       <th class="right-text">피크</th>
-                      <th>그때의 추천 처리</th>
+                      <th>추천 처리</th>
                     </tr>
                   </thead>
                   <tbody>

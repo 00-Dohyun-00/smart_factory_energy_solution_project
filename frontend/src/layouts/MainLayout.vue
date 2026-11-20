@@ -172,13 +172,7 @@ const peakMark = computed(() => {
 
       <!-- 접었을 때: 메뉴 대신 자동 모드, 지금 피크 단계, 연결 상태만 짧게 보여 줌 -->
       <div v-if="collapsed" class="rail">
-        <span
-          v-if="isAuto"
-          class="rail-auto"
-          role="img"
-          aria-label="자동 모드 (시뮬레이션)"
-          title="자동 모드 (시뮬레이션)"
-        >
+        <span v-if="isAuto" class="rail-auto" role="img" aria-label="자동 모드" title="자동 모드">
           자동
         </span>
         <span

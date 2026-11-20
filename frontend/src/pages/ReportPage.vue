@@ -209,7 +209,7 @@ const kpis = computed(() => {
       label: '평균 피크 저감량',
       value: formatKw(summary.avgReductionKw),
       unit: 'kW',
-      sub: `예상 대비 · 가장 크게 줄인 날 ${formatKw(summary.maxReductionKw)} kW`,
+      // sub: `예상 대비 · 가장 크게 줄인 날 ${formatKw(summary.maxReductionKw)} kW`,
     },
     {
       label: '전기요금 추정',
@@ -299,7 +299,7 @@ const peakOption = computed(() => {
   }
 })
 
-// ---- 피크가 몰리는 시간대 (날짜 × 시각 히트맵) ----
+// ---- 피크 히트맵 (날짜 × 시각 히트맵) ----
 // 세로로 긴 배치라 날짜 수에 맞춰 칸이 납작해지지 않게 높이를 잡음
 const heatHeight = computed(() => Math.max(240, dayRows.value.length * 14 + 60))
 
@@ -404,7 +404,7 @@ const essOption = computed(() => ({
       </div>
       <span class="period">{{ periodLabel }}</span>
       <!-- 금액·탄소는 추정값이라는 것을 제목 줄에서도 바로 보이게 함 (맨 아래 주의 문구와 같은 뜻) -->
-      <span class="estimate">요금 · 저감량 · 탄소는 추정값</span>
+      <!-- <span class="estimate">요금 · 저감량 · 탄소는 추정값</span> -->
       <div class="actions">
         <!-- 브라우저의 인쇄 창을 엶. 인쇄 창에서 "PDF로 저장"을 고르면 파일로 남길 수 있음 -->
         <button class="action" :disabled="!report || !report.hasData" @click="printReport">
@@ -464,9 +464,7 @@ const essOption = computed(() => ({
       <section class="card">
         <div class="card-head">
           <h2 class="card-title">일별 최대 피크와 저감량</h2>
-          <span class="note">
-            단위 kW · 빨강은 목표 초과 · 세로축은 {{ formatKw(peakAxisMin) }}부터
-          </span>
+          <span class="note"> 단위 kW {{ formatKw(peakAxisMin) }}부터 </span>
         </div>
         <Chart v-if="dailyPeaks.length" class="chart" :option="peakOption" :height="230" />
         <p v-else class="empty">이 달에는 일별 피크 기록이 없습니다.</p>
@@ -474,8 +472,8 @@ const essOption = computed(() => ({
 
       <section class="card">
         <div class="card-head">
-          <h2 class="card-title">피크가 몰리는 시간대</h2>
-          <span class="note">칸 하나 = 그 날 그 시각의 최대 15분 피크</span>
+          <h2 class="card-title">피크 히트맵</h2>
+          <!-- <span class="note">칸 하나 = 그 날 그 시각의 최대 15분 피크</span> -->
         </div>
         <!-- key: 날짜 수가 바뀌면 그래프 높이도 바뀌므로 새로 만듦 -->
         <!-- 목표 값이 없으면 색 단계(목표 대비 비율)를 나눌 수 없어서 그리지 않음 -->
@@ -535,10 +533,10 @@ const essOption = computed(() => ({
       </section>
 
       <div class="bottom">
-        <!-- ESS 운용 -->
+        <!-- ESS 운용 기록 -->
         <section class="card ess">
           <div class="card-head">
-            <h2 class="card-title">ESS 운용</h2>
+            <h2 class="card-title">ESS 운용 기록</h2>
             <span class="note">일별 방전량 (kWh)</span>
           </div>
           <div class="ess-body">
@@ -571,7 +569,7 @@ const essOption = computed(() => ({
                 <dd class="num">{{ formatOneDecimal(report.ess.minSocPercent) }} %</dd>
               </div>
               <div class="wide">
-                <dt>잔량 부족으로 방전 못 함</dt>
+                <dt>잔량 부족</dt>
                 <dd class="num">{{ formatInteger(report.ess.blockedCount) }} 회</dd>
               </div>
             </dl>
@@ -601,7 +599,7 @@ const essOption = computed(() => ({
               </dd>
             </div>
             <div>
-              <dt>한전 구매전력 감소</dt>
+              <dt>구매전력 감소</dt>
               <dd class="num">{{ formatInteger(report.solar.gridReductionKwh) }} kWh</dd>
             </div>
             <!-- 배출계수는 임시 값이라 팀에서 확인 필요. 인쇄물에 찍히지 않게 화면에는 적지 않음 -->
@@ -614,9 +612,9 @@ const essOption = computed(() => ({
         </section>
       </div>
 
-      <p class="caution">
+      <!-- <p class="caution">
         피크 저감량은 "방전하지 않았을 때의 예상"과 비교한 값이고, 금액과 탄소는 추정값입니다.
-      </p>
+      </p> -->
     </template>
   </div>
 </template>
