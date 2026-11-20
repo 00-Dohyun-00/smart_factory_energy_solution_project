@@ -57,7 +57,8 @@ const RESULT_LABELS = { DEFENDED: '달성', EXCEEDED: '초과' }
 const date = ref('') // 예: '2026-11-19'
 const time = ref('') // 예: '14:15'. 비어 있으면 하루 전체
 const range = ref('1')
-const rowFilter = ref('ALL')
+// 기본은 "이벤트 있는 구간만" (기록이 없는 시간까지 다 보이면 표가 너무 길어짐)
+const rowFilter = ref('EVENT')
 
 // "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
 const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) ?? '')
@@ -202,6 +203,7 @@ const allRows = computed(() => {
 
 const rows = computed(() =>
   allRows.value.filter((row) => {
+    if (isFocus(row)) return true // 추이 그래프 점에서 고른 구간은 조건과 상관없이 항상 보임
     if (rowFilter.value === 'EXCEEDED') return row.exceeded
     if (rowFilter.value === 'EVENT') return row.events.length > 0
     return true
@@ -212,7 +214,7 @@ const isFocus = (row) => row.start === focusStart.value
 
 // 조건 초기화: 오늘 하루 전체 · 전체 보기
 function resetFilters() {
-  rowFilter.value = 'ALL'
+  rowFilter.value = 'EVENT'
   range.value = '1'
   time.value = ''
   if (serverDate.value) date.value = serverDate.value
