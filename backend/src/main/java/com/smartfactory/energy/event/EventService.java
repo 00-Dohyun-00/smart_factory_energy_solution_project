@@ -17,8 +17,8 @@ public class EventService {
     // 한 번에 받을 수 있는 최대 개수
     private static final int MAX_LIMIT = 50;
 
-    // 기간 조회로 한 번에 볼 수 있는 최대 시간 (전력 이력 화면은 하루 단위로 봄)
-    private static final int MAX_RANGE_HOURS = 48;
+    // 기간 조회로 한 번에 볼 수 있는 최대 시간 (전력 이력 화면은 최대 7일까지 봄)
+    private static final int MAX_RANGE_HOURS = 7 * 24;
 
     private final EventLogRepository eventLogRepository;
 

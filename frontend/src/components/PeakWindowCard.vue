@@ -1,7 +1,7 @@
 <!--
   예상 피크 카드 (모니터링 > 통합)
   왼쪽: 단계·짧은 판정, 예상 피크(큰 숫자), 목표 피크·현재 누적·추가 방전
-  오른쪽: 15분 흐름 그래프 (구간 시작부터 지금까지 쌓인 값 → 끝까지 예상, 목표선)
+  오른쪽: 15분 흐름 그래프 (구간 시작부터 지금까지 쌓인 값 → 최종 예상 값, 목표선)
 
   2026-11-18 UI 피드백: "현재 15분 피크 구간"이 와닿지 않고 가로 막대 게이지가 별로라는 의견으로
   제목을 "예상 피크"로 바꾸고 막대 대신 흐름 그래프를 넣음. (이전 막대 모양은 커밋 dd472f1에 있음)
@@ -140,7 +140,7 @@ const chartOption = computed(() => {
       itemWidth: 16,
       itemHeight: 8,
       textStyle: { color: COLORS.mute, fontSize: 12 },
-      data: ['현재 누적', '끝까지 예상'],
+      data: ['현재 누적', '최종 예상 값'],
     },
     tooltip: {
       ...tooltipColors(),
@@ -188,7 +188,7 @@ const chartOption = computed(() => {
       },
       {
         // 지금 점에서 구간 끝의 예상 피크까지 점선으로 이음
-        name: '끝까지 예상',
+        name: '최종 예상 값',
         type: 'line',
         data: [
           { value: [now.minute, now.demandKw], symbol: 'none' },

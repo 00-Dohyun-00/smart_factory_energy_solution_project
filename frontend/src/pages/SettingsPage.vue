@@ -19,7 +19,7 @@ const realtimeStore = useRealtimeStore()
 // 운영 모드: 명세 키 operation.auto_mode의 값(true / false)으로 고름
 const MODES = [
   { value: false, label: '운영자 승인 모드', note: '추천을 사람이 보고 적용' },
-  { value: true, label: '자동 모드 (시뮬레이션)', note: '추천을 바로 반영한 것으로 표시' },
+  { value: true, label: '자동 모드', note: '추천을 바로 반영한 것으로 표시' },
 ]
 
 // 화면에 놓을 항목들. key는 명세 v0.2의 설정 키 그대로 (예: 'peak.target_kw')
@@ -29,7 +29,7 @@ const GROUPS = [
   {
     key: 'peak',
     title: '피크',
-    note: '피크 단계를 나누는 기준',
+    // note: '피크 단계를 나누는 기준',
     fields: [
       { key: 'peak.target_kw', label: '목표 피크', unit: 'kW', min: 100, max: 100000 },
       { key: 'peak.warn_ratio', label: '주의선', unit: '%', min: 50, max: 100 },
@@ -38,7 +38,7 @@ const GROUPS = [
   {
     key: 'ess',
     title: 'ESS',
-    note: '배터리를 안전하게 쓰는 범위',
+    // note: '배터리를 안전하게 쓰는 범위',
     fields: [
       { key: 'ess.capacity_kwh', label: '배터리 용량', unit: 'kWh', readOnly: true },
       { key: 'ess.max_power_kw', label: '최대 충·방전 출력', unit: 'kW', readOnly: true },
@@ -50,7 +50,7 @@ const GROUPS = [
   {
     key: 'operation',
     title: '운영',
-    note: '추천을 반영하는 방식',
+    // note: '추천을 반영하는 방식',
     fields: [
       { key: 'operation.auto_mode', label: '운영 모드', mode: true },
       // 아래 두 개는 명세에 키가 없음 → 화면에서 뺄지 팀 결정 대기 (docs/api-spec-diff.md 2-10)
@@ -79,7 +79,7 @@ const equipmentGroup = computed(() => {
   return {
     key: 'equipment',
     title: '설비 임계치',
-    note: '설비 전력이 이 값을 넘으면 설비 모니터링에서 빨갛게 표시',
+    // note: '설비 전력이 이 값을 넘으면 설비 모니터링에서 빨갛게 표시',
     wide: true, // 칸이 많아서 한 줄을 다 쓰고 3열로 놓음
     fields,
   }
@@ -233,7 +233,7 @@ function saveLabel(group) {
 }
 
 // ---- 표시용 글자 ----
-// 값 + 단위 (예: '1,800 kW', '자동 모드 (시뮬레이션)')
+// 값 + 단위 (예: '1,800 kW', '자동 모드')
 function valueText(field, value) {
   if (field.mode) return MODES.find((mode) => mode.value === value)?.label ?? '—'
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
@@ -254,10 +254,10 @@ function helpOf(field) {
   if (field.key === 'ess.soc_low') return '이 아래로는 방전하지 않음'
   if (field.key === 'ess.soc_high') return '이 위로는 충전하지 않음'
   if (field.key === 'ess.room_temp_limit') {
-    const now = realtimeStore.status
-      ? `, 지금 ${formatOneDecimal(realtimeStore.status.batteryTempC)} ℃`
-      : ''
-    return `넘으면 충·방전을 멈추고 대기${now}`
+    // const now = realtimeStore.status
+    //   ? `, 지금 ${formatOneDecimal(realtimeStore.status.batteryTempC)} ℃`
+    //   : ''
+    return `넘으면 충·방전을 멈추고 대기`
   }
   if (field.key === 'operation.poll_seconds') return '화면이 서버에서 새 값을 받아 오는 간격'
   if (field.key === 'operation.decision_valid_minutes') {
@@ -375,7 +375,7 @@ const historyRows = computed(() =>
               </p>
               <p v-else class="item-help">
                 자동 모드는 실제 설비를 제어하지 않습니다. 켜면 추천이 바로 반영된 것으로 기록되고
-                화면에 "자동 모드 (시뮬레이션)"으로 표시됩니다.
+                화면에 "자동 모드"으로 표시됩니다.
               </p>
             </template>
 
@@ -447,9 +447,7 @@ const historyRows = computed(() =>
       <section class="card history">
         <div class="card-head">
           <h2 class="card-title">변경 기록</h2>
-          <span class="note">
-            최근 {{ HISTORY_DAYS }}일 · 저장할 때마다 저장 전 값과 저장 후 값이 남습니다
-          </span>
+          <span class="note"> 최근 {{ HISTORY_DAYS }}일 </span>
         </div>
         <p v-if="settingsStore.historyError && !historyRows.length" class="empty" role="alert">
           변경 기록을 불러오지 못했습니다. ({{ settingsStore.historyError }})

@@ -20,7 +20,7 @@ public class EquipmentPowerController {
 
     private final EquipmentPowerService equipmentPowerService;
 
-    @Operation(summary = "기간 안의 15분 구간별 · 부하 설비별 평균 kW (최대 24시간)")
+    @Operation(summary = "기간 안의 15분 구간별 · 부하 설비별 평균 kW (최대 7일)")
     @GetMapping // GET /api/equipment-powers?from=2026-11-19T14:15:00&to=2026-11-19T14:30:00
     public List<EquipmentPowerResponse> findInPeriod(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,

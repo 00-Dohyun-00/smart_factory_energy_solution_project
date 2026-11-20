@@ -22,17 +22,11 @@ const realtimeStore = useRealtimeStore()
 const route = useRoute()
 const router = useRouter()
 
-// 고른 시각 앞뒤로 얼마나 볼지
-const RANGES = [
-  { value: '1', label: '앞뒤 1시간' },
-  { value: '3', label: '앞뒤 3시간' },
-  { value: 'DAY', label: '하루 전체' },
-]
 // 표에 보일 줄 고르기
 const ROW_FILTERS = [
   { value: 'ALL', label: '전체' },
-  { value: 'EXCEEDED', label: '피크 초과만' },
-  { value: 'EVENT', label: '이벤트 있는 구간만' },
+  { value: 'EXCEEDED', label: '피크 초과' },
+  { value: 'EVENT', label: '이벤트 구간' },
 ]
 // 단계는 색만으로 구분하지 않도록 도형 + 글자로 표시 (위쪽 상태 표시줄과 같은 표시)
 const LEVEL_INFO = {
@@ -55,11 +49,16 @@ const STATUS_LABELS = { RECOMMENDED: '추천 중', APPLIED: '적용', IGNORED: '
 const RESULT_LABELS = { DEFENDED: '달성', EXCEEDED: '초과' }
 
 // ---- 조회 조건 ----
-const date = ref('') // 예: '2026-11-19'
-const time = ref('') // 예: '14:15'. 비어 있으면 하루 전체
-const range = ref('1')
-// 기본은 "이벤트 있는 구간만" (기록이 없는 시간까지 다 보이면 표가 너무 길어짐)
+const preset = ref('today') // today(오늘) | week(최근 7일) | custom(직접 입력)
+const fromDate = ref('') // 예: '2026-11-14'
+const toDate = ref('')
+// 추이 그래프의 빨간 점을 눌러 들어오면 그 15분 구간의 시작 (예: '2026-11-19T14:15:00'). 표에서 강조함
+const focusAt = ref('')
+// 기본은 "이벤트 구간" (기록이 없는 시간까지 다 보이면 표가 너무 길어짐)
 const rowFilter = ref('EVENT')
+
+// 한 번에 조회할 수 있는 최대 기간 (15분 구간이 하루 96줄이라 7일이면 672줄. 백엔드 이벤트 · 설비별 전력 API도 최대 7일)
+const MAX_DAYS = 7
 
 // "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
 const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) ?? '')
@@ -73,25 +72,43 @@ function toDateTime(value) {
 const addMinutes = (dateTime, minutes) =>
   toDateTime(new Date(new Date(dateTime).getTime() + minutes * 60000))
 
-// 고른 시각이 들어 있는 15분 구간의 시작 (예: 14:22 → 14:15)
-const focusStart = computed(() => {
-  if (!date.value || !time.value) return ''
-  const [hour, minute] = time.value.split(':').map(Number)
-  return `${date.value}T${pad2(hour)}:${pad2(Math.floor(minute / 15) * 15)}:00`
+// '2026-11-01' ~ '2026-11-07' → 7 (시작일과 종료일을 모두 셈)
+function dayCount(from, to) {
+  const toTime = (date) => {
+    const [year, month, day] = date.split('-').map(Number)
+    return new Date(year, month - 1, day).getTime()
+  }
+  return Math.round((toTime(to) - toTime(from)) / 86400000) + 1
+}
+
+const dateError = computed(() => {
+  if (!fromDate.value || !toDate.value) return ''
+  if (fromDate.value > toDate.value) return '시작일이 종료일보다 늦습니다.'
+  // 요청을 보내기 전에 막음 (보내면 400이 남)
+  if (dayCount(fromDate.value, toDate.value) > MAX_DAYS) {
+    return `기간은 최대 ${MAX_DAYS}일까지 조회할 수 있습니다.`
+  }
+  return ''
 })
 
-// 조회할 기간 [시작, 끝). 시각이 없거나 "하루 전체"면 그날 0시 ~ 다음 날 0시
+// '2026-11-14'에서 며칠 전 날짜 구하기
+function daysBefore(date, days) {
+  const [year, month, day] = date.split('-').map(Number)
+  const result = new Date(year, month - 1, day - days)
+  return `${result.getFullYear()}-${pad2(result.getMonth() + 1)}-${pad2(result.getDate())}`
+}
+
+function applyPreset(name) {
+  preset.value = name
+  if (!serverDate.value) return
+  toDate.value = serverDate.value
+  fromDate.value = name === 'week' ? daysBefore(serverDate.value, 6) : serverDate.value
+}
+
+// 조회할 기간 [시작일 0시, 종료일 다음 날 0시)
 const period = computed(() => {
-  if (!date.value) return null
-  if (!focusStart.value || range.value === 'DAY') {
-    const from = `${date.value}T00:00:00`
-    return { from, to: addMinutes(from, 24 * 60) }
-  }
-  const hours = Number(range.value)
-  return {
-    from: addMinutes(focusStart.value, -hours * 60),
-    to: addMinutes(focusStart.value, 15 + hours * 60),
-  }
+  if (!fromDate.value || !toDate.value || dateError.value) return null
+  return { from: `${fromDate.value}T00:00:00`, to: addMinutes(`${toDate.value}T00:00:00`, 24 * 60) }
 })
 
 function load(showLoading = true) {
@@ -100,35 +117,41 @@ function load(showLoading = true) {
   historyStore.fetchEquipmentPowers(period.value.from, period.value.to)
 }
 
-// 조건이 바뀌면 다시 조회
-watch(period, () => load())
+// 기간이 바뀌면 다시 조회
+watch(
+  () => (period.value ? `${period.value.from}~${period.value.to}` : ''),
+  () => load(),
+)
 
-// 주소에 시각이 있으면(?at=2026-11-19T14:15:00) 그 시각으로 시작. 없으면 서버 날짜의 하루 전체
+// 주소에 시각이 있으면(?at=2026-11-19T14:15:00) 그날 하루를 조회하고 그 구간을 강조. 없으면 서버 날짜의 "오늘"
 function applyQuery() {
   const at = route.query.at
   if (typeof at === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(at)) {
-    date.value = at.slice(0, 10)
-    time.value = at.slice(11, 16)
-    range.value = '1'
+    const minute = Number(at.slice(14, 16))
+    focusAt.value = `${at.slice(0, 13)}:${pad2(Math.floor(minute / 15) * 15)}:00`
+    preset.value = 'custom'
+    fromDate.value = at.slice(0, 10)
+    toDate.value = at.slice(0, 10)
   }
 }
 applyQuery()
 // 이 화면에 있는 채로 다른 점을 눌러 들어와도 반영
 watch(() => route.query.at, applyQuery)
 
+// 서버 날짜를 처음 알게 되면 "오늘"로 조회 시작 (주소에 시각이 있었으면 이미 날짜가 있어 건너뜀)
 watch(
   serverDate,
   (value) => {
-    if (value && !date.value) date.value = value
+    if (value && !fromDate.value) applyPreset('today')
   },
   { immediate: true },
 )
 
-// 시각 칸을 바꾸면 주소도 같이 바꿈 (새로 고침해도 같은 화면이 보이게)
-watch([date, time], () => {
-  const at = focusStart.value || undefined
-  if (route.query.at !== at) router.replace({ query: at ? { at } : {} })
-})
+// 기간을 직접 바꾸면 강조하던 구간과 주소의 시각을 지움
+function clearFocus() {
+  focusAt.value = ''
+  if (route.query.at) router.replace({ query: {} })
+}
 
 // ---- 표의 줄: 15분 구간 하나 = 한 줄 ----
 // 백엔드 시각을 '2026-11-19T14:15' 모양 키로 맞춤 (초 표기가 달라도 같은 구간으로 보게)
@@ -211,14 +234,13 @@ const rows = computed(() =>
   }),
 )
 
-const isFocus = (row) => row.start === focusStart.value
+const isFocus = (row) => row.start === focusAt.value
 
-// 조건 초기화: 오늘 하루 전체 · 전체 보기
+// 조건 초기화: 오늘 · 이벤트 구간
 function resetFilters() {
   rowFilter.value = 'EVENT'
-  range.value = '1'
-  time.value = ''
-  if (serverDate.value) date.value = serverDate.value
+  clearFocus()
+  applyPreset('today')
 }
 
 // ---- 표의 칸 (화면 표와 CSV가 같이 씀) ----
@@ -399,7 +421,7 @@ function downloadExcel() {
   // 파일 받기는 화면 이동이 아니라서 RouterLink 대신 임시 링크를 만들어 누름
   const link = document.createElement('a')
   link.href = url
-  link.download = `전력이력_${period.value.from.slice(0, 16).replace(':', '')}_${period.value.to.slice(0, 16).replace(':', '')}.csv`
+  link.download = `전력이력_${fromDate.value}_${toDate.value}.csv`
   link.click()
   URL.revokeObjectURL(url)
 }
@@ -442,28 +464,39 @@ watch(
 
     <!-- 조회 조건 -->
     <section class="card filters" aria-label="조회 조건">
-      <label class="field">
-        <span class="field-label">날짜</span>
-        <input v-model="date" type="date" class="input" />
-      </label>
-      <label class="field">
-        <span class="field-label">시각</span>
-        <input v-model="time" type="time" step="900" class="input" />
-        <button v-if="time" class="reset" @click="time = ''">시각 지우기</button>
-      </label>
-      <div v-if="time" class="field">
-        <span class="field-label">범위</span>
-        <div class="presets" role="group" aria-label="범위">
+      <div class="field">
+        <span class="field-label">기간</span>
+        <div class="presets" role="group" aria-label="기간 빠른 선택">
           <button
-            v-for="item in RANGES"
-            :key="item.value"
-            :class="{ active: range === item.value }"
-            :aria-pressed="range === item.value"
-            @click="range = item.value"
+            :class="{ active: preset === 'today' }"
+            :aria-pressed="preset === 'today'"
+            @click="(clearFocus(), applyPreset('today'))"
           >
-            {{ item.label }}
+            오늘
+          </button>
+          <button
+            :class="{ active: preset === 'week' }"
+            :aria-pressed="preset === 'week'"
+            @click="(clearFocus(), applyPreset('week'))"
+          >
+            최근 7일
           </button>
         </div>
+        <input
+          v-model="fromDate"
+          type="date"
+          class="input num"
+          aria-label="시작일"
+          @change="((preset = 'custom'), clearFocus())"
+        />
+        <span aria-hidden="true">~</span>
+        <input
+          v-model="toDate"
+          type="date"
+          class="input num"
+          aria-label="종료일"
+          @change="((preset = 'custom'), clearFocus())"
+        />
       </div>
       <div class="field">
         <span class="field-label">보기</span>
@@ -479,6 +512,8 @@ watch(
           </button>
         </div>
       </div>
+
+      <p v-if="dateError" class="date-error" role="alert">{{ dateError }}</p>
     </section>
 
     <section class="card table-card">
@@ -487,17 +522,17 @@ watch(
         <button class="retry" @click="load()">다시 시도</button>
       </p>
       <p v-if="historyStore.equipmentError" class="notice" role="alert">
-        설비별 전력을 불러오지 못해 "많이 쓴 설비" 칸이 비어 있습니다. ({{
+        설비별 전력을 불러오지 못해 구역별 · 설비별 kW 칸이 비어 있습니다. ({{
           historyStore.equipmentError
         }})
       </p>
 
       <div v-if="historyStore.powerLoading" class="empty spinner-box"><LoadingSpinner /></div>
-      <div v-else-if="!date" class="empty spinner-box">
+      <div v-else-if="!fromDate" class="empty spinner-box">
         <LoadingSpinner text="서버에서 현재 시각을 받으면 오늘 기록을 조회합니다." />
       </div>
       <p v-else-if="!rows.length && !historyStore.powerError" class="empty">
-        조건에 맞는 구간이 없습니다. 날짜나 보기를 바꿔 보세요.
+        조건에 맞는 구간이 없습니다. 기간이나 보기를 바꿔 보세요.
       </p>
 
       <div v-else-if="rows.length" ref="tableWrap" class="table-wrap">
@@ -590,6 +625,10 @@ watch(
 }
 
 /* 조회 조건 */
+.date-error {
+  width: 100%;
+  color: var(--crit);
+}
 .filters {
   display: flex;
   flex-wrap: wrap;

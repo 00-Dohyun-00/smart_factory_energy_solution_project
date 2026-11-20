@@ -1,7 +1,7 @@
 <!--
   분석 > 피크 분석
   기간을 골라 "언제, 얼마나 높았나"를 들여다보는 화면
-  조회 조건 → 요약 숫자 4개 → 일별 최대 피크와 저감량 → 피크가 몰리는 시간대(히트맵) · 피크가 높았던 구간
+  조회 조건 → 요약 숫자 4개 → 일별 최대 피크와 저감량 → 피크 히트맵(히트맵) · 피크가 높았던 구간
 
   요약 숫자와 구간 순위는 백엔드가 계산해 준 값을 그대로 보여 줍니다.
 -->
@@ -290,7 +290,7 @@ const dailyOption = computed(() => {
   }
 })
 
-// ---- 피크가 몰리는 시간대 (날짜 × 시각 히트맵) ----
+// ---- 피크 히트맵 (날짜 × 시각 히트맵) ----
 // 날짜가 많아도 칸이 너무 납작해지지 않게 날짜 수에 맞춰 높이를 잡음
 // 표 높이를 넘는 피크 구간은 표 내부에서 스크롤해 모두 확인함
 const shownWindows = computed(() => analysisStore.peakWindows)
@@ -604,18 +604,16 @@ const heatOption = computed(() => {
       <section class="card daily">
         <div class="card-head">
           <h2 class="card-title">일별 최대 피크와 저감량</h2>
-          <span class="note">
-            단위 kW · 빨강은 목표 초과 · 세로축은 {{ formatKw(peakAxisMin) }}부터
-          </span>
+          <span class="note"> 단위 kW </span>
         </div>
         <FitChart :option="dailyOption" :min-height="90" />
       </section>
 
       <div class="bottom">
-        <!-- 피크가 몰리는 시간대 -->
+        <!-- 피크 히트맵 -->
         <section class="card heat">
           <div class="card-head">
-            <h2 class="card-title">피크가 몰리는 시간대</h2>
+            <h2 class="card-title">피크 히트맵</h2>
             <span class="note"> 진할수록 높음 · 굵은 테두리 = 표에서 누른 구간 </span>
           </div>
           <!-- 남은 높이를 채움 (날짜가 많으면 한 줄 높이가 줄어듦) -->
@@ -659,7 +657,7 @@ const heatOption = computed(() => {
                   <th class="rank-col">순위</th>
                   <th>대상 시간</th>
                   <th class="right-text">피크</th>
-                  <th>그때의 추천 처리</th>
+                  <th>추천 처리</th>
                 </tr>
               </thead>
               <tbody>

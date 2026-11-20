@@ -26,7 +26,7 @@ public class EventController {
         return eventService.findRecent(limit);
     }
 
-    @Operation(summary = "기간 안의 이벤트 목록 (오래된 순, 최대 48시간)")
+    @Operation(summary = "기간 안의 이벤트 목록 (오래된 순, 최대 7일)")
     @GetMapping(params = {"from", "to"}) // GET /api/events?from=2026-11-19T00:00:00&to=2026-11-20T00:00:00
     public List<EventResponse> findInPeriod(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,

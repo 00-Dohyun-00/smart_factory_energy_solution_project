@@ -12,24 +12,24 @@
 
 ## 0. 한눈에 보기
 
-| 번호 | API | 프론트 함수 (`src/api/`) | 쓰는 화면 | 상태 |
-|---|---|---|---|---|
-| 1 | `GET /api/site-powers/latest` | `getLatestBatteryStatus` | 왼쪽 메뉴, 통합, 설비 모니터링 | 연결됨 (11-19) |
-| 2 | `GET /api/recommendations/latest` (없으면 204) | `getLatestBatteryDecision` | 통합 ESS 추천 | 연결됨 (11-19) |
-| 3 | `PATCH /api/recommendations/{id}` 본문 `{ status }` | `updateBatteryDecision` | 통합 [적용]·[넘기기] | 연결됨 (11-19), 실제 클릭은 아직 확인 못 함 |
-| 4 | `GET /api/events?limit=30` | `getRecentEvents` | 통합 이벤트 로그 | 연결됨 (11-19) |
-| 5 | `GET /api/site-powers/today` | `getTodayBatteryStatuses` | 통합 오늘 그래프 | 연결됨 (11-19) |
-| 6 | `GET /api/site-powers/recent` | — | — | 화면에서 안 씀 (백엔드에도 없음) |
-| 7 | `GET /api/zones/{zoneCode}` (`Z1`~`Z6`) | `getZoneRecent` | 설비 모니터링 구역 상세 | 연결됨 (11-19) |
-| 8 | `GET /api/recommendations?from=&to=` (최대 121일) | `getBatteryDecisions` | 추천 이력, 추이 분석 | 연결됨 (11-17) |
-| 9 | `GET /api/reports?month=` | `getReport` | 월간 성적표 | 연결됨 (11-18) |
-| 10 | `GET /api/analyses/trend?from=&to=&interval=` (최대 121일) | `getTrendAnalysis` | 추이 분석 | 연결됨 (11-18) |
-| 11 | `GET /api/settings` | `getSettings` | 왼쪽 메뉴, 환경 설정 | 연결됨 (11-18) |
-| 12 | `PUT /api/settings` 본문 `[{ key, value }]` | `updateSettings` | 환경 설정 | 연결됨 (11-18) |
-| 13 | `GET /api/setting-histories?from=&to=` | `getSettingHistories` | 환경 설정 | 연결됨 (11-18) |
-| 16 | `GET /api/demand-intervals` | — | — | 안 씀: 피크 분석 응답의 `topWindows`로 대신함 |
-| (추가) | `GET /api/analyses/peak?from=&to=` (최대 62일) | `getPeakAnalysis` | 피크 분석 | 연결됨 (11-18) |
-| — | `GET /api/equipment`, `GET /api/tariff-periods`, `GET /api/zones`, `GET·POST /api/system/*` | — | — | 화면에서 안 씀 |
+| 번호   | API                                                                                         | 프론트 함수 (`src/api/`)   | 쓰는 화면                      | 상태                                          |
+| ------ | ------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------ | --------------------------------------------- |
+| 1      | `GET /api/site-powers/latest`                                                               | `getLatestBatteryStatus`   | 왼쪽 메뉴, 통합, 설비 모니터링 | 연결됨 (11-19)                                |
+| 2      | `GET /api/recommendations/latest` (없으면 204)                                              | `getLatestBatteryDecision` | 통합 ESS 추천                  | 연결됨 (11-19)                                |
+| 3      | `PATCH /api/recommendations/{id}` 본문 `{ status }`                                         | `updateBatteryDecision`    | 통합 [적용]·[넘기기]           | 연결됨 (11-19), 실제 클릭은 아직 확인 못 함   |
+| 4      | `GET /api/events?limit=30`                                                                  | `getRecentEvents`          | 통합 이벤트 로그               | 연결됨 (11-19)                                |
+| 5      | `GET /api/site-powers/today`                                                                | `getTodayBatteryStatuses`  | 통합 오늘 그래프               | 연결됨 (11-19)                                |
+| 6      | `GET /api/site-powers/recent`                                                               | —                          | —                              | 화면에서 안 씀 (백엔드에도 없음)              |
+| 7      | `GET /api/zones/{zoneCode}` (`Z1`~`Z6`)                                                     | `getZoneRecent`            | 설비 모니터링 구역 상세        | 연결됨 (11-19)                                |
+| 8      | `GET /api/recommendations?from=&to=` (최대 121일)                                           | `getBatteryDecisions`      | 추천 이력, 추이 분석           | 연결됨 (11-17)                                |
+| 9      | `GET /api/reports?month=`                                                                   | `getReport`                | 월간 성적표                    | 연결됨 (11-18)                                |
+| 10     | `GET /api/analyses/trend?from=&to=&interval=` (최대 121일)                                  | `getTrendAnalysis`         | 추이 분석                      | 연결됨 (11-18)                                |
+| 11     | `GET /api/settings`                                                                         | `getSettings`              | 왼쪽 메뉴, 환경 설정           | 연결됨 (11-18)                                |
+| 12     | `PUT /api/settings` 본문 `[{ key, value }]`                                                 | `updateSettings`           | 환경 설정                      | 연결됨 (11-18)                                |
+| 13     | `GET /api/setting-histories?from=&to=`                                                      | `getSettingHistories`      | 환경 설정                      | 연결됨 (11-18)                                |
+| 16     | `GET /api/demand-intervals`                                                                 | —                          | —                              | 안 씀: 피크 분석 응답의 `topWindows`로 대신함 |
+| (추가) | `GET /api/analyses/peak?from=&to=` (최대 62일)                                              | `getPeakAnalysis`          | 피크 분석                      | 연결됨 (11-18)                                |
+| —      | `GET /api/equipment`, `GET /api/tariff-periods`, `GET /api/zones`, `GET·POST /api/system/*` | —                          | —                              | 화면에서 안 씀                                |
 
 ---
 
@@ -65,13 +65,13 @@
 
 ### 1-5. 값이 없을 때 (`null`)
 
-| 응답 | 백엔드가 `null`을 주는 경우 | 화면 |
-|---|---|---|
-| `site-powers/latest`의 `weather` | 날씨 기록이 없을 때 (2026년 날씨 데이터 없음, #24-3) | 왼쪽 메뉴의 날씨 칸을 숨김 |
-| `recommendations/latest` | 추천이 없을 때 (204) | `api()`가 `null` → "아직 받은 추천이 없습니다" |
-| 분석·성적표의 `targetPeakKw` 등 | 설정 값을 못 찾을 때 | 목표선, 목표 초과/달성, 히트맵 색 단계를 그리지 않음 |
-| 성적표 `dailyPeaks`·`heatmap` | 기록이 없는 달 (`hasData: false`) | "기록 없음" |
-| 피크 분석 `summary`·`topWindows` 등 | `hasData: false` | "이 기간에는 기록이 없습니다" |
+| 응답                                | 백엔드가 `null`을 주는 경우                          | 화면                                                 |
+| ----------------------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
+| `site-powers/latest`의 `weather`    | 날씨 기록이 없을 때 (2026년 날씨 데이터 없음, #24-3) | 왼쪽 메뉴의 날씨 칸을 숨김                           |
+| `recommendations/latest`            | 추천이 없을 때 (204)                                 | `api()`가 `null` → "아직 받은 추천이 없습니다"       |
+| 분석·성적표의 `targetPeakKw` 등     | 설정 값을 못 찾을 때                                 | 목표선, 목표 초과/달성, 히트맵 색 단계를 그리지 않음 |
+| 성적표 `dailyPeaks`·`heatmap`       | 기록이 없는 달 (`hasData: false`)                    | "기록 없음"                                          |
+| 피크 분석 `summary`·`topWindows` 등 | `hasData: false`                                     | "이 기간에는 기록이 없습니다"                        |
 
 ### 1-6. `defenseKw` (추가 방전)
 
@@ -98,25 +98,25 @@
 
 받아도 문제는 없고, 백엔드 일을 줄이려면 나중으로 미뤄도 되는 것들이다.
 
-| API | 필드 |
-|---|---|
-| `site-powers/latest` | `sohPercent`, `todayPeakKw`, `monthPeakKw`, `todayEnergy.*`, `equipments[].origin` |
-| `recommendations` | `durationMinutes`, `reasonType`(화면은 `ruleLabel`만 씀) |
-| `events` | `recommendationId` |
-| `site-powers/latest` 설비 | `ratedKw` |
+| API                       | 필드                                                                               |
+| ------------------------- | ---------------------------------------------------------------------------------- |
+| `site-powers/latest`      | `sohPercent`, `todayPeakKw`, `monthPeakKw`, `todayEnergy.*`, `equipments[].origin` |
+| `recommendations`         | `durationMinutes`, `reasonType`(화면은 `ruleLabel`만 씀)                           |
+| `events`                  | `recommendationId`                                                                 |
+| `site-powers/latest` 설비 | `ratedKw`                                                                          |
 
 ---
 
 ## 3. 남은 차이와 백엔드에 요청한 것
 
-| 항목 | 상태 | 프론트 영향 |
-|---|---|---|
-| `site-powers/latest`의 설비에 구역 추가 (#29) | 반영됨 (`zoneId`, 11-19) | 임시 코드 지움 |
-| 2026년 날씨 데이터 없음 (#24-3) | 답변 대기 | 날씨 칸·온도 그래프 바깥 기온이 비어 있음 (화면은 오류 없이 숨김) |
-| 공용 DB에 한전 구매전력 음수 데이터 (#24-6) | 답변 대기 | 추이 분석 "눈에 띄는 구간"에 음수가 보일 수 있음 |
-| 팀 결정 4건: 추천 저장 빈도, 최신값 출처, 판단 방식(method) 칸 (#27) | 결정 대기 | method 칸이 생기면 추천 이력·ESS 카드에 "규칙 / 모델" 표시 |
-| 월간 성적표 엑셀 저장 (예: `GET /api/reports/{month}/excel`) | 계획 | 백엔드가 .xlsx를 만들어 주면 버튼만 연결 (프론트 라이브러리 추가 없음) |
-| 피크 분석 "시간대별 위험 · 피크 원인 구역" | 시안 단계 | 정해지면 피크 분석 응답에 필드 추가 요청 |
+| 항목                                                                 | 상태                     | 프론트 영향                                                            |
+| -------------------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------- |
+| `site-powers/latest`의 설비에 구역 추가 (#29)                        | 반영됨 (`zoneId`, 11-19) | 임시 코드 지움                                                         |
+| 2026년 날씨 데이터 없음 (#24-3)                                      | 답변 대기                | 날씨 칸·온도 그래프 바깥 기온이 비어 있음 (화면은 오류 없이 숨김)      |
+| 공용 DB에 구매전력 음수 데이터 (#24-6)                               | 답변 대기                | 추이 분석 "눈에 띄는 구간"에 음수가 보일 수 있음                       |
+| 팀 결정 4건: 추천 저장 빈도, 최신값 출처, 판단 방식(method) 칸 (#27) | 결정 대기                | method 칸이 생기면 추천 이력·ESS 카드에 "규칙 / 모델" 표시             |
+| 월간 성적표 엑셀 저장 (예: `GET /api/reports/{month}/excel`)         | 계획                     | 백엔드가 .xlsx를 만들어 주면 버튼만 연결 (프론트 라이브러리 추가 없음) |
+| 피크 분석 "시간대별 위험 · 피크 원인 구역"                           | 시안 단계                | 정해지면 피크 분석 응답에 필드 추가 요청                               |
 
 ---
 

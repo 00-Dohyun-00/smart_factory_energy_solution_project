@@ -26,8 +26,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class EquipmentPowerService {
 
-    // 한 번에 볼 수 있는 최대 시간 (하루)
-    private static final int MAX_RANGE_HOURS = 24;
+    // 한 번에 볼 수 있는 최대 시간 (7일, 전력 이력 화면의 최대 기간)
+    private static final int MAX_RANGE_HOURS = 7 * 24;
 
     private final EquipmentRepository equipmentRepository;
     private final ZoneRepository zoneRepository;

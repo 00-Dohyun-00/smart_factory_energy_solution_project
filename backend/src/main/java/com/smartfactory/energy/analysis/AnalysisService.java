@@ -359,7 +359,7 @@ public class AnalysisService {
                         round1(toDouble(minSolar.getSolarKw())), "kW", "INFO")));
 
         sitePowerMinuteRepository.findFirstByTsGreaterThanEqualAndTsLessThanOrderByGridKwAsc(start, end)
-                .ifPresent(minGrid -> result.add(new TrendHighlight(minGrid.getTs(), "한전 구매전력 최저",
+                .ifPresent(minGrid -> result.add(new TrendHighlight(minGrid.getTs(), "구매전력 최저",
                         round1(toDouble(minGrid.getGridKw())), "kW", "INFO")));
 
         return result;
