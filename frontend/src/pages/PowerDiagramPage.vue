@@ -499,7 +499,7 @@ const equipmentShareOption = computed(() => {
             다시 시도
           </button>
         </p>
-        <p v-else class="empty">불러오는 중입니다.</p>
+        <div v-else class="empty spinner-box"><LoadingSpinner /></div>
 
         <!-- 오늘 최대 · 평균 · 사용량: "이 구역의 설비" 위 (최근 1시간 그래프 바로 아래) -->
         <dl class="today">
@@ -1071,5 +1071,10 @@ const equipmentShareOption = computed(() => {
   .today dd {
     font-size: 14.2px;
   }
+}
+/* 불러오는 중: 이 칸을 덮는 공통 스피너(LoadingSpinner)를 칸 안에 둠 (통합 화면과 같은 모양) */
+.spinner-box {
+  position: relative;
+  min-height: 160px;
 }
 </style>

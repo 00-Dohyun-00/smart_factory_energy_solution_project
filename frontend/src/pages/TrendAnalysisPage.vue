@@ -9,6 +9,7 @@
 import { computed, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { useRouter } from 'vue-router'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import Chart from '@/components/Chart.vue'
 import FitChart from '@/components/FitChart.vue'
 import { useThemeStore } from '@/stores/useThemeStore'
@@ -1086,10 +1087,10 @@ const patternOption = computed(() => {
       <button class="retry" @click="load()">다시 시도</button>
     </p>
     <!-- 조회 기간은 서버 시각으로 정하므로, 서버 시각을 받기 전에는 조회하지 않음 -->
-    <p v-else-if="!trend && !serverDate" class="state">
-      서버에서 현재 시각을 받으면 자동으로 조회합니다.
-    </p>
-    <p v-else-if="!trend" class="state">불러오는 중입니다.</p>
+    <div v-else-if="!trend && !serverDate" class="state spinner-box">
+      <LoadingSpinner text="서버에서 현재 시각을 받으면 자동으로 조회합니다." />
+    </div>
+    <div v-else-if="!trend" class="state spinner-box"><LoadingSpinner /></div>
     <p v-else-if="!points.length" class="state">이 기간에는 기록이 없습니다. 기간을 바꿔 보세요.</p>
 
     <template v-else>
@@ -1260,7 +1261,9 @@ const patternOption = computed(() => {
             <!-- Chart.vue는 크기가 0이면 오류가 나므로 v-show 대신 v-if로 바꿔 끼움 -->
             <template v-if="hourlyView === 'time'">
               <FitChart v-if="patternBars.length" :option="patternOption" :min-height="40" />
-              <p v-else-if="analysisStore.patternLoading" class="state">불러오는 중입니다.</p>
+              <div v-else-if="analysisStore.patternLoading" class="state spinner-box">
+                <LoadingSpinner />
+              </div>
               <p v-else-if="analysisStore.patternError" class="state" role="alert">
                 불러오지 못했습니다. ({{ analysisStore.patternError }})
                 <button class="retry" @click="analysisStore.fetchPattern(fromDate, toDate)">
@@ -2028,5 +2031,10 @@ const patternOption = computed(() => {
   .track {
     width: 48px;
   }
+}
+/* 불러오는 중: 이 칸을 덮는 공통 스피너(LoadingSpinner)를 칸 안에 둠 (통합 화면과 같은 모양) */
+.spinner-box {
+  position: relative;
+  min-height: 160px;
 }
 </style>

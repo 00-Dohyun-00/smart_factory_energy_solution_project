@@ -7,6 +7,7 @@
 -->
 <script setup>
 import { computed, ref, watch } from 'vue'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import FitChart from '@/components/FitChart.vue'
 import { useThemeStore } from '@/stores/useThemeStore'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
@@ -553,10 +554,10 @@ const heatOption = computed(() => {
       <button class="retry" @click="load()">다시 시도</button>
     </p>
     <!-- 조회 기간은 서버 시각으로 정하므로, 서버 시각을 받기 전에는 조회하지 않음 -->
-    <p v-else-if="!peak && !serverDate" class="state">
-      서버에서 현재 시각을 받으면 자동으로 조회합니다.
-    </p>
-    <p v-else-if="!peak" class="state">불러오는 중입니다.</p>
+    <div v-else-if="!peak && !serverDate" class="state spinner-box">
+      <LoadingSpinner text="서버에서 현재 시각을 받으면 자동으로 조회합니다." />
+    </div>
+    <div v-else-if="!peak" class="state spinner-box"><LoadingSpinner /></div>
     <p v-else-if="!peak.hasData" class="state">이 기간에는 기록이 없습니다. 기간을 바꿔 보세요.</p>
 
     <!-- 기간 · 제목 줄을 뺀 나머지는 높이와 글자를 80% 크기로 (2026-11-18) -->
@@ -1012,5 +1013,10 @@ const heatOption = computed(() => {
   .top {
     width: 440px;
   }
+}
+/* 불러오는 중: 이 칸을 덮는 공통 스피너(LoadingSpinner)를 칸 안에 둠 (통합 화면과 같은 모양) */
+.spinner-box {
+  position: relative;
+  min-height: 160px;
 }
 </style>

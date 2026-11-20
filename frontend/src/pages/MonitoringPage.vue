@@ -483,7 +483,9 @@ const trendOption = computed(() => makeTrendOption(TREND_LINES.value, true))
             :option="trendOption"
             :min-height="80"
           />
-          <p v-else-if="realtimeStore.todayLoading" class="empty chart-empty">불러오는 중입니다.</p>
+          <div v-else-if="realtimeStore.todayLoading" class="empty chart-empty spinner-box">
+            <LoadingSpinner />
+          </div>
           <p v-else-if="realtimeStore.todayError" class="empty chart-empty" role="alert">
             그래프를 불러오지 못했습니다. ({{ realtimeStore.todayError }})
             <button class="retry" @click="realtimeStore.fetchToday()">다시 시도</button>
@@ -935,5 +937,10 @@ const trendOption = computed(() => makeTrendOption(TREND_LINES.value, true))
   .advice-wrap {
     width: 484px;
   }
+}
+/* 불러오는 중: 이 칸을 덮는 공통 스피너(LoadingSpinner)를 칸 안에 둠 (통합 화면과 같은 모양) */
+.spinner-box {
+  position: relative;
+  min-height: 160px;
 }
 </style>

@@ -2,6 +2,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import { useHistoryStore } from '@/stores/useHistoryStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { formatHourMinute, formatKw, formatMonthDayTime } from '@/utils/format'
@@ -348,12 +349,12 @@ function toggle(id) {
         <button class="retry" @click="load()">다시 시도</button>
       </p>
 
-      <p v-if="historyStore.loading" class="empty">불러오는 중입니다.</p>
+      <div v-if="historyStore.loading" class="empty spinner-box"><LoadingSpinner /></div>
 
       <!-- "오늘"은 서버 시각으로 정하므로, 서버 시각을 받기 전에는 조회하지 않음 ("이력 없음"으로 잘못 보이지 않게) -->
-      <p v-else-if="!fromDate" class="empty">
-        서버에서 현재 시각을 받으면 오늘 이력을 자동으로 조회합니다.
-      </p>
+      <div v-else-if="!fromDate" class="empty spinner-box">
+        <LoadingSpinner text="서버에서 현재 시각을 받으면 오늘 이력을 자동으로 조회합니다." />
+      </div>
 
       <p v-else-if="!filtered.length && !historyStore.errorMessage" class="empty">
         조건에 맞는 이력이 없습니다. 기간이나 조건을 바꿔 보세요.
@@ -704,5 +705,10 @@ select.input {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+/* 불러오는 중: 이 칸을 덮는 공통 스피너(LoadingSpinner)를 칸 안에 둠 (통합 화면과 같은 모양) */
+.spinner-box {
+  position: relative;
+  min-height: 160px;
 }
 </style>

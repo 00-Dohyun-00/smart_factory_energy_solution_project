@@ -1,6 +1,7 @@
 <!-- 성적표: 한 달 동안 ESS 추천 운영이 실제로 어땠는지 보여 줍니다 -->
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import BillCard from '@/components/BillCard.vue'
 import Chart from '@/components/Chart.vue'
 import { useThemeStore } from '@/stores/useThemeStore'
@@ -430,8 +431,12 @@ const essOption = computed(() => ({
       <button class="retry" @click="reportStore.fetchReport(month)">다시 시도</button>
     </p>
     <!-- 조회할 달은 서버 시각으로 정하므로, 서버 시각을 받기 전에는 조회하지 않음 -->
-    <p v-else-if="!month" class="state">서버에서 현재 시각을 받으면 자동으로 조회합니다.</p>
-    <p v-else-if="reportStore.loading || !report" class="state">불러오는 중입니다.</p>
+    <div v-else-if="!month" class="state spinner-box">
+      <LoadingSpinner text="서버에서 현재 시각을 받으면 자동으로 조회합니다." />
+    </div>
+    <div v-else-if="reportStore.loading || !report" class="state spinner-box">
+      <LoadingSpinner />
+    </div>
     <p v-else-if="!report.hasData" class="state">이 달에는 아직 기록이 없습니다.</p>
 
     <template v-else>
@@ -948,5 +953,10 @@ const essOption = computed(() => ({
     top: 0;
     left: 0;
   }
+}
+/* 불러오는 중: 이 칸을 덮는 공통 스피너(LoadingSpinner)를 칸 안에 둠 (통합 화면과 같은 모양) */
+.spinner-box {
+  position: relative;
+  min-height: 160px;
 }
 </style>
