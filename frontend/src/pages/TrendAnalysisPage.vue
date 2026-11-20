@@ -26,10 +26,17 @@ const analysisStore = useAnalysisStore()
 const historyStore = useHistoryStore() // 그래프 위 추천 핀용. 추천 이력 화면과 같은 API를 씀
 const realtimeStore = useRealtimeStore()
 
-const INTERVALS = [
-  { value: 'QUARTER', label: '15분' },
-  { value: 'HOUR', label: '1시간' },
-  { value: 'DAY', label: '1일' },
+// 그래프 간격은 1시간으로 고정 (2026-11-20, 간격 고르기를 뺌).
+// 1일로 묶으면 하루 중 피크가 평균에 묻히고, 15분은 계절(3~4달) 단위로 보면 점이 너무 많음
+const INTERVAL = 'HOUR'
+// 기간 빠른 선택. 고르면 옆 날짜 칸이 그 기간으로 채워짐
+// 하절기 · 동절기는 한전 요금 계절 기준 (백엔드 seasonOf와 같은 기준). title은 버튼에 마우스를 올리면 보임
+const PRESETS = [
+  { value: 'today', label: '오늘' },
+  { value: 'week', label: '최근 7일' },
+  { value: 'month', label: '이번 달' },
+  { value: 'summer', label: '하절기', title: '올해 6~8월' },
+  { value: 'winter', label: '동절기', title: '작년 11월 ~ 올해 2월' },
 ]
 // "보기"에서 켜고 끌 수 있는 항목
 const ITEMS = [
@@ -62,10 +69,10 @@ const ACTION_LABELS = { CHARGE: '충전', DISCHARGE: '방전', IDLE: '대기' }
 const PERIOD_LABELS = { PEAK: '최대부하', MID: '중간부하', LIGHT: '경부하' }
 
 // ---- 조회 조건 ----
-const preset = ref('week') // today(오늘) | week(최근 7일) | month(이번 달) | custom(직접 입력)
+// today(오늘) | week(최근 7일) | month(이번 달) | summer(하절기) | winter(동절기) | custom(직접 입력)
+const preset = ref('week')
 const fromDate = ref('') // 예: '2026-11-10'
 const toDate = ref('')
-const interval = ref('HOUR')
 const shown = ref(ITEMS.map((item) => item.key)) // 켜져 있는 항목들
 const focusAt = ref('') // "눈에 띄는 구간"에서 고른 시각 (그래프에 세로선으로 표시)
 const hourlyView = ref('time') // 시간대별 사용 패턴 보기: time(시간 순 막대) | rank(많이 쓴 순위)
@@ -76,8 +83,8 @@ const showPins = ref(true) // 전력 그래프 위에 추천 기호를 보일지
 // "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
 const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) ?? '')
 
-// 백엔드가 한 번에 조회해 주는 최대 기간 (넘으면 400을 줌)
-const MAX_DAYS = 62
+// 백엔드가 한 번에 조회해 주는 최대 기간 (넘으면 400을 줌). 동절기(최대 121일)가 들어가게 백엔드와 같이 늘림
+const MAX_DAYS = 121
 
 // '2026-11-01' ~ '2026-11-18' → 18 (시작일과 종료일을 모두 셈)
 function dayCount(from, to) {
@@ -106,9 +113,29 @@ function daysBefore(date, days) {
   return `${result.getFullYear()}-${pad(result.getMonth() + 1)}-${pad(result.getDate())}`
 }
 
+// 올해(서버 날짜의 연도) 기준 계절의 시작일 ~ 종료일
+// - 하절기: 올해 6월 1일 ~ 8월 31일
+// - 동절기: 작년 11월 1일 ~ 올해 2월 말일 (한전 요금 계절 · 백엔드 seasonOf와 같은 기준)
+// 계절이 진행 중이면 종료일은 오늘 (아직 오지 않은 날까지 넣으면 지금까지의 기록이 왼쪽에 좁게 몰림)
+// 예: 오늘 2026-11-20 → 하절기 2026-06-01 ~ 2026-08-31, 동절기 2025-11-01 ~ 2026-02-28
+function seasonRange(name, today) {
+  const year = Number(today.slice(0, 4))
+  const from = name === 'summer' ? `${year}-06-01` : `${year - 1}-11-01`
+  // 동절기 끝: 올해 3월 1일의 하루 전 (윤년이면 2월 29일)
+  const to = name === 'summer' ? `${year}-08-31` : daysBefore(`${year}-03-01`, 1)
+  const inProgress = from <= today && today < to
+  return { from, to: inProgress ? today : to }
+}
+
 function applyPreset(name) {
   preset.value = name
   if (!serverDate.value) return
+  if (name === 'summer' || name === 'winter') {
+    const range = seasonRange(name, serverDate.value)
+    fromDate.value = range.from
+    toDate.value = range.to
+    return
+  }
   toDate.value = serverDate.value
   if (name === 'today') fromDate.value = serverDate.value
   if (name === 'week') fromDate.value = daysBefore(serverDate.value, 6)
@@ -117,24 +144,16 @@ function applyPreset(name) {
 
 function load(showLoading = true) {
   if (!fromDate.value || !toDate.value || dateError.value) return
-  analysisStore.fetchTrend(fromDate.value, toDate.value, interval.value, showLoading)
+  // 간격이 1시간이라, 스토어가 이 결과를 시간대별 사용 패턴에도 그대로 넣어 줌 (따로 받지 않음 — 이슈 #25)
+  analysisStore.fetchTrend(fromDate.value, toDate.value, INTERVAL, showLoading)
   // 같은 기간의 추천 이력도 받아 그래프 위에 핀으로 꽂음
   historyStore.fetchDecisions(fromDate.value, toDate.value, showLoading)
 }
 
-// 기간이나 간격이 바뀌면 다시 조회
-watch([fromDate, toDate, interval], () => {
+// 기간이 바뀌면 다시 조회
+watch([fromDate, toDate], () => {
   focusAt.value = ''
   load()
-})
-
-// 기간이 바뀌면 시간대별 사용 패턴 데이터(1시간 간격)도 다시 받음
-// (1분마다 자동으로 다시 받지는 않음: 그래프를 좌우로 옮겨 보던 위치가 처음으로 돌아가지 않게)
-watch([fromDate, toDate], () => {
-  if (!fromDate.value || !toDate.value || dateError.value) return
-  // 간격이 1시간이면 위 load()의 추이 결과를 스토어가 패턴에도 넣어 주므로 따로 받지 않음 (이슈 #25)
-  if (interval.value === 'HOUR') return
-  analysisStore.fetchPattern(fromDate.value, toDate.value)
 })
 
 // 서버 날짜를 처음 알게 되면 "최근 7일"로 조회 시작
@@ -408,10 +427,12 @@ function timeAxis(withWeather) {
         return withWeather && weather ? `${date}\n${weather}` : date
       },
     },
-    // 날짜가 바뀌는 곳에 세로선
+    // 날짜가 바뀌는 곳에 세로선. 글자를 적는 날에만 그음
+    // (계절처럼 기간이 길면 매일 그은 선이 빗금처럼 촘촘해져 그래프를 가렸음)
     splitLine: {
       show: !isDaily.value && !isSingleDay.value,
-      interval: (index, value) => value.endsWith(' 00:00'),
+      interval: (index, value) =>
+        value.endsWith(' 00:00') && dayNumbers.value[value.slice(0, 5)] % dayStep.value === 0,
       lineStyle: { color: COLOR.line },
     },
   }
@@ -1069,27 +1090,17 @@ const patternOption = computed(() => {
     <section class="card filters" aria-label="조회 조건">
       <div class="field">
         <span class="field-label">기간</span>
+        <!-- 버튼을 누르면 옆 날짜 칸이 그 기간으로 채워짐. 날짜를 직접 바꾸면 버튼 선택이 풀림 -->
         <div class="presets" role="group" aria-label="기간 빠른 선택">
           <button
-            :class="{ active: preset === 'today' }"
-            :aria-pressed="preset === 'today'"
-            @click="applyPreset('today')"
+            v-for="item in PRESETS"
+            :key="item.value"
+            :class="{ active: preset === item.value }"
+            :aria-pressed="preset === item.value"
+            :title="item.title"
+            @click="applyPreset(item.value)"
           >
-            오늘
-          </button>
-          <button
-            :class="{ active: preset === 'week' }"
-            :aria-pressed="preset === 'week'"
-            @click="applyPreset('week')"
-          >
-            최근 7일
-          </button>
-          <button
-            :class="{ active: preset === 'month' }"
-            :aria-pressed="preset === 'month'"
-            @click="applyPreset('month')"
-          >
-            이번 달
+            {{ item.label }}
           </button>
         </div>
         <input
@@ -1107,21 +1118,6 @@ const patternOption = computed(() => {
           aria-label="종료일"
           @change="preset = 'custom'"
         />
-      </div>
-
-      <div class="field">
-        <span class="field-label">간격</span>
-        <div class="presets" role="group" aria-label="간격">
-          <button
-            v-for="item in INTERVALS"
-            :key="item.value"
-            :class="{ active: interval === item.value }"
-            :aria-pressed="interval === item.value"
-            @click="interval = item.value"
-          >
-            {{ item.label }}
-          </button>
-        </div>
       </div>
 
       <!-- 보기: 오른쪽 끝에 두 줄(3개씩)로 둬서, 왼쪽 메뉴가 펼쳐진 좁은 화면에서도 아래로 내려가지 않게 함 -->
