@@ -801,7 +801,7 @@ export async function fakeGetDecisions(from, to) {
 
   const day = new Date(`${from}T00:00:00`)
   const lastDay = new Date(`${to}T00:00:00`)
-  for (let count = 0; day <= lastDay && count < 62; count++) {
+  for (let count = 0; day <= lastDay && count < 121; count++) {
     list = list.concat(buildHistoryOfDay(toLocalDateTime(day).slice(0, 10), now))
     day.setDate(day.getDate() + 1)
   }
@@ -1419,7 +1419,7 @@ export async function fakeGetTrendAnalysis(from, to, interval) {
   const raw = []
   const weather = []
   const day = new Date(`${from}T00:00:00`)
-  for (let count = 0; day < last && count < 62; count++) {
+  for (let count = 0; day < last && count < 121; count++) {
     weather.push({ date: dateKeyOf(day), text: weatherOf(day) })
     for (const item of simulateDay(dateKeyOf(day))) {
       if (new Date(item.recordedAt) >= last) break
