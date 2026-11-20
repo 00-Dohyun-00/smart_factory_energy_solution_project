@@ -106,7 +106,29 @@ export const useAnalysisStore = defineStore('analysis', () => {
     }
   }
 
+  // ---- 목표 피크를 넘은 15분 구간 (추이 그래프의 점 ●) ----
+  // 피크 분석 API의 exceededWindows를 씀. 추이 그래프 선은 기간이 길면 1시간 평균이라 짧은 피크가 묻히므로
+  // 15분 기준 초과 구간을 따로 받아 점으로 찍음. 피크 분석 화면의 peak 값과 섞이지 않게 따로 둠
+  // [{ windowStart, windowEnd, peakKw }]
+  const exceededWindows = ref([])
+  let latestExceededRequest = 0
+
+  async function fetchExceeded(from, to) {
+    const requestId = ++latestExceededRequest
+    try {
+      const result = await getPeakAnalysis(from, to)
+      if (requestId !== latestExceededRequest) return
+      exceededWindows.value = result.exceededWindows ?? []
+    } catch {
+      // 점은 보조 표시라 실패하면 점만 안 보이게 함 (그래프 오류 안내는 추이 조회 쪽에서 함)
+      if (requestId !== latestExceededRequest) return
+      exceededWindows.value = []
+    }
+  }
+
   return {
+    exceededWindows,
+    fetchExceeded,
     pattern,
     patternLoading,
     patternError,
