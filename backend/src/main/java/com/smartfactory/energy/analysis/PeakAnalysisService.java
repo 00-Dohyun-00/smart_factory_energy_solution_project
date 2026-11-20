@@ -71,16 +71,18 @@ public class PeakAnalysisService {
 
         // 기록이 하나도 없으면 hasData=false 만 돌려줌
         if (intervals.isEmpty()) {
-            return new PeakResponse(from, to, false, targetPeakKw, null, null, null, null);
+            return new PeakResponse(from, to, false, targetPeakKw, null, null, null, null, null);
         }
 
         // 3. 화면 구역별로 만들기
         List<PeakDaily> dailyPeaks = makeDailyPeaks(intervals);
         List<PeakHeatmapCell> heatmap = makeHeatmap(intervals);
         List<PeakWindow> topWindows = makeTopWindows(intervals, start, end);
+        List<PeakWindow> exceededWindows = makeExceededWindows(intervals, targetPeakKw);
         PeakSummary summary = makeSummary(intervals, dailyPeaks, heatmap, targetPeakKw, to);
 
-        return new PeakResponse(from, to, true, targetPeakKw, summary, dailyPeaks, heatmap, topWindows);
+        return new PeakResponse(from, to, true, targetPeakKw, summary, dailyPeaks, heatmap, topWindows,
+                exceededWindows);
     }
 
     // ---------- 일별 최대 피크 (dailyPeaks) ----------
@@ -154,6 +156,26 @@ public class PeakAnalysisService {
                             r != null && r.getDescription() != null ? r.getDescription() : (r != null ? "방전 추천" : "방전 추천 없음")
                     );
                 })
+                .toList();
+    }
+
+    // ---------- 목표를 넘은 구간 (exceededWindows) ----------
+
+    // 목표 피크보다 높았던 15분 구간 전부 (시간 순). 추이 그래프는 기간이 길면 1시간 평균이라 짧은 피크가 묻히므로,
+    // 15분 기준 초과 구간을 따로 줘서 그래프 위에 점으로 찍게 함. 추천 처리는 붙이지 않음 (전력 이력 화면에서 봄)
+    private List<PeakWindow> makeExceededWindows(List<DemandInterval15m> intervals, Double targetPeakKw) {
+        if (targetPeakKw == null) {
+            return List.of();
+        }
+        return intervals.stream()
+                .filter(d -> d.getActualAvgKw().doubleValue() > targetPeakKw)
+                .sorted(Comparator.comparing(DemandInterval15m::getIntervalStart))
+                .map(d -> new PeakWindow(
+                        d.getIntervalStart(),
+                        d.getIntervalStart().plusMinutes(15),
+                        round1(d.getActualAvgKw().doubleValue()),
+                        null,
+                        null))
                 .toList();
     }
 
