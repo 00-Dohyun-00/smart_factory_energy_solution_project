@@ -7,19 +7,22 @@ import com.smartfactory.energy.analysis.dto.TrendResponse;
 import com.smartfactory.energy.analysis.dto.TrendStatusResult;
 import com.smartfactory.energy.analysis.dto.TrendSummary;
 import com.smartfactory.energy.analysis.dto.TrendWeather;
+import com.smartfactory.energy.ess.EssBucketAverage;
 import com.smartfactory.energy.ess.EssStatusMinute;
 import com.smartfactory.energy.ess.EssStatusMinuteRepository;
 import com.smartfactory.energy.power.DemandInterval15m;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
-import com.smartfactory.energy.power.SitePowerMinute;
+import com.smartfactory.energy.power.HourlyGridAverage;
+import com.smartfactory.energy.power.PowerBucketAverage;
+import com.smartfactory.energy.power.PowerSummaryTotals;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.recommendation.Recommendation;
 import com.smartfactory.energy.recommendation.RecommendationAction;
 import com.smartfactory.energy.recommendation.RecommendationRepository;
 import com.smartfactory.energy.recommendation.RecommendationStatus;
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
 import com.smartfactory.energy.tariff.TariffPeriod;
-import com.smartfactory.energy.tariff.TariffPeriodRepository;
+import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.tariff.TariffSeason;
 import com.smartfactory.energy.weather.Sky;
 import com.smartfactory.energy.weather.Weather;
@@ -30,13 +33,10 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.TreeMap;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -53,8 +53,8 @@ public class AnalysisService {
     private final SitePowerMinuteRepository sitePowerMinuteRepository;
     private final EssStatusMinuteRepository essStatusMinuteRepository;
     private final WeatherRepository weatherRepository;
-    private final SettingRepository settingRepository;
-    private final TariffPeriodRepository tariffPeriodRepository;
+    private final SettingCache settingCache;
+    private final TariffPeriodCache tariffPeriodCache;
     private final RecommendationRepository recommendationRepository;
     private final DemandInterval15mRepository demandInterval15mRepository;
 
@@ -71,22 +71,34 @@ public class AnalysisService {
             throw new IllegalArgumentException("기간은 최대 " + MAX_DAYS + "일까지 조회할 수 있습니다.");
         }
 
-        // 2. 기간 안의 기록 꺼내기 (from 00:00 이상 ~ to 다음 날 00:00 미만)
+        // 2. 기간 (from 00:00 이상 ~ to 다음 날 00:00 미만). 날씨·추천은 테이블이 작아서 그대로 가져옴
         LocalDateTime start = from.atStartOfDay();
         LocalDateTime end = to.plusDays(1).atStartOfDay();
-        List<SitePowerMinute> powers = sitePowerMinuteRepository.findInPeriod(start, end);
-        List<EssStatusMinute> essList = essStatusMinuteRepository.findInPeriod(start, end);
         List<Weather> weathers = weatherRepository.findInPeriod(start, end);
         List<Recommendation> recommendations = recommendationRepository.findInPeriod(start, end);
 
-        // 3. 기준값 읽기 (setting 테이블)
+        // 3. 기준값 읽기 (setting)
         Double targetPeakKw = settingNumber("peak.target_kw");
+        Double capacityKwh = settingNumber("ess.capacity_kwh");
 
         // 4. 15분 피크 (요약, 처리별 결과, 눈에 띄는 구간이 같이 씀)
         // 피크 분석·성적표·추천 이력과 같은 숫자가 나오게 demand_interval_15m 뷰에서 읽음
         Map<LocalDateTime, Double> quarterPeaks = makeQuarterPeaks(start, end);
 
-        // 5. 화면 구역별로 만들어서 응답 하나로 묶기
+        // 5. 1분 기록은 전부 가져오지 않고, SQL이 집계한 값만 받음 (SUM/AVG/MIN/MAX 1행씩)
+        PowerSummaryTotals totals = sitePowerMinuteRepository.summaryTotals(start, end);
+        EssStatusMinute minSoc = essStatusMinuteRepository
+                .findFirstByTsGreaterThanEqualAndTsLessThanOrderBySocAsc(start, end).orElse(null);
+        EssStatusMinute maxSoc = essStatusMinuteRepository
+                .findFirstByTsGreaterThanEqualAndTsLessThanOrderBySocDesc(start, end).orElse(null);
+        EssStatusMinute maxRoom = essStatusMinuteRepository
+                .findFirstByTsGreaterThanEqualAndTsLessThanOrderByBatteryTempDesc(start, end).orElse(null);
+        EssStatusMinute firstEss = essStatusMinuteRepository
+                .findFirstByTsGreaterThanEqualAndTsLessThanOrderByTsAsc(start, end).orElse(null);
+        EssStatusMinute lastEss = essStatusMinuteRepository
+                .findFirstByTsGreaterThanEqualAndTsLessThanOrderByTsDesc(start, end).orElse(null);
+
+        // 6. 화면 구역별로 만들어서 응답 하나로 묶기
         return new TrendResponse(
                 from,
                 to,
@@ -95,59 +107,72 @@ public class AnalysisService {
                 settingNumber("ess.soc_low"),
                 settingNumber("ess.soc_high"),
                 settingNumber("ess.room_temp_limit"),
-                makeSummary(powers, essList, quarterPeaks),
-                makePoints(powers, essList, weathers, interval),
+                makeSummary(totals, quarterPeaks, minSoc, maxSoc, maxRoom, firstEss, lastEss, capacityKwh),
+                makePoints(interval, start, end, weathers),
                 makeWeather(weathers),
-                makeHourly(powers, to),
+                makeHourly(start, end, to),
                 makeByStatus(recommendations, quarterPeaks, targetPeakKw),
-                makeHighlights(powers, essList, quarterPeaks, targetPeakKw)
+                makeHighlights(start, end, quarterPeaks, targetPeakKw, minSoc, maxRoom)
         );
     }
 
     // ---------- 그래프 점 (points) ----------
 
-    // interval 단위로 묶어 평균 낸 점 목록
-    private List<TrendPoint> makePoints(List<SitePowerMinute> powers, List<EssStatusMinute> essList,
-                                        List<Weather> weathers, String interval) {
-        // 구간 시작 시각별로 묶기 (예: HOUR면 14:00~14:59 기록이 모두 14:00 묶음으로)
-        // TreeMap은 키(시각) 순서대로 정렬해 줌
-        Map<LocalDateTime, List<SitePowerMinute>> powerGroups = powers.stream()
-                .collect(Collectors.groupingBy(p -> bucketStart(p.getTs(), interval), TreeMap::new, Collectors.toList()));
-        Map<LocalDateTime, List<EssStatusMinute>> essGroups = essList.stream()
-                .collect(Collectors.groupingBy(e -> bucketStart(e.getTs(), interval)));
+    // interval 단위로 SQL이 평균 낸 점 목록. 기록이 없는 칸은 나오지 않음
+    private List<TrendPoint> makePoints(String interval, LocalDateTime start, LocalDateTime end,
+                                        List<Weather> weathers) {
+        List<PowerBucketAverage> powerBuckets = "QUARTER".equals(interval)
+                ? sitePowerMinuteRepository.averageByQuarter(start, end)
+                : sitePowerMinuteRepository.averageByUnit(sqlUnit(interval), start, end);
+        List<EssBucketAverage> essBuckets = "QUARTER".equals(interval)
+                ? essStatusMinuteRepository.averageByQuarter(start, end)
+                : essStatusMinuteRepository.averageByUnit(sqlUnit(interval), start, end);
+        Map<LocalDateTime, EssBucketAverage> essByBucket = essBuckets.stream()
+                .collect(Collectors.toMap(EssBucketAverage::getBucket, e -> e));
 
         // 날씨는 보통 1시간에 1줄이라, 15분 간격이어도 1시간 단위로 묶어서 같은 시간의 값을 씀
-        String weatherInterval = interval.equals("QUARTER") ? "HOUR" : interval;
+        String weatherInterval = "QUARTER".equals(interval) ? "HOUR" : interval;
         Map<LocalDateTime, List<Weather>> weatherGroups = weathers.stream()
                 .collect(Collectors.groupingBy(w -> bucketStart(w.getTs(), weatherInterval)));
 
-        // 묶음마다 평균을 내서 점 1개로 만들기
         List<TrendPoint> points = new ArrayList<>();
-        for (LocalDateTime time : powerGroups.keySet()) {
-            List<SitePowerMinute> powerRows = powerGroups.get(time);
-            List<EssStatusMinute> essRows = essGroups.getOrDefault(time, List.of());
-            List<Weather> weatherRows = weatherGroups.getOrDefault(bucketStart(time, weatherInterval), List.of());
-
+        for (PowerBucketAverage p : powerBuckets) {
+            EssBucketAverage e = essByBucket.get(p.getBucket());
+            List<Weather> weatherRows = weatherGroups.getOrDefault(bucketStart(p.getBucket(), weatherInterval), List.of());
             points.add(new TrendPoint(
-                    time,
-                    average(powerRows.stream().map(SitePowerMinute::getLoadKw).toList()),
-                    average(powerRows.stream().map(SitePowerMinute::getGridKw).toList()),
-                    average(powerRows.stream().map(SitePowerMinute::getSolarKw).toList()),
-                    average(powerRows.stream().map(SitePowerMinute::getEssKw).toList()),
-                    average(essRows.stream().map(EssStatusMinute::getSoc).toList()),
-                    average(essRows.stream().map(EssStatusMinute::getBatteryTemp).toList()),
-                    average(weatherRows.stream().map(Weather::getTemperature).toList())
+                    p.getBucket(),
+                    round1(p.getAvgLoadKw()),
+                    round1(p.getAvgGridKw()),
+                    round1(p.getAvgSolarKw()),
+                    round1(p.getAvgEssKw()),
+                    e != null ? round1(e.getAvgSoc()) : null,
+                    e != null ? round1(e.getAvgBatteryTemp()) : null,
+                    averageTemperature(weatherRows)
             ));
         }
         return points;
     }
 
+    // date_trunc에 넘길 글자 (HOUR → 'hour'). QUARTER는 date_bin을 따로 쓰므로 여기서는 안 씀
+    private String sqlUnit(String interval) {
+        return interval.toLowerCase();
+    }
+
+    private Double averageTemperature(List<Weather> weatherRows) {
+        List<BigDecimal> values = weatherRows.stream().map(Weather::getTemperature).filter(v -> v != null).toList();
+        if (values.isEmpty()) {
+            return null;
+        }
+        return round1(values.stream().mapToDouble(BigDecimal::doubleValue).average().orElse(0));
+    }
+
     // ---------- 요약 숫자 (summary) ----------
 
-    // 요약 숫자 6칸. 공장 전력 기록이 하나도 없으면 null
-    private TrendSummary makeSummary(List<SitePowerMinute> powers, List<EssStatusMinute> essList,
-                                     Map<LocalDateTime, Double> quarterPeaks) {
-        if (powers.isEmpty()) {
+    // 요약 숫자 6칸. 공장 전력 기록이 하나도 없으면 null (avgGridKw는 AVG라서 기록이 없으면 null로 옴)
+    private TrendSummary makeSummary(PowerSummaryTotals totals, Map<LocalDateTime, Double> quarterPeaks,
+                                     EssStatusMinute minSoc, EssStatusMinute maxSoc, EssStatusMinute maxRoom,
+                                     EssStatusMinute firstEss, EssStatusMinute lastEss, Double capacityKwh) {
+        if (totals.avgGridKw() == null) {
             return null;
         }
 
@@ -155,41 +180,43 @@ public class AnalysisService {
         Map.Entry<LocalDateTime, Double> maxPeak = quarterPeaks.entrySet().stream()
                 .max(Map.Entry.comparingByValue()).orElse(null);
 
-        // ② 평균 한전 구매
-        Double avgGridKw = average(powers.stream().map(SitePowerMinute::getGridKw).toList());
-
-        // ③ 태양광 발전량: 1분 기록이라 kW × (1/60)시간 = kWh 를 모두 더함
-        double solarKwh = sum(powers, SitePowerMinute::getSolarKw) / 60;
-        double loadKwh = sum(powers, SitePowerMinute::getLoadKw) / 60;
+        // ③ 태양광 발전량: 1분 기록이라 kW × (1/60)시간 = kWh. SQL이 이미 합쳐 준 값을 60으로 나눔
+        double solarKwh = toDouble(totals.solarKwSum()) / 60;
+        double loadKwh = toDouble(totals.loadKwSum()) / 60;
         Double solarPercent = loadKwh > 0 ? round1(solarKwh / loadKwh * 100) : null;
 
-        // ④ ESS 충·방전량과 효율 (방전량 ÷ 충전량). site_power_minute.ess_kw(+ 방전/- 충전)에서 계산 (효율 적용 전 값)
-        double dischargeKwh = sum(powers, p -> p.getEssKw().max(BigDecimal.ZERO)) / 60;
-        double chargeKwh = sum(powers, p -> p.getEssKw().negate().max(BigDecimal.ZERO)) / 60;
-        Double efficiency = chargeKwh > 0 ? round1(dischargeKwh / chargeKwh * 100) : null;
-
-        // ⑤ 배터리 잔량 최저·최고
-        EssStatusMinute minSoc = pickMin(essList, EssStatusMinute::getSoc);
-        EssStatusMinute maxSoc = pickMax(essList, EssStatusMinute::getSoc);
-
-        // ⑥ 배터리실 최고 온도
-        EssStatusMinute maxRoom = pickMax(essList, EssStatusMinute::getBatteryTemp);
+        // ④ ESS 충·방전량과 효율. 효율 = (방전량 + 기간 중 저장량 변화) ÷ 충전량
+        //    저장량 변화 = (기간 마지막 SOC − 처음 SOC) ÷ 100 × 배터리 용량 (단순 비율이면 기간 앞뒤 잔량 차이를 못 보여줌)
+        double dischargeKwh = toDouble(totals.dischargeKwSum()) / 60;
+        double chargeKwh = toDouble(totals.chargeKwSum()) / 60;
+        double storageChangeKwh = storageChangeKwh(firstEss, lastEss, capacityKwh);
+        Double efficiency = chargeKwh > 0 ? round1((dischargeKwh + storageChangeKwh) / chargeKwh * 100) : null;
 
         return new TrendSummary(
                 maxPeak != null ? round1(maxPeak.getValue()) : null,
                 maxPeak != null ? maxPeak.getKey() : null,
-                avgGridKw,
+                round1(totals.avgGridKw()),
                 round1(solarKwh),
                 solarPercent,
                 round1(dischargeKwh),
                 round1(chargeKwh),
                 efficiency,
-                minSoc != null ? round1(minSoc.getSoc().doubleValue()) : null,
+                minSoc != null ? round1(toDouble(minSoc.getSoc())) : null,
                 minSoc != null ? minSoc.getTs() : null,
-                maxSoc != null ? round1(maxSoc.getSoc().doubleValue()) : null,
-                maxRoom != null ? round1(maxRoom.getBatteryTemp().doubleValue()) : null,
+                maxSoc != null ? round1(toDouble(maxSoc.getSoc())) : null,
+                maxRoom != null ? round1(toDouble(maxRoom.getBatteryTemp())) : null,
                 maxRoom != null ? maxRoom.getTs() : null
         );
+    }
+
+    // 기간 중 배터리에 더 쌓이거나 빠진 양 (kWh). 처음·마지막 기록이나 용량 설정이 없으면 0
+    private double storageChangeKwh(EssStatusMinute firstEss, EssStatusMinute lastEss, Double capacityKwh) {
+        if (firstEss == null || lastEss == null || capacityKwh == null) {
+            return 0;
+        }
+        double firstSoc = toDouble(firstEss.getSoc());
+        double lastSoc = toDouble(lastEss.getSoc());
+        return (lastSoc - firstSoc) / 100 * capacityKwh;
     }
 
     // ---------- 날짜별 날씨 (weather) ----------
@@ -213,17 +240,15 @@ public class AnalysisService {
 
     // ---------- 시각별 평균 한전 구매 (hourly) ----------
 
-    // 0~23시마다 평균 한전 구매 + 요금 시간대 (요금 시간대는 기간 마지막 날의 계절 기준)
-    private List<TrendHourly> makeHourly(List<SitePowerMinute> powers, LocalDate to) {
-        Map<Integer, List<SitePowerMinute>> byHour = powers.stream()
-                .collect(Collectors.groupingBy(p -> p.getTs().getHour()));
-        List<TariffPeriod> periods = tariffPeriodRepository.findBySeason(seasonOf(to));
+    // 0~23시마다 평균 한전 구매(여러 날짜를 SQL이 한 시각으로 묶음) + 요금 시간대 (기간 마지막 날의 계절 기준)
+    private List<TrendHourly> makeHourly(LocalDateTime start, LocalDateTime end, LocalDate to) {
+        Map<Integer, BigDecimal> byHour = sitePowerMinuteRepository.averageByHourOfDay(start, end).stream()
+                .collect(Collectors.toMap(HourlyGridAverage::getHour, HourlyGridAverage::getAvgGridKw));
+        List<TariffPeriod> periods = tariffPeriodCache.findBySeason(seasonOf(to));
 
         List<TrendHourly> result = new ArrayList<>();
         for (int hour = 0; hour < 24; hour++) {
-            List<SitePowerMinute> rows = byHour.getOrDefault(hour, List.of());
-            Double avgGridKw = average(rows.stream().map(SitePowerMinute::getGridKw).toList());
-            result.add(new TrendHourly(hour, avgGridKw, periodAt(periods, LocalTime.of(hour, 0))));
+            result.add(new TrendHourly(hour, round1(byHour.get(hour)), periodAt(periods, LocalTime.of(hour, 0))));
         }
         return result;
     }
@@ -271,7 +296,7 @@ public class AnalysisService {
                     count,
                     defendedCount,
                     count > 0 ? round1(defendedCount * 100.0 / count) : null,
-                    average(resultPeaks)
+                    count > 0 ? round1(resultPeaks.stream().mapToDouble(Double::doubleValue).average().orElse(0)) : null
             ));
         }
         return result;
@@ -309,9 +334,10 @@ public class AnalysisService {
 
     // ---------- 눈에 띄는 구간 (highlights) ----------
 
-    // 최대 피크, 잔량 최저, 온도 최고, 한낮 태양광 최저, 한전 구매 최저
-    private List<TrendHighlight> makeHighlights(List<SitePowerMinute> powers, List<EssStatusMinute> essList,
-                                                Map<LocalDateTime, Double> quarterPeaks, Double targetPeakKw) {
+    // 최대 피크, 잔량 최저, 온도 최고, 한낮 태양광 최저, 한전 구매 최저 (전부 SQL이 1행씩 골라서 줌)
+    private List<TrendHighlight> makeHighlights(LocalDateTime start, LocalDateTime end,
+                                                Map<LocalDateTime, Double> quarterPeaks, Double targetPeakKw,
+                                                EssStatusMinute minSoc, EssStatusMinute maxRoom) {
         List<TrendHighlight> result = new ArrayList<>();
 
         quarterPeaks.entrySet().stream().max(Map.Entry.comparingByValue()).ifPresent(peak -> {
@@ -319,27 +345,22 @@ public class AnalysisService {
             result.add(new TrendHighlight(peak.getKey(), "15분 피크 최대", round1(peak.getValue()), "kW", over ? "CRITICAL" : "INFO"));
         });
 
-        EssStatusMinute minSoc = pickMin(essList, EssStatusMinute::getSoc);
         if (minSoc != null) {
-            result.add(new TrendHighlight(minSoc.getTs(), "배터리 잔량 최저", round1(minSoc.getSoc().doubleValue()), "%", "INFO"));
+            result.add(new TrendHighlight(minSoc.getTs(), "배터리 잔량 최저", round1(toDouble(minSoc.getSoc())), "%", "INFO"));
         }
-
-        EssStatusMinute maxRoom = pickMax(essList, EssStatusMinute::getBatteryTemp);
         if (maxRoom != null) {
-            result.add(new TrendHighlight(maxRoom.getTs(), "배터리실 온도 최고", round1(maxRoom.getBatteryTemp().doubleValue()), "℃", "INFO"));
+            result.add(new TrendHighlight(maxRoom.getTs(), "배터리실 온도 최고", round1(toDouble(maxRoom.getBatteryTemp())), "℃", "INFO"));
         }
 
         // 한낮(12시대)에 태양광이 가장 적게 나온 때 (흐린 날 찾기용)
-        List<SitePowerMinute> noonRows = powers.stream().filter(p -> p.getTs().getHour() == 12).toList();
-        SitePowerMinute minSolar = pickMin(noonRows, SitePowerMinute::getSolarKw);
-        if (minSolar != null) {
-            result.add(new TrendHighlight(minSolar.getTs(), "한낮 태양광 발전 최저", round1(minSolar.getSolarKw().doubleValue()), "kW", "INFO"));
-        }
+        sitePowerMinuteRepository.findMinSolarAtNoon(start, end).ifPresent(minSolar ->
+                result.add(new TrendHighlight(minSolar.getTs(), "한낮 태양광 발전 최저",
+                        round1(toDouble(minSolar.getSolarKw())), "kW", "INFO")));
 
-        SitePowerMinute minGrid = pickMin(powers, SitePowerMinute::getGridKw);
-        if (minGrid != null) {
-            result.add(new TrendHighlight(minGrid.getTs(), "한전 구매전력 최저", round1(minGrid.getGridKw().doubleValue()), "kW", "INFO"));
-        }
+        sitePowerMinuteRepository.findFirstByTsGreaterThanEqualAndTsLessThanOrderByGridKwAsc(start, end)
+                .ifPresent(minGrid -> result.add(new TrendHighlight(minGrid.getTs(), "한전 구매전력 최저",
+                        round1(toDouble(minGrid.getGridKw())), "kW", "INFO")));
+
         return result;
     }
 
@@ -358,11 +379,9 @@ public class AnalysisService {
         return result;
     }
 
-    // setting 테이블의 값을 숫자로 읽음. 없으면 null
+    // setting 값을 메모리 캐시에서 숫자로 읽음 (DB는 안 읽음). 없으면 null
     private Double settingNumber(String key) {
-        return settingRepository.findById(key)
-                .map(setting -> Double.valueOf(setting.getValue()))
-                .orElse(null);
+        return settingCache.getNumber(key);
     }
 
     // 날짜의 계절 (한전 요금 기준: 6~8월 여름, 3~5월·9~10월 봄가을, 나머지 겨울)
@@ -411,34 +430,15 @@ public class AnalysisService {
         };
     }
 
-    // 값 목록의 평균 (소수 1자리). 값이 하나도 없으면 null
-    // Entity 값은 BigDecimal, 계산 중 값은 Double이라 둘 다 받을 수 있게 Number로 받음
-    private Double average(List<? extends Number> values) {
-        List<? extends Number> notNullValues = values.stream().filter(Objects::nonNull).toList();
-        if (notNullValues.isEmpty()) {
-            return null;
-        }
-        return round1(notNullValues.stream().mapToDouble(Number::doubleValue).average().orElse(0));
+    private double toDouble(BigDecimal value) {
+        return value == null ? 0 : value.doubleValue();
     }
 
-    // 목록에서 한 칸의 합계 (null은 빼고 더함)
-    private <T> double sum(List<T> rows, Function<T, BigDecimal> field) {
-        return rows.stream().map(field).filter(Objects::nonNull).mapToDouble(BigDecimal::doubleValue).sum();
+    // 소수 1자리로 반올림 (예: 12.345 → 12.3). 없으면 null
+    private Double round1(BigDecimal value) {
+        return value == null ? null : round1(value.doubleValue());
     }
 
-    // 목록에서 한 칸의 값이 가장 작은 줄. 없으면 null
-    private <T> T pickMin(List<T> rows, Function<T, BigDecimal> field) {
-        return rows.stream().filter(row -> field.apply(row) != null)
-                .min(Comparator.comparing(field)).orElse(null);
-    }
-
-    // 목록에서 한 칸의 값이 가장 큰 줄. 없으면 null
-    private <T> T pickMax(List<T> rows, Function<T, BigDecimal> field) {
-        return rows.stream().filter(row -> field.apply(row) != null)
-                .max(Comparator.comparing(field)).orElse(null);
-    }
-
-    // 소수 1자리로 반올림 (예: 12.345 → 12.3)
     private Double round1(double value) {
         return Math.round(value * 10) / 10.0;
     }

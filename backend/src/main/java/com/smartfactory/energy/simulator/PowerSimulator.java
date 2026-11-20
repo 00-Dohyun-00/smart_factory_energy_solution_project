@@ -5,8 +5,7 @@ import com.smartfactory.energy.ess.EssCommandHolder;
 import com.smartfactory.energy.power.RawEquipmentLoad;
 import com.smartfactory.energy.power.RawEquipmentLoadRepository;
 import com.smartfactory.energy.power.RawFactoryLoad;
-import com.smartfactory.energy.setting.Setting;
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
 import com.smartfactory.energy.solar.SolarPower;
 import com.smartfactory.energy.solar.SolarPowerRepository;
 import com.smartfactory.energy.solar.SolarPowerType;
@@ -47,7 +46,7 @@ public class PowerSimulator {
     private final SolarPowerRepository solarPowerRepository;
     private final EssCommandHolder essCommandHolder;
     private final EssSocState essSocState;
-    private final SettingRepository settingRepository;
+    private final SettingCache settingCache;
     private final MinuteBuffer minuteBuffer;
 
     @Scheduled(fixedRate = 1000)
@@ -113,11 +112,14 @@ public class PowerSimulator {
         return BigDecimal.valueOf(desiredKw).setScale(2, RoundingMode.HALF_UP);
     }
 
-    // ESS 관련 setting 값을 한 번의 조회로 숫자로 읽음. 값이 없는 키는 기본값을 씀
+    // ESS 관련 setting 값을 메모리 캐시에서 숫자로 읽음 (DB는 안 읽음). 값이 없는 키는 기본값을 씀
     private Map<String, Double> essSettings() {
         Map<String, Double> values = new HashMap<>();
-        for (Setting setting : settingRepository.findAllById(ESS_SETTING_KEYS)) {
-            values.put(setting.getSettingKey(), Double.parseDouble(setting.getValue()));
+        for (String key : ESS_SETTING_KEYS) {
+            Double value = settingCache.getNumber(key);
+            if (value != null) {
+                values.put(key, value);
+            }
         }
         return values;
     }

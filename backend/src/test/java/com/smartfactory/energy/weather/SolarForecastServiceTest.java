@@ -1,11 +1,10 @@
 package com.smartfactory.energy.weather;
 
-import static com.smartfactory.energy.TestData.setting;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
 import com.smartfactory.energy.weather.dto.OpenMeteoResponse;
 import com.smartfactory.energy.weather.dto.SolarForecastSlot;
 import java.time.LocalDateTime;
@@ -41,12 +40,13 @@ class SolarForecastServiceTest {
             }
             """;
 
-    @Mock SettingRepository settingRepository;
+    @Mock SettingCache settingCache;
     @InjectMocks SolarForecastService solarForecastService;
 
     @BeforeEach
     void setUp() {
-        when(settingRepository.findAllById(any())).thenReturn(List.of());
+        // Mockito가 안 정해진 Double 반환을 0.0으로 주는 것 때문에 "설정값 없음"이 0으로 보이지 않게 null로 둠
+        when(settingCache.getNumber(anyString())).thenReturn(null);
     }
 
     private static OpenMeteoResponse response() {
@@ -102,9 +102,8 @@ class SolarForecastServiceTest {
         // 기본값: 1,000 kW × 0.8 → 일사량 116이면 92.8 kW
         assertThat(solarForecastService.solarKwOf(116)).isEqualTo(92.8);
 
-        when(settingRepository.findAllById(any())).thenReturn(List.of(
-                setting("solar.capacity_kw", "태양광 용량", "500"),
-                setting("solar.performance_ratio", "성능비", "80"))); // %로 들어 있어도 0.8로 봄
+        when(settingCache.getNumber("solar.capacity_kw")).thenReturn(500.0);
+        when(settingCache.getNumber("solar.performance_ratio")).thenReturn(80.0); // %로 들어 있어도 0.8로 봄
         assertThat(solarForecastService.solarKwOf(116)).isEqualTo(46.4);
     }
 

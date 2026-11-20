@@ -17,7 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class TariffPeriodServiceTest {
 
-    @Mock TariffPeriodRepository tariffPeriodRepository;
+    @Mock TariffPeriodCache tariffPeriodCache;
     @InjectMocks TariffPeriodService tariffPeriodService;
 
     @Test
@@ -27,7 +27,7 @@ class TariffPeriodServiceTest {
 
     @Test
     void 소문자도_받고_화면_코드와_24시로_돌려줌() {
-        when(tariffPeriodRepository.findBySeason(TariffSeason.WINTER)).thenReturn(dayTariffs(TariffSeason.WINTER));
+        when(tariffPeriodCache.findBySeason(TariffSeason.WINTER)).thenReturn(dayTariffs(TariffSeason.WINTER));
 
         List<TariffPeriodResponse> list = tariffPeriodService.findAll("winter");
 

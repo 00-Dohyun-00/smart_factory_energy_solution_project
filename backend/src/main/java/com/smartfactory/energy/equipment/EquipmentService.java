@@ -11,10 +11,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class EquipmentService {
 
-    private final EquipmentRepository equipmentRepository;
+    private final EquipmentCache equipmentCache;
 
     public List<EquipmentResponse> findAll() {
-        return equipmentRepository.findAll().stream()
+        return equipmentCache.findAll().stream()
                 .map(EquipmentResponse::from)
                 .toList();
     }

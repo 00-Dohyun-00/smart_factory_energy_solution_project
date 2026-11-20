@@ -1,7 +1,6 @@
 package com.smartfactory.energy.weather;
 
-import com.smartfactory.energy.setting.Setting;
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
 import com.smartfactory.energy.weather.dto.OpenMeteoResponse;
 import com.smartfactory.energy.weather.dto.SolarForecastSlot;
 import java.time.Duration;
@@ -39,7 +38,7 @@ public class SolarForecastService {
     private static final Duration SLOT = Duration.ofMinutes(15);
     private static final Duration HALF_SLOT = Duration.ofSeconds(450);
 
-    private final SettingRepository settingRepository;
+    private final SettingCache settingCache;
 
     // 예보 1칸: end = Open-Meteo 시각 (일사량은 end 직전 15분의 평균)
     record Point(LocalDateTime end, double radiationWm2, Double temperature, Double cloudCover) {
@@ -142,31 +141,14 @@ public class SolarForecastService {
         return Math.round(kw * 10) / 10.0;
     }
 
-    // [용량 kW, 성능비]를 setting에서 읽음 (환경 설정에서 바꾸면 바로 반영)
+    // [용량 kW, 성능비]를 setting 캐시에서 읽음 (환경 설정에서 바꾸면 SettingService.update가 캐시를 바로 갱신함).
+    // forecastFrom()이 칸마다(최대 96번) 부르므로, DB가 아니라 메모리 캐시만 봄
     // 성능비가 80처럼 %로 들어 있으면 0.8로 바꿈
     private double[] solarSettings() {
-        double capacityKw = DEFAULT_CAPACITY_KW;
-        double ratio = DEFAULT_PERFORMANCE_RATIO;
-        for (Setting setting : settingRepository.findAllById(List.of(CAPACITY_KEY, PERFORMANCE_RATIO_KEY))) {
-            Double value = parse(setting.getValue());
-            if (value == null) {
-                continue;
-            }
-            if (CAPACITY_KEY.equals(setting.getSettingKey())) {
-                capacityKw = value;
-            } else if (PERFORMANCE_RATIO_KEY.equals(setting.getSettingKey())) {
-                ratio = value > 1 ? value / 100 : value;
-            }
-        }
-        return new double[] {capacityKw, ratio};
-    }
-
-    private static Double parse(String text) {
-        try {
-            return Double.valueOf(text);
-        } catch (NumberFormatException | NullPointerException e) {
-            return null;
-        }
+        Double capacityKw = settingCache.getNumber(CAPACITY_KEY);
+        Double ratio = settingCache.getNumber(PERFORMANCE_RATIO_KEY);
+        double resolvedRatio = ratio == null ? DEFAULT_PERFORMANCE_RATIO : (ratio > 1 ? ratio / 100 : ratio);
+        return new double[] {capacityKw == null ? DEFAULT_CAPACITY_KW : capacityKw, resolvedRatio};
     }
 
     private static Double valueAt(List<Double> values, int index) {

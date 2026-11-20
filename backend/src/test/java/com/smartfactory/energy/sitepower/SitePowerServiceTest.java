@@ -3,7 +3,6 @@ package com.smartfactory.energy.sitepower;
 import static com.smartfactory.energy.TestData.dayTariffs;
 import static com.smartfactory.energy.TestData.ess;
 import static com.smartfactory.energy.TestData.power;
-import static com.smartfactory.energy.TestData.setting;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -11,22 +10,24 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 import com.smartfactory.energy.equipment.Equipment;
-import com.smartfactory.energy.equipment.EquipmentRepository;
+import com.smartfactory.energy.equipment.EquipmentCache;
 import com.smartfactory.energy.equipment.EquipmentRole;
 import com.smartfactory.energy.ess.EssStatusMinute;
 import com.smartfactory.energy.ess.EssStatusMinuteRepository;
 import com.smartfactory.energy.global.exception.NotFoundException;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
+import com.smartfactory.energy.power.EnergyTotals;
 import com.smartfactory.energy.power.PowerMinute;
 import com.smartfactory.energy.power.PowerMinuteRepository;
 import com.smartfactory.energy.power.RawFactoryLoad;
 import com.smartfactory.energy.power.SitePowerMinute;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
+import com.smartfactory.energy.simulator.LatestSiteStatus;
 import com.smartfactory.energy.simulator.RawLoadCursor;
 import com.smartfactory.energy.sitepower.dto.SitePowerLatestResponse;
 import com.smartfactory.energy.sitepower.dto.SitePowerQuarterResponse;
-import com.smartfactory.energy.tariff.TariffPeriodRepository;
+import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.weather.WeatherRepository;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -54,11 +55,12 @@ class SitePowerServiceTest {
     @Mock EssStatusMinuteRepository essStatusMinuteRepository;
     @Mock DemandInterval15mRepository demandInterval15mRepository;
     @Mock PowerMinuteRepository powerMinuteRepository;
-    @Mock EquipmentRepository equipmentRepository;
+    @Mock EquipmentCache equipmentCache;
     @Mock WeatherRepository weatherRepository;
-    @Mock TariffPeriodRepository tariffPeriodRepository;
-    @Mock SettingRepository settingRepository;
+    @Mock TariffPeriodCache tariffPeriodCache;
+    @Mock SettingCache settingCache;
     @Mock RawLoadCursor rawLoadCursor;
+    @Mock LatestSiteStatus latestSiteStatus;
     @InjectMocks SitePowerService sitePowerService;
 
     // 가짜 DB 표: findInPeriod(start, end)는 이 목록에서 기간 안의 줄만 돌려줌
@@ -80,14 +82,14 @@ class SitePowerServiceTest {
         when(sitePowerMinuteRepository.findFirstByOrderByTsDesc())
                 .thenAnswer(call -> powerTable.isEmpty() ? Optional.empty() : Optional.of(powerTable.get(powerTable.size() - 1)));
         when(essStatusMinuteRepository.findFirstByOrderByTsDesc()).thenReturn(Optional.empty());
-        when(demandInterval15mRepository.findInPeriod(any(), any())).thenReturn(List.of());
+        when(sitePowerMinuteRepository.sumEnergy(any(), any())).thenReturn(new EnergyTotals(null, null, null, null));
         when(powerMinuteRepository.findByTs(any())).thenReturn(List.of());
-        when(equipmentRepository.findByEquipmentRole(any())).thenReturn(List.of());
+        when(equipmentCache.findByEquipmentRole(any())).thenReturn(List.of());
         when(weatherRepository.findInPeriod(any(), any())).thenReturn(List.of());
-        when(tariffPeriodRepository.findBySeason(any())).thenAnswer(call -> dayTariffs(call.getArgument(0)));
-        when(settingRepository.findById(anyString())).thenReturn(Optional.empty());
-        when(settingRepository.findById("peak.target_kw")).thenReturn(Optional.of(setting("peak.target_kw", "목표 피크", "1800")));
-        when(settingRepository.findById("peak.warn_ratio")).thenReturn(Optional.of(setting("peak.warn_ratio", "주의선", "97")));
+        when(tariffPeriodCache.findBySeason(any())).thenAnswer(call -> dayTariffs(call.getArgument(0)));
+        when(settingCache.getNumber(anyString())).thenReturn(null);
+        when(settingCache.getNumber("peak.target_kw")).thenReturn(1800.0);
+        when(settingCache.getNumber("peak.warn_ratio")).thenReturn(97.0);
         // 지금 이 순간의 공장 부하 (raw_factory_load 기반). 이 테스트들은 그 값 자체를 검사하지 않아 아무 값이나 둠
         when(rawLoadCursor.nextRow())
                 .thenReturn(new RawFactoryLoad(LocalDateTime.now(), LocalDateTime.now(), BigDecimal.ZERO));
@@ -170,6 +172,7 @@ class SitePowerServiceTest {
 
         // 공장 800, 태양광 1000 → 태양광이 다 채움 (100%를 넘지 않음)
         powerTable.add(power(lastMinute.plusSeconds(1), 0, 1000, 0, 800));
+        sitePowerService.clearLatestCacheForTest(); // 1초 캐시 때문에 바로 다음 호출이 이전 값을 그대로 주는 걸 막음
 
         SitePowerLatestResponse surplus = sitePowerService.getLatest();
 
@@ -191,7 +194,7 @@ class SitePowerServiceTest {
     void 설비마다_구역_코드와_정격_전력을_줌() {
         LocalDateTime lastMinute = LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES).minusMinutes(1);
         powerTable.add(power(lastMinute, 1000, 0, 0, 1000));
-        when(equipmentRepository.findByEquipmentRole(EquipmentRole.LOAD)).thenReturn(List.of(
+        when(equipmentCache.findByEquipmentRole(EquipmentRole.LOAD)).thenReturn(List.of(
                 new Equipment("BRZ-01", "Z2", "브레이징로", EquipmentRole.LOAD, new BigDecimal("600"))
         ));
         when(powerMinuteRepository.findByTs(lastMinute)).thenReturn(List.of(

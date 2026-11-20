@@ -9,7 +9,7 @@ public record ReportEss(
         List<ReportDailyDischarge> dailyDischarge, // 날짜별 방전량
         Double dischargeKwh,       // 방전 합계
         Double chargeKwh,          // 충전 합계
-        Double efficiencyPercent,  // 충방전 효율 = 방전 ÷ 충전 × 100
+        Double efficiencyPercent,  // 충방전 효율 = (방전 + 기간 중 저장량 변화) ÷ 충전 × 100
         Double cycles,             // 충방전 횟수 = 방전량 ÷ 배터리 용량
         Double avgSocPercent,      // 평균 잔량
         Double minSocPercent,      // 최저 잔량

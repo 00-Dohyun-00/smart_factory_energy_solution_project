@@ -1,9 +1,8 @@
 package com.smartfactory.energy.analysis;
 
+import static com.smartfactory.energy.TestData.bd;
 import static com.smartfactory.energy.TestData.interval;
-import static com.smartfactory.energy.TestData.powers;
 import static com.smartfactory.energy.TestData.recommendation;
-import static com.smartfactory.energy.TestData.setting;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -14,18 +13,18 @@ import com.smartfactory.energy.analysis.dto.TrendResponse;
 import com.smartfactory.energy.analysis.dto.TrendStatusResult;
 import com.smartfactory.energy.ess.EssStatusMinuteRepository;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
+import com.smartfactory.energy.power.PowerSummaryTotals;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.recommendation.RecommendationAction;
 import com.smartfactory.energy.recommendation.RecommendationReasonType;
 import com.smartfactory.energy.recommendation.RecommendationRepository;
 import com.smartfactory.energy.recommendation.RecommendationStatus;
-import com.smartfactory.energy.setting.SettingRepository;
-import com.smartfactory.energy.tariff.TariffPeriodRepository;
+import com.smartfactory.energy.setting.SettingCache;
+import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.weather.WeatherRepository;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,8 +42,8 @@ class AnalysisServiceTest {
     @Mock SitePowerMinuteRepository sitePowerMinuteRepository;
     @Mock EssStatusMinuteRepository essStatusMinuteRepository;
     @Mock WeatherRepository weatherRepository;
-    @Mock SettingRepository settingRepository;
-    @Mock TariffPeriodRepository tariffPeriodRepository;
+    @Mock SettingCache settingCache;
+    @Mock TariffPeriodCache tariffPeriodCache;
     @Mock RecommendationRepository recommendationRepository;
     @Mock DemandInterval15mRepository demandInterval15mRepository;
     @InjectMocks AnalysisService analysisService;
@@ -56,11 +55,13 @@ class AnalysisServiceTest {
 
     @BeforeEach
     void setUp() {
-        when(settingRepository.findById(anyString())).thenReturn(Optional.empty());
-        when(settingRepository.findById("peak.target_kw")).thenReturn(Optional.of(setting("peak.target_kw", "목표 피크", "1800")));
-        when(tariffPeriodRepository.findBySeason(any())).thenReturn(List.of());
-        when(essStatusMinuteRepository.findInPeriod(any(), any())).thenReturn(List.of());
+        when(settingCache.getNumber(anyString())).thenReturn(null);
+        when(settingCache.getNumber("peak.target_kw")).thenReturn(1800.0);
+        when(tariffPeriodCache.findBySeason(any())).thenReturn(List.of());
         when(weatherRepository.findInPeriod(any(), any())).thenReturn(List.of());
+        // 1분 기록이 하나도 없을 때의 기본값 (avgGridKw가 null이면 요약은 null)
+        when(sitePowerMinuteRepository.summaryTotals(any(), any()))
+                .thenReturn(new PowerSummaryTotals(null, null, null, null, null));
     }
 
     @Test
@@ -77,7 +78,6 @@ class AnalysisServiceTest {
 
     @Test
     void 기간은_62일까지_되고_63일이면_400() {
-        when(sitePowerMinuteRepository.findInPeriod(any(), any())).thenReturn(List.of());
         when(recommendationRepository.findInPeriod(any(), any())).thenReturn(List.of());
         when(demandInterval15mRepository.findInPeriod(any(), any())).thenReturn(List.of());
 
@@ -88,7 +88,6 @@ class AnalysisServiceTest {
 
     @Test
     void 기록이_없으면_요약은_null이고_목록은_비어_있음() {
-        when(sitePowerMinuteRepository.findInPeriod(any(), any())).thenReturn(List.of());
         when(recommendationRepository.findInPeriod(any(), any())).thenReturn(List.of());
         when(demandInterval15mRepository.findInPeriod(any(), any())).thenReturn(List.of());
 
@@ -103,7 +102,6 @@ class AnalysisServiceTest {
 
     @Test
     void 처리별_결과는_같은_구간을_한_번만_세고_만료는_넘김으로_셈() {
-        when(sitePowerMinuteRepository.findInPeriod(any(), any())).thenReturn(powers(W1, 37, 1700));
         when(demandInterval15mRepository.findInPeriod(any(), any())).thenReturn(List.of(
                 interval(W1, 1790, 1900, 15),
                 interval(W2, 1800.04, 1900, 15), // 반올림하면 1800.0이지만 목표 1800을 넘음
@@ -136,7 +134,9 @@ class AnalysisServiceTest {
 
     @Test
     void 최대_피크는_다_찬_구간에서만_고르고_목표_초과면_CRITICAL() {
-        when(sitePowerMinuteRepository.findInPeriod(any(), any())).thenReturn(powers(W1, 37, 1700));
+        // summary()를 null이 아니게 만들기 위한 집계값 (powers(W1, 37, 1700)과 같은 뜻: 37분, 한전 1700kW)
+        when(sitePowerMinuteRepository.summaryTotals(any(), any()))
+                .thenReturn(new PowerSummaryTotals(1700.0, bd(1700.0 * 37), bd(0), bd(0), bd(0)));
         when(recommendationRepository.findInPeriod(any(), any())).thenReturn(List.of());
         when(demandInterval15mRepository.findInPeriod(any(), any())).thenReturn(List.of(
                 interval(W1, 1790, 1900, 15),

@@ -11,9 +11,9 @@ import com.smartfactory.energy.recommendation.Recommendation;
 import com.smartfactory.energy.recommendation.RecommendationAction;
 import com.smartfactory.energy.recommendation.RecommendationRepository;
 import com.smartfactory.energy.recommendation.RecommendationStatus;
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
 import com.smartfactory.energy.tariff.TariffPeriod;
-import com.smartfactory.energy.tariff.TariffPeriodRepository;
+import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.tariff.TariffSeason;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -46,8 +46,8 @@ public class PeakAnalysisService {
 
     private final DemandInterval15mRepository demandInterval15mRepository;
     private final RecommendationRepository recommendationRepository;
-    private final SettingRepository settingRepository;
-    private final TariffPeriodRepository tariffPeriodRepository;
+    private final SettingCache settingCache;
+    private final TariffPeriodCache tariffPeriodCache;
 
     // 기간 피크 분석
     public PeakResponse getPeak(LocalDate from, LocalDate to) {
@@ -178,7 +178,7 @@ public class PeakAnalysisService {
         // ④ 피크가 잦은 시간대: 요금 시간대 묶음마다 히트맵 평균 → 가장 높은 묶음
         TariffPeriod busiest = null;
         double busiestAvg = 0;
-        for (TariffPeriod period : tariffPeriodRepository.findBySeason(seasonOf(to))) {
+        for (TariffPeriod period : tariffPeriodCache.findBySeason(seasonOf(to))) {
             OptionalDouble avg = heatmap.stream()
                     .filter(cell -> isInPeriod(period, LocalTime.of(cell.hour(), 0)))
                     .mapToDouble(PeakHeatmapCell::peakKw)
@@ -207,11 +207,9 @@ public class PeakAnalysisService {
 
     // ---------- 작은 도우미 메서드 ----------
 
-    // setting 테이블의 값을 숫자로 읽음. 없으면 null
+    // setting 값을 메모리 캐시에서 숫자로 읽음 (DB는 안 읽음). 없으면 null
     private Double settingNumber(String key) {
-        return settingRepository.findById(key)
-                .map(setting -> Double.valueOf(setting.getValue()))
-                .orElse(null);
+        return settingCache.getNumber(key);
     }
 
     // 같은 구간의 추천 2개 중 대표 1개 (적용 > 자동 > 넘김·만료 > 대기중, 같으면 나중 추천)

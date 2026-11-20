@@ -3,7 +3,6 @@ package com.smartfactory.energy.recommendation;
 import static com.smartfactory.energy.TestData.bd;
 import static com.smartfactory.energy.TestData.dayTariffs;
 import static com.smartfactory.energy.TestData.power;
-import static com.smartfactory.energy.TestData.setting;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -21,10 +20,10 @@ import com.smartfactory.energy.loadforecast.dto.LoadForecast;
 import com.smartfactory.energy.power.SitePowerMinute;
 import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.recommendation.dto.EssPlanResponse;
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
 import com.smartfactory.energy.simulator.EssSocState;
 import com.smartfactory.energy.tariff.TariffPeriod;
-import com.smartfactory.energy.tariff.TariffPeriodRepository;
+import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.tariff.TariffSeason;
 import com.smartfactory.energy.weather.SolarForecastService;
 import com.smartfactory.energy.weather.dto.SolarForecastSlot;
@@ -32,6 +31,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -56,8 +56,8 @@ class RecommendationEngineTest {
     @Mock EssSocState essSocState;
     @Mock EssCommandHolder essCommandHolder;
     @Mock SitePowerMinuteRepository sitePowerMinuteRepository;
-    @Mock TariffPeriodRepository tariffPeriodRepository;
-    @Mock SettingRepository settingRepository;
+    @Mock TariffPeriodCache tariffPeriodCache;
+    @Mock SettingCache settingCache;
     @Mock RecommendationRepository recommendationRepository;
     @Mock RecommendationService recommendationService;
     @Mock EventLogRepository eventLogRepository;
@@ -68,10 +68,10 @@ class RecommendationEngineTest {
         List<TariffPeriod> all = new ArrayList<>();
         for (TariffSeason season : TariffSeason.values()) {
             all.addAll(dayTariffs(season));
-            when(tariffPeriodRepository.findBySeason(season)).thenReturn(dayTariffs(season));
+            when(tariffPeriodCache.findBySeason(season)).thenReturn(dayTariffs(season));
         }
-        when(tariffPeriodRepository.findAll()).thenReturn(all);
-        when(settingRepository.findAll()).thenReturn(List.of());
+        when(tariffPeriodCache.findAll()).thenReturn(all);
+        when(settingCache.values()).thenReturn(Map.of());
         when(essSocState.get()).thenReturn(bd(50));
         when(solarForecastService.forecastFrom(any(), anyInt())).thenAnswer(inv -> {
             LocalDateTime from = inv.getArgument(0);
@@ -187,7 +187,7 @@ class RecommendationEngineTest {
     @Test
     void 자동_모드면_바로_적용함() {
         history(300, 2000, 0);
-        when(settingRepository.findAll()).thenReturn(List.of(setting("operation.auto_mode", "자동 모드", "true")));
+        when(settingCache.values()).thenReturn(Map.of("operation.auto_mode", "true"));
 
         recommendationEngine.run();
 

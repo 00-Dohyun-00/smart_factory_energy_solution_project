@@ -15,7 +15,7 @@ import com.smartfactory.energy.event.EventLogRepository;
 import com.smartfactory.energy.global.exception.NotFoundException;
 import com.smartfactory.energy.power.DemandInterval15mRepository;
 import com.smartfactory.energy.recommendation.dto.RecommendationResponse;
-import com.smartfactory.energy.setting.SettingRepository;
+import com.smartfactory.energy.setting.SettingCache;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -39,7 +39,7 @@ class RecommendationServiceTest {
     @Mock RecommendationRepository recommendationRepository;
     @Mock DemandInterval15mRepository demandInterval15mRepository;
     @Mock EventLogRepository eventLogRepository;
-    @Mock SettingRepository settingRepository;
+    @Mock SettingCache settingCache;
     @Mock EssCommandHolder essCommandHolder;
     @InjectMocks RecommendationService recommendationService;
 

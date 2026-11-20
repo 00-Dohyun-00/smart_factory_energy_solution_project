@@ -14,7 +14,7 @@ public record TrendSummary(
         Double solarPercentOfLoad,  // 공장 소비 중 태양광 비율 %
         Double dischargeKwh,        // ESS 방전량 kWh
         Double chargeKwh,           // ESS 충전량 kWh
-        Double efficiencyPercent,   // 충·방전 효율 % (방전량 ÷ 충전량)
+        Double efficiencyPercent,   // 충·방전 효율 % ((방전량 + 기간 중 저장량 변화) ÷ 충전량)
         Double socMinPercent,       // 배터리 잔량 최저 %
         LocalDateTime socMinAt,     // 잔량이 최저였던 시각
         Double socMaxPercent,       // 배터리 잔량 최고 %
