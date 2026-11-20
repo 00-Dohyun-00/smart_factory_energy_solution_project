@@ -771,6 +771,27 @@ const peakNote = computed(() => {
 })
 const showPeakRetry = computed(() => !peakTooLong.value && !!analysisStore.peakError && !peak.value)
 
+// ---- 기간 요약의 "목표를 넘은 구간" · "평균 피크 저감" (피크 분석 화면의 요약 카드에서 옮겨 옴, 2026-11-20) ----
+// 피크 분석 API가 계산해 준 summary를 그대로 보여 줌. 아직 못 받았거나 기간이 62일을 넘으면 숫자는 "—"
+const peakSummary = computed(() => peak.value?.summary ?? null)
+
+// 목표를 넘은 구간이 전체 15분 구간의 몇 %인지 (표시용 비율: 백엔드 값 두 개를 나눈 것)
+const exceededPercent = computed(() =>
+  peakSummary.value?.windowCount && peakSummary.value.exceededCount != null
+    ? (peakSummary.value.exceededCount / peakSummary.value.windowCount) * 100
+    : null,
+)
+
+// 피크 숫자를 보여 줄 수 없을 때 숫자 아래 줄에 적는 짧은 안내
+// (요약 칸이 좁아 1366px 화면에서도 안 잘리게 peakNote보다 짧게 씀. 자세한 안내와 [다시 시도]는 일별 최대 피크 카드에 있음)
+const peakSummaryNote = computed(() => {
+  if (peakTooLong.value) return `${PEAK_MAX_DAYS}일까지만 볼 수 있습니다`
+  if (analysisStore.peakError && !peak.value) return '불러오지 못했습니다'
+  if (!peak.value) return '불러오는 중입니다'
+  if (!peakSummary.value) return '피크 기록이 없습니다'
+  return ''
+})
+
 const dailyOption = computed(() => {
   const rows = dailyRows.value
   const target = peak.value?.targetPeakKw ?? null
@@ -1196,6 +1217,31 @@ const patternOption = computed(() => {
           </dd>
           <p class="num">{{ shortTime(summary.maxPeakAt) }}{{ maxPeakVerdict }}</p>
         </div>
+        <!-- 목표를 넘은 구간 · 평균 피크 저감: 피크 분석 화면에서 옮겨 옴 (피크 분석 API 값, 2026-11-20) -->
+        <div>
+          <dt>목표를 넘은 구간</dt>
+          <dd>
+            <span class="num">{{ formatInteger(peakSummary?.exceededCount) }}</span>
+            <small>회</small>
+            <!-- 전체 15분 구간 중 몇 %였는지 -->
+            <span v-if="exceededPercent !== null" class="pct num">
+              ({{ formatOneDecimal(exceededPercent) }}%)
+            </span>
+          </dd>
+          <p v-if="peakSummaryNote">{{ peakSummaryNote }}</p>
+          <p v-else class="num">15분 구간 {{ formatInteger(peakSummary.windowCount) }}개 중</p>
+        </div>
+        <div>
+          <dt>평균 피크 저감</dt>
+          <dd>
+            <span class="num">{{ formatKw(peakSummary?.avgReductionKw) }}</span> <small>kW</small>
+          </dd>
+          <p v-if="peakSummaryNote">{{ peakSummaryNote }}</p>
+          <!-- 칸이 좁아 "방전하지 않았을 때의 예상 대비"는 마우스를 올리면 보이게 둠 -->
+          <p v-else class="num" title="방전하지 않았을 때의 예상 피크 대비">
+            가장 크게 줄인 날 {{ formatKw(peakSummary.maxReductionKw) }} kW
+          </p>
+        </div>
         <div>
           <dt>평균 한전 구매전력</dt>
           <dd>
@@ -1220,27 +1266,7 @@ const patternOption = computed(() => {
           </dd>
           <p class="num">충·방전 효율 {{ formatOneDecimal(summary.efficiencyPercent) }}%</p>
         </div>
-        <div>
-          <dt>배터리 잔량 범위</dt>
-          <dd>
-            <span class="num">
-              {{ formatOneDecimal(summary.socMinPercent) }} ~
-              {{ formatOneDecimal(summary.socMaxPercent) }}
-            </span>
-            <small>%</small>
-          </dd>
-          <p class="num">최저 {{ shortTime(summary.socMinAt) }}</p>
-        </div>
-        <div>
-          <dt>배터리실 최고 온도</dt>
-          <dd>
-            <span class="num">{{ formatOneDecimal(summary.roomTempMaxC) }}</span> <small>℃</small>
-          </dd>
-          <p class="num">
-            {{ shortTime(summary.roomTempMaxAt) }}, 제한
-            {{ formatOneDecimal(trend.roomTempLimitC) }}℃
-          </p>
-        </div>
+        <!-- 배터리 잔량 범위 · 배터리실 최고 온도 카드는 2026-11-20에 뺌 (사용자 요청) -->
       </dl>
 
       <div class="main">
@@ -1669,6 +1695,12 @@ const patternOption = computed(() => {
   color: var(--mute);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 목표를 넘은 구간 옆 비율 (%) */
+.summary .pct {
+  margin-left: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
 }
 
 /* 그래프와 오른쪽 열 */
