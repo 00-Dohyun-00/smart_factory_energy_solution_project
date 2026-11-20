@@ -423,14 +423,16 @@ const valueAxis = {
   splitLine: { lineStyle: { color: COLOR.line } },
 }
 
-const legend = computed(() => ({
-  right: 0,
-  top: 0,
-  icon: 'rect',
-  itemWidth: 10,
-  itemHeight: 10,
-  textStyle: { color: COLOR.legendText },
-}))
+// 전력 그래프 범례: 그래프 안에 두면 위쪽 한 줄을 차지해 그래프 칸이 좁아지므로 제목 줄에 글자로 둠
+// (색은 그래프와 같은 CSS 변수. "보기"에서 끈 항목은 범례에서도 뺌)
+const POWER_LEGEND = [
+  { key: 'grid', name: '한전 구매', className: 'grid' },
+  { key: 'solar', name: '태양광', className: 'solar' },
+  { key: 'ess', name: 'ESS 방전', className: 'discharge' },
+  { key: 'ess', name: 'ESS 충전(−)', className: 'charge' },
+  { key: 'load', name: '공장 소비', className: 'load' },
+]
+const powerLegend = computed(() => POWER_LEGEND.filter((item) => shown.value.includes(item.key)))
 
 // 어떤 시각이 그래프의 어느 칸인지 (그 시각이 들어 있는 칸의 가로축 글자)
 function slotLabelOf(at) {
@@ -516,8 +518,8 @@ function pinTooltip(label) {
 // 전력 · 배터리 잔량 · 온도 그래프의 오른쪽 여백 (세 그래프의 가로축을 맞추려고 같은 값을 씀.
 // 배터리 잔량 · 온도의 기준선 이름표를 이 자리에 적음)
 const GRID_RIGHT = 58
-// 전력 그래프 칸의 위쪽 여백 (이 위에 범례와 추천 기호 띠가 들어감)
-const POWER_GRID_TOP = 44
+// 전력 그래프 칸의 위쪽 여백 (이 위에 추천 기호 띠 20px가 들어감. 범례는 제목 줄로 옮김)
+const POWER_GRID_TOP = 24
 
 // lines 예: [{ value: 1800, text: '목표 피크 1,800', color: COLOR.ink, dashed: false }]
 // withPins = true면 그래프 위쪽 띠에 추천 기호를 적음 (전력 그래프만)
@@ -629,58 +631,179 @@ function rowsTooltip(format) {
 }
 
 // ---- 전력 (kW) ----
+// 공장 소비 = 한전 구매 + 태양광 + ESS(방전 +, 충전 −) 이므로, 공장이 쓴 전기를 "어디서 채웠는지" 쌓아서 그림.
+// - 0 위: 한전 구매(맨 아래) → 태양광 → ESS 방전 순서로 쌓은 면. 맨 위가 공장 소비 선과 만남
+// - 0 아래: ESS 충전 (배터리로 들어간 만큼)
+// - 한전 구매가 맨 아래 층이라, 그 윗선을 목표 피크선과 바로 비교할 수 있음
+// (예전에는 선 3개 + 막대를 겹쳐 그려, 선이 서로 얽혀 무엇이 큰지 알기 어려웠음)
 const powerItems = computed(() => shown.value.filter((key) => key !== 'soc' && key !== 'temp'))
 
-const powerOption = computed(() => {
-  const series = []
-  if (shown.value.includes('ess')) {
-    series.push({
-      name: 'ESS 방전(+) · 충전(−)',
-      type: 'bar',
-      barMaxWidth: 14,
-      data: points.value.map((item) => item.essKw ?? null),
-      itemStyle: { color: COLOR.ess },
-    })
+const ESS_DISCHARGE = 'ESS 방전'
+const ESS_CHARGE = 'ESS 충전(−)'
+
+// 쌓는 면 하나. 그라데이션 없이 단색을 옅게 칠하고, 윗선은 같은 색으로 얇게
+function areaSeries(name, data, color, { stack, areaOpacity, lineWidth }) {
+  return {
+    name,
+    type: 'line',
+    stack,
+    showSymbol: false,
+    data,
+    lineStyle: { color, width: lineWidth },
+    itemStyle: { color },
+    areaStyle: { color, opacity: areaOpacity },
+    emphasis: { disabled: true },
   }
-  if (shown.value.includes('solar')) series.push(lineSeries('태양광', 'solarKw', COLOR.solar))
-  if (shown.value.includes('grid')) series.push(lineSeries('한전 구매', 'gridKw', COLOR.grid))
-  if (shown.value.includes('load')) series.push(lineSeries('공장 소비', 'loadKw', COLOR.ink))
+}
+
+// 기록이 없는 구간을 옅은 띠로 칠하고 "기록 없음"이라고 적음 (값이 0으로 떨어진 것과 구분되게)
+// 맨 끝(오늘의 아직 오지 않은 시간)은 기록이 "없는" 게 아니라 "아직 안 온" 것이라 칠하지 않음
+function emptyAreas() {
+  const isEmpty = (item) => item.loadKw == null && item.gridKw == null
+  const lastIndex = points.value.findLastIndex((item) => !isEmpty(item))
+  // 띠가 좁으면 글자가 띠 밖으로 넘쳐 옆 띠의 글자와 겹치므로, 전체 폭의 1/12 이상인 띠에만 글자를 적음
+  const labelMin = points.value.length / 12
+  const areas = []
+  let start = null
+  points.value.forEach((item, index) => {
+    if (index > lastIndex) return
+    if (isEmpty(item) && start === null) start = index
+    if (!isEmpty(item) && start !== null) {
+      // 한 칸짜리 빈칸은 선이 끊긴 것만으로 충분히 보여 띠를 칠하지 않음
+      if (index - start >= 2) {
+        areas.push([
+          {
+            xAxis: labels.value[start],
+            itemStyle: { color: COLOR.band },
+            label: {
+              show: index - start >= labelMin,
+              formatter: '기록 없음',
+              position: 'inside',
+              color: COLOR.mute,
+              fontSize: 11,
+            },
+          },
+          { xAxis: labels.value[index - 1] },
+        ])
+      }
+      start = null
+    }
+  })
+  return areas
+}
+
+const powerOption = computed(() => {
+  const has = (key) => shown.value.includes(key)
+  const pick = (field) => points.value.map((item) => item[field] ?? null) // 기록 없는 칸은 비움
+  const series = []
+  if (has('grid')) {
+    series.push(
+      areaSeries('한전 구매', pick('gridKw'), COLOR.grid, {
+        stack: 'supply',
+        areaOpacity: 0.35,
+        lineWidth: 1.5, // 목표 피크선과 비교하는 선이라 조금 또렷하게
+      }),
+    )
+  }
+  if (has('solar')) {
+    series.push(
+      // 노랑은 옅게 칠하면 어두운 바탕에서 갈색으로 보여 진하게.
+      // 윗선은 긋지 않음: 밤(태양광 0)에는 윗선이 한전 구매 윗선 위에 겹쳐 노란 선이 보였음
+      areaSeries('태양광', pick('solarKw'), COLOR.solar, {
+        stack: 'supply',
+        areaOpacity: 0.8,
+        lineWidth: 0,
+      }),
+    )
+  }
+  if (has('ess')) {
+    // ESS 값 하나(방전 +, 충전 −)를 부호로 나눠, 방전은 위에 쌓고 충전은 0 아래에 그림
+    const essOf = (pickSign) =>
+      points.value.map((item) => (item.essKw == null ? null : pickSign(item.essKw, 0)))
+    series.push(
+      areaSeries(ESS_DISCHARGE, essOf(Math.max), COLOR.ess, {
+        stack: 'supply',
+        areaOpacity: 0.65,
+        lineWidth: 0,
+      }),
+      areaSeries(ESS_CHARGE, essOf(Math.min), COLOR.ess, {
+        stack: 'charge',
+        areaOpacity: 0.3,
+        lineWidth: 0,
+      }),
+    )
+  }
+  // 공장 소비는 쌓지 않은 선으로 맨 위에 그림 (쌓인 면의 맨 위와 만나는지 보면 됨)
+  if (has('load')) series.push(lineSeries('공장 소비', 'loadKw', COLOR.ink))
 
   // 목표 피크선은 한전 구매전력과 비교하는 선이라, 한전 구매를 켰을 때만 그림
   const target = trend.value.targetPeakKw
-  const lines = shown.value.includes('grid')
+  const lines = has('grid')
     ? // 목표 피크선은 공장 소비 선(먹색)과 구분되게 전용 자주색 (통합 화면의 목표 피크선과 같은 색)
       // 이름표는 선 아래에 둠: 목표선이 그래프 맨 위 가까이 있으면 위쪽 이름표가 추천 기호(● ◇ ✕ ○)와 겹쳤음
       [{ value: target, text: `목표 피크 ${formatKw(target)}`, color: COLOR.target, below: true }]
     : []
-  if (series.length) series[0].markLine = markLines(lines, true)
-  // 범례에는 보이는 선만 (보이지 않는 선은 범례 목록에서 뺌)
-  const legendNames = series.map((item) => item.name)
+  if (series.length) {
+    series[0].markLine = markLines(lines, true)
+    series[0].markArea = { silent: true, data: emptyAreas() }
+  }
   series.push(cursorSeries())
 
   return {
     animation: false,
-    // 위쪽에 범례와 추천 핀 기호가 들어가므로 여백을 넉넉히 둠
+    // 위쪽에 추천 핀 기호 띠가 들어감. 범례는 그래프 칸을 넓히려고 제목 줄(powerLegend)에 둠
     grid: { left: 52, right: GRID_RIGHT, top: POWER_GRID_TOP, bottom: 24 },
-    legend: { ...legend.value, data: legendNames },
+    legend: { show: false },
     tooltip: {
       ...tooltipColors(),
       trigger: 'axis',
+      // 공장 소비 → 한전 구매 → 태양광 → ESS 순서로, ESS는 방전/충전 중 한 줄만 보여 줌.
       // 값 목록 아래에 그 칸에 나온 추천을 함께 보여 줌
       formatter: (allParams) => {
         if (!allParams.length) return ''
         const label = allParams[0].axisValue
+        const point = points.value[allParams[0].dataIndex]
         const params = realParams(allParams)
         // 기록이 없는 칸이면 값마다 "—"를 늘어놓지 않고 한 줄로 알림
         if (params.every((item) => item.value == null)) return `${label}<br/>기록 없음`
-        const rows = params.map(
-          (item) => `${item.marker}${item.seriesName} <strong>${formatKw(item.value)} kW</strong>`,
-        )
+        const marker = (name) => params.find((item) => item.seriesName === name)?.marker ?? ''
+        // kw를 주지 않으면 이름만 적음 (ESS 대기)
+        const row = (name, text, kw) =>
+          `${marker(name)}${text}${kw === undefined ? '' : ` <strong>${formatKw(kw)} kW</strong>`}`
+        const rows = []
+        if (has('load')) rows.push(row('공장 소비', '공장 소비', point.loadKw))
+        if (has('grid')) rows.push(row('한전 구매', '한전 구매', point.gridKw))
+        if (has('solar')) rows.push(row('태양광', '태양광', point.solarKw))
+        if (has('ess')) {
+          const ess = point.essKw
+          if (ess != null && ess < 0) rows.push(row(ESS_CHARGE, 'ESS 충전', Math.abs(ess)))
+          else if (ess > 0) rows.push(row(ESS_DISCHARGE, 'ESS 방전', ess))
+          else if (ess === 0) rows.push(row(ESS_DISCHARGE, 'ESS 대기'))
+          else rows.push(row(ESS_DISCHARGE, 'ESS', null)) // 이 칸만 ESS 기록이 없으면 "—"
+        }
         return `${label}<br/>${rows.join('<br/>')}${pinTooltip(label)}`
       },
     },
-    xAxis: timeAxis(false),
-    yAxis: [valueAxis, CURSOR_AXIS],
+    // 충전(0 아래)이 있으면 가로축 선이 그래프 가운데(0)로 올라오므로, 가로축은 항상 맨 아래에 둠
+    xAxis: { ...timeAxis(false), axisLine: { onZero: false, lineStyle: { color: COLOR.line } } },
+    yAxis: [
+      {
+        ...valueAxis,
+        splitNumber: 3,
+        // 그래프 칸이 낮으면 눈금 숫자가 겹치므로, 겹치는 숫자는 숨김
+        axisLabel: { ...valueAxis.axisLabel, hideOverlap: true },
+        // 값이 목표 피크보다 한참 낮으면(예: 1일 간격 평균) 세로축이 목표보다 낮게 끝나 목표선이 사라졌음.
+        // 목표선을 그릴 때는 세로축 위쪽을 목표보다 조금 위(500 단위)까지 올림. null이면 ECharts가 알아서 정함
+        max: (value) =>
+          has('grid') && target != null && target >= value.max
+            ? Math.ceil((target * 1.05) / 500) * 500
+            : null,
+        // 충전(0 아래)은 보통 수백 kW라, ECharts에 맡기면 칸이 낮을 때 -1,000까지 내려가 그래프 1/4이 비었음.
+        // 가장 큰 충전값 바로 아래(250 단위)에서 자름
+        min: (value) => (value.min < 0 ? Math.floor(value.min / 250) * 250 : null),
+      },
+      CURSOR_AXIS,
+    ],
     series,
   }
 })
@@ -1103,6 +1226,13 @@ const patternOption = computed(() => {
               전력 <small>kW</small>
               <span v-if="showPins" class="chart-note">
                 추천: ● 적용 · ◇ 자동 · ✕ 넘김 · ○ 추천 중
+              </span>
+              <!-- 범례 (그래프의 면 · 선 색과 같음) -->
+              <span class="power-legend">
+                <span v-for="item in powerLegend" :key="item.name" class="power-legend-item">
+                  <span class="power-swatch" :class="item.className" aria-hidden="true"></span>
+                  {{ item.name }}
+                </span>
               </span>
               <label class="check pin-toggle">
                 <input v-model="showPins" type="checkbox" />
@@ -1746,6 +1876,55 @@ const patternOption = computed(() => {
   margin-left: auto;
   font-size: 13px;
   font-weight: 400;
+}
+/* 전력 제목 줄: 화면이 좁아 한 줄에 안 들어가면 범례가 다음 줄로 내려감 */
+.chart-title.main-chart {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.chart-title.main-chart .pin-toggle {
+  margin-left: 12px; /* 범례가 오른쪽으로 붙도록 빈 공간은 범례 앞에 둠 */
+}
+.power-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--legend-text);
+}
+.power-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+/* 면은 네모, 공장 소비(선)는 가는 막대. 그래프에서 칠한 진하기와 비슷하게 */
+.power-swatch {
+  width: 10px;
+  height: 10px;
+}
+.power-swatch.grid {
+  background: var(--src-grid);
+  opacity: 0.6;
+}
+.power-swatch.solar {
+  background: var(--src-solar);
+  opacity: 0.85;
+}
+.power-swatch.discharge {
+  background: var(--src-ess);
+  opacity: 0.8;
+}
+.power-swatch.charge {
+  background: var(--src-ess);
+  opacity: 0.4;
+}
+.power-swatch.load {
+  height: 2px;
+  background: var(--ink);
 }
 .pin-error {
   font-size: 12px;
