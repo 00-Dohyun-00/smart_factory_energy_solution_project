@@ -1,6 +1,6 @@
 <!--
   운영 로그 > 전력 이력
-  15분 구간마다 한 줄씩, 그 구간의 전력 상황을 모두 표의 칸으로 보여 주는 로그 화면. [CSV 받기]로 지금 표를 그대로 파일로 받음
+  15분 구간마다 한 줄씩, 그 구간의 전력 상황을 모두 표의 칸으로 보여 주는 로그 화면. [엑셀 받기]로 지금 표를 그대로 파일로 받음
   - 공장 소비 · 한전 구매 · 태양광 · ESS · 잔량 · 온도: 추이 분석 API (15분 간격). 날씨 · 요금 시간대도 같은 응답에서 씀
   - 피크 초과: 피크 분석 API의 exceededWindows
   - 피크 단계 · 이벤트: 이벤트 API (event_log 테이블)
@@ -385,9 +385,9 @@ const counts = computed(() => [
   { label: '이벤트', value: historyStore.powerEvents.length },
 ])
 
-// ---- CSV 받기 ----
-// 지금 표에 보이는 줄(거른 결과)과 칸을 그대로 파일로 만듦. 엑셀에서 한글이 깨지지 않게 맨 앞에 BOM(\uFEFF)을 붙임
-function downloadCsv() {
+// ---- 엑셀 받기 ----
+// 지금 표에 보이는 줄(거른 결과)과 칸을 엑셀에서 열 수 있는 CSV 파일로 만듦 (라이브러리 없이). 엑셀에서 한글이 깨지지 않게 맨 앞에 BOM(\uFEFF)을 붙임
+function downloadExcel() {
   const header = columns.value.map((column) => column.label)
   const lines = rows.value.map((row) => columns.value.map((column) => column.text(row)))
   // 칸 안에 쉼표 · 따옴표 · 줄바꿈이 있어도 깨지지 않게 큰따옴표로 감쌈
@@ -434,7 +434,7 @@ watch(
         </li>
       </ul>
       <div class="head-buttons">
-        <button class="reset" :disabled="!rows.length" @click="downloadCsv">CSV 받기</button>
+        <button class="reset" :disabled="!rows.length" @click="downloadExcel">엑셀 받기</button>
         <button class="reset" @click="resetFilters">조건 초기화</button>
       </div>
     </div>
