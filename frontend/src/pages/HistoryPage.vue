@@ -1,7 +1,7 @@
 <!-- 운영 이력: 추천 → 적용 여부 → 결과를 시간순 표로 보여 줍니다 -->
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { useHistoryStore } from '@/stores/useHistoryStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { formatHourMinute, formatKw, formatMonthDayTime } from '@/utils/format'
@@ -195,6 +195,11 @@ function toggle(id) {
         <span class="crumb-parent" aria-hidden="true">›</span>
         <h1 class="crumb-title">추천 이력</h1>
       </div>
+      <!-- 운영 로그의 두 탭 (추천 이력 / 전력 이력) -->
+      <nav class="log-tabs" aria-label="운영 로그 탭">
+        <RouterLink to="/logs" class="tab active" aria-current="page">추천 이력</RouterLink>
+        <RouterLink to="/logs/power" class="tab">전력 이력</RouterLink>
+      </nav>
       <ul class="counts">
         <li v-for="item in counts" :key="item.label">
           {{ item.label }} <strong class="num">{{ item.value }}</strong>
@@ -422,6 +427,32 @@ function toggle(id) {
   display: flex;
   align-items: center;
   gap: 24px;
+}
+/* 운영 로그 탭 (전력 이력 화면에도 같은 모양이 있음) */
+.log-tabs {
+  display: flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.log-tabs .tab {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  background: var(--card);
+  color: var(--ink-2);
+}
+.log-tabs .tab + .tab {
+  border-left: 1px solid var(--line-strong);
+}
+.log-tabs .tab:hover {
+  background: var(--bg);
+}
+.log-tabs .tab.active {
+  background: var(--ink);
+  font-weight: 700;
+  color: var(--card);
 }
 .head-reset {
   margin-left: auto;
