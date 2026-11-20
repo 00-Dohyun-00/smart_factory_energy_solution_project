@@ -254,13 +254,10 @@ const kpis = computed(() => {
       prefixIcon: s?.pcsStatus ?? '', // 글자 앞 아이콘 (대기 · 방전 · 충전)
       value: formatKw(essKw),
       unit: 'kW',
-      // 아랫줄: 지금 출력이 최대 출력의 몇 %인지 (표시용 비율)
-      sub: !s
-        ? ''
-        : s.pcsStatus === 'STANDBY' || !maxPowerKw
-          ? `최대 출력 ${maxPowerKw ? formatKw(maxPowerKw) : '—'} kW`
-          : `최대 ${formatKw(maxPowerKw)} kW의 ${formatOneDecimal((essKw / maxPowerKw) * 100)}%`,
-      // 아랫줄 둘째 줄: 배터리실 온도 (배터리 잔량 카드를 없애면서 여기로 옮김, 2026-11-19)
+      // 숫자(대기 0.0 kW) 바로 옆에 최대 출력 (아랫줄을 배터리실 온도에 크게 쓰려고 옮김)
+      valueNote: s ? `최대 출력 ${maxPowerKw ? formatKw(maxPowerKw) : '—'} kW` : '',
+      sub: '',
+      // 아랫줄: 배터리실 온도 (배터리 잔량 카드를 없애면서 여기로 옮김, 2026-11-19)
       roomTemp: s ? `${formatOneDecimal(s.batteryTempC)}℃` : '',
       // 반원 계기판 대신 건전지 (2026-11-19): 안의 막대 = 지금 잔량(SOC), 옆 화살표 = 충전 ↑ / 방전 ↓
       battery: s
@@ -366,6 +363,7 @@ const kpis = computed(() => {
           </span>
           <span class="num">{{ kpi.value }}</span>
           <span class="kpi-unit">{{ kpi.unit }}</span>
+          <span v-if="kpi.valueNote" class="kpi-value-note num">{{ kpi.valueNote }}</span>
         </p>
         <!-- 아랫줄 (높이를 두 줄로 고정해서 글자가 바뀌어도 카드 높이가 변하지 않음) -->
         <p v-if="kpi.legend" class="kpi-sub num">
@@ -581,16 +579,25 @@ const kpis = computed(() => {
   font-weight: 400;
   color: var(--ink-2);
 }
-/* 배터리실 온도: 아랫줄의 둘째 줄 */
+/* 숫자 옆 보조 글 (배터리 잔량: 최대 출력) */
+.kpi-value-note {
+  margin-left: 4px;
+  font-size: 9.6px;
+  font-weight: 400;
+  color: var(--mute);
+}
+/* 배터리실 온도: 아랫줄을 혼자 쓰므로 크게 (칸 높이 20.8px 안에서 한 줄) */
 .room-temp {
   display: block;
+  font-size: 12px;
+  line-height: 20.8px;
+  color: var(--ink-2);
 }
-/* 두 줄 칸(높이 고정)에 들어가게 온도계를 글자 높이로 줄임 */
 .room-temp .thermo {
-  width: 7px;
-  height: 10px;
-  margin: 0 1px 0 2px;
-  vertical-align: -1px;
+  width: 9px;
+  height: 13px;
+  margin: 0 2px 0 3px;
+  vertical-align: -2px;
 }
 .kpi-sub {
   align-self: stretch;
@@ -728,6 +735,7 @@ const kpis = computed(() => {
   text-align: left;
 }
 .kpi-sub.over {
+  font-size: 8px; /* 굵은 두 줄이 높이 20.8px 칸에서 아래가 잘려서, 칸 크기는 두고 글자만 줄임 */
   font-weight: 700;
   color: var(--warn);
 }
