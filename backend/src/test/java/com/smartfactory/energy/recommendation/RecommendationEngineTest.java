@@ -11,7 +11,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.smartfactory.energy.ess.EssCommandHolder;
 import com.smartfactory.energy.event.EventLog;
 import com.smartfactory.energy.event.EventLogRepository;
 import com.smartfactory.energy.event.EventType;
@@ -22,13 +21,13 @@ import com.smartfactory.energy.power.SitePowerMinuteRepository;
 import com.smartfactory.energy.recommendation.dto.EssPlanResponse;
 import com.smartfactory.energy.setting.SettingCache;
 import com.smartfactory.energy.simulator.EssSocState;
+import com.smartfactory.energy.simulator.SimClock;
 import com.smartfactory.energy.tariff.TariffPeriod;
 import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.tariff.TariffSeason;
 import com.smartfactory.energy.weather.SolarForecastService;
 import com.smartfactory.energy.weather.dto.SolarForecastSlot;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -45,26 +44,31 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 // 판단 엔진: 계획(96칸·잔량), 추천 저장, 같은 구간·같은 추천이면 다시 저장하지 않음, 자동 모드, 멈춘 기록
-// "지금"은 서버 시계라서 기록도 지금 시각을 기준으로 만듦
+// "지금"은 SimClock에서 얻으므로, 테스트에서는 항상 아래 NOW(심야 경부하 시간, 구간 6분째)로 고정해서
+// 돌릴 때마다 같은 결과가 나오게 함. 최대부하 시간대에 돌리면 계획 자체가 미리 방전하려고 해서
+// "피크 방어(PEAK_DEFENSE)"와 "최대부하 할인 방전(ON_PEAK_DISCHARGE)"이 구분되지 않기 때문
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class RecommendationEngineTest {
 
+    // 2026-01-15(겨울) 02:05 = 경부하 시간대(00:00~08:00), 15분 구간(02:00~02:15)의 6분째(남은 9분)
+    private static final LocalDateTime NOW = LocalDateTime.of(2026, 1, 15, 2, 5, 0);
+
     @Spy EssPlanner essPlanner = new EssPlanner();
     @Mock LoadForecastService loadForecastService;
     @Mock SolarForecastService solarForecastService;
+    @Mock SimClock simClock;
     @Mock EssSocState essSocState;
-    @Mock EssCommandHolder essCommandHolder;
     @Mock SitePowerMinuteRepository sitePowerMinuteRepository;
     @Mock TariffPeriodCache tariffPeriodCache;
     @Mock SettingCache settingCache;
     @Mock RecommendationRepository recommendationRepository;
-    @Mock RecommendationService recommendationService;
     @Mock EventLogRepository eventLogRepository;
     @InjectMocks RecommendationEngine recommendationEngine;
 
     @BeforeEach
     void setUp() {
+        when(simClock.now()).thenReturn(NOW);
         List<TariffPeriod> all = new ArrayList<>();
         for (TariffSeason season : TariffSeason.values()) {
             all.addAll(dayTariffs(season));
@@ -103,8 +107,8 @@ class RecommendationEngineTest {
 
     // 평소에는 usualKw, 이번 15분 구간과 최근 4분은 nowKw
     private void history(double usualKw, double nowKw, int minutesAgoOfLast) {
-        LocalDateTime last = LocalDateTime.now().truncatedTo(ChronoUnit.MINUTES).minusMinutes(minutesAgoOfLast);
-        LocalDateTime windowStart = RecommendationEngine.quarterStartOf(LocalDateTime.now());
+        LocalDateTime last = NOW.minusMinutes(minutesAgoOfLast);
+        LocalDateTime windowStart = RecommendationEngine.quarterStartOf(NOW);
         List<SitePowerMinute> rows = new ArrayList<>();
         for (int i = 59; i >= 0; i--) {
             LocalDateTime ts = last.minusMinutes(i);
@@ -129,7 +133,7 @@ class RecommendationEngineTest {
 
         EssPlanResponse plan = recommendationEngine.latestPlan().orElseThrow();
         assertThat(plan.slots()).hasSize(96);
-        assertThat(plan.slots().get(0).slotStart()).isEqualTo(RecommendationEngine.quarterStartOf(LocalDateTime.now()));
+        assertThat(plan.slots().get(0).slotStart()).isEqualTo(RecommendationEngine.quarterStartOf(NOW));
         assertThat(plan.slots().get(95).slotStart()).isEqualTo(plan.slots().get(0).slotStart().plusMinutes(15 * 95));
         assertThat(plan.slots()).allSatisfy(slot -> {
             assertThat(slot.loadKw()).isEqualTo(300);
@@ -171,9 +175,43 @@ class RecommendationEngineTest {
     }
 
     @Test
+    void 피크_방어_중_훨씬_더_방전해야_하면_유지_규칙보다_우선해서_다시_추천함() {
+        history(300, 5000, 0); // 아주 큰 스파이크 → 최대 출력(500kW)까지 필요
+        LocalDateTime windowStart = RecommendationEngine.quarterStartOf(NOW);
+        // 같은 구간에 이미 40kW 방전이 적용돼 있음 (원래 규칙대로면 구간 끝까지 유지됨)
+        Recommendation last = new Recommendation(windowStart.plusMinutes(1), windowStart, RecommendationAction.DISCHARGE,
+                bd(40), RecommendationReasonType.PEAK_DEFENSE, "이전 추천", bd(1900), bd(1800),
+                RecommendationStatus.APPLIED, "운영자", windowStart.plusMinutes(1));
+        when(recommendationRepository.findFirstByOrderByRecommendedAtDescRecommendationIdDesc())
+                .thenReturn(Optional.of(last));
+
+        recommendationEngine.run();
+
+        Recommendation r = savedRecommendation();
+        assertThat(r.getReasonType()).isEqualTo(RecommendationReasonType.PEAK_DEFENSE);
+        assertThat(r.getAction()).isEqualTo(RecommendationAction.DISCHARGE);
+        // 40 + ESCALATION_KW(50) 이상 커야 다시 추천되므로, 그보다 확실히 큰지 확인
+        assertThat(r.getPowerKw().doubleValue()).isGreaterThanOrEqualTo(40 + 50);
+    }
+
+    @Test
+    void 피크_방어_중이어도_차이가_작으면_유지_규칙대로_다시_저장하지_않음() {
+        history(300, 2000, 0);
+        recommendationEngine.run();
+        Recommendation first = savedRecommendation();
+        // 직전과 똑같은 상황을 다시 돌림 → 차이 0 < ESCALATION_KW(50) → 유지 규칙대로 그대로 둠
+        when(recommendationRepository.findFirstByOrderByRecommendedAtDescRecommendationIdDesc())
+                .thenReturn(Optional.of(first));
+
+        recommendationEngine.run();
+
+        verify(recommendationRepository, times(1)).save(any());
+    }
+
+    @Test
     void 새_구간이면_답하지_않은_이전_추천은_만료() {
         history(300, 2000, 0);
-        LocalDateTime previousWindow = RecommendationEngine.quarterStartOf(LocalDateTime.now()).minusMinutes(15);
+        LocalDateTime previousWindow = RecommendationEngine.quarterStartOf(NOW).minusMinutes(15);
         Recommendation old = new Recommendation(previousWindow, previousWindow, RecommendationAction.DISCHARGE, bd(100),
                 RecommendationReasonType.PEAK_DEFENSE, "이전", bd(1900), bd(1800), RecommendationStatus.PENDING, null, null);
         when(recommendationRepository.findFirstByOrderByRecommendedAtDescRecommendationIdDesc()).thenReturn(Optional.of(old));
@@ -194,7 +232,6 @@ class RecommendationEngineTest {
         Recommendation r = savedRecommendation();
         assertThat(r.getStatus()).isEqualTo(RecommendationStatus.AUTO);
         assertThat(r.getHandledBy()).isEqualTo("자동 모드");
-        verify(recommendationService).applyToEss(any(), any());
         verify(eventLogRepository, times(2)).save(any()); // 추천 + 자동 적용
     }
 

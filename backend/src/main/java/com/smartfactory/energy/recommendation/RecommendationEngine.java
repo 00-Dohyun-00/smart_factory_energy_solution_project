@@ -1,7 +1,5 @@
 package com.smartfactory.energy.recommendation;
 
-import com.smartfactory.energy.ess.EssCommand;
-import com.smartfactory.energy.ess.EssCommandHolder;
 import com.smartfactory.energy.event.EventLog;
 import com.smartfactory.energy.event.EventLogRepository;
 import com.smartfactory.energy.event.EventStage;
@@ -14,6 +12,7 @@ import com.smartfactory.energy.recommendation.dto.EssPlanResponse;
 import com.smartfactory.energy.recommendation.dto.RecommendationResponse;
 import com.smartfactory.energy.setting.SettingCache;
 import com.smartfactory.energy.simulator.EssSocState;
+import com.smartfactory.energy.simulator.SimClock;
 import com.smartfactory.energy.tariff.TariffPeriod;
 import com.smartfactory.energy.tariff.TariffPeriodCache;
 import com.smartfactory.energy.tariff.TariffPeriodType;
@@ -60,19 +59,20 @@ public class RecommendationEngine {
     private static final int LOAD_HISTORY_MINUTES = 60;
     // "최근 ESS 없이 한전 구매"를 볼 최근 분 수
     private static final int RECENT_MINUTES = 4;
+    // 같은 구간에서 피크 방어 중일 때, 방전이 이만큼(kW) 이상 더 필요해지면 깜빡임 방지보다 우선해서 다시 추천
+    private static final double ESCALATION_KW = 50;
     private static final String AUTO_HANDLER = "자동 모드";
     private static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm");
 
     private final EssPlanner essPlanner;
     private final LoadForecastService loadForecastService;
     private final SolarForecastService solarForecastService;
+    private final SimClock simClock;
     private final EssSocState essSocState;
-    private final EssCommandHolder essCommandHolder;
     private final SitePowerMinuteRepository sitePowerMinuteRepository;
     private final TariffPeriodCache tariffPeriodCache;
     private final SettingCache settingCache;
     private final RecommendationRepository recommendationRepository;
-    private final RecommendationService recommendationService;
     private final EventLogRepository eventLogRepository;
 
     // 가장 최근에 짠 24시간 계획 (이 서버 메모리에만 있음)
@@ -83,7 +83,7 @@ public class RecommendationEngine {
     }
 
     public void run() {
-        LocalDateTime now = LocalDateTime.now().withNano(0);
+        LocalDateTime now = simClock.now().withNano(0);
 
         // 1. 최근 1시간 1분 기록. 없거나 멈춰 있으면 판단하지 않음
         List<SitePowerMinute> history = sitePowerMinuteRepository.findInPeriod(
@@ -153,6 +153,8 @@ public class RecommendationEngine {
 
     // 새 15분 구간이거나 추천이 바뀌었을 때만 1줄 저장
     // 같은 구간에서 피크 방어가 나왔으면 그 구간이 끝날 때까지 유지 (방전 → 대기 → 방전 깜빡임 방지)
+    // 단, 피크 방어 중에 더 많이 방전해야 하는 상황으로 악화되면(ESCALATION_KW 이상 더 필요) 그 유지
+    // 규칙보다 우선해서 다시 추천함 (예: 40kW 적용해 뒀는데 갑자기 500kW가 필요해진 경우)
     private void saveIfChanged(LocalDateTime now, LocalDateTime windowStart, EssPlanner.Advice advice,
                                EssPlanner.NowInfo info, List<PlanInput> inputs, EssLimits limits,
                                Map<String, String> settings, List<TariffPeriod> periods) {
@@ -161,7 +163,10 @@ public class RecommendationEngine {
             Recommendation last = latest.get();
             boolean sameWindow = last.getIntervalStart().equals(windowStart);
             boolean sameAdvice = last.getReasonType() == advice.reasonType() && last.getAction() == advice.action();
-            if (sameWindow && (sameAdvice || last.getReasonType() == RecommendationReasonType.PEAK_DEFENSE)) {
+            boolean needsMoreDefense = advice.reasonType() == RecommendationReasonType.PEAK_DEFENSE
+                    && last.getReasonType() == RecommendationReasonType.PEAK_DEFENSE
+                    && Math.abs(advice.wantKw()) - last.getPowerKw().doubleValue() >= ESCALATION_KW;
+            if (sameWindow && !needsMoreDefense && (sameAdvice || last.getReasonType() == RecommendationReasonType.PEAK_DEFENSE)) {
                 return;
             }
             // 대기 추천은 구간이 바뀌어도 대기가 이어지면 새로 쌓지 않음 (이력이 대기로 가득 차지 않게)
@@ -199,16 +204,12 @@ public class RecommendationEngine {
             eventLogRepository.save(new EventLog(now, EventType.RECOMMEND, stageOf(advice),
                     recommendMessage(recommendation, windowStart), recommendation.getRecommendationId()));
         }
-        // 자동 모드면 사람이 누르지 않아도 바로 ESS에 명령 (실제 제어가 아니라 시뮬레이터)
-        if (auto) {
-            if (advice.action() == RecommendationAction.IDLE) {
-                essCommandHolder.set(EssCommand.idle(), null);
-            } else {
-                recommendationService.applyToEss(recommendation, now);
-                eventLogRepository.save(new EventLog(now, EventType.HANDLE, null,
-                        actionText(advice.action()) + " " + num(powerKw) + " kW 자동 적용 (시뮬레이션)",
-                        recommendation.getRecommendationId()));
-            }
+        // 자동 모드면 사람이 누르지 않아도 바로 적용(AUTO) 상태로 저장되어 있어서(위), 시뮬레이터가
+        // currentCommand()로 DB를 보고 바로 따름. 대기(IDLE)는 따로 할 일이 없음
+        if (auto && advice.action() != RecommendationAction.IDLE) {
+            eventLogRepository.save(new EventLog(now, EventType.HANDLE, null,
+                    actionText(advice.action()) + " " + num(powerKw) + " kW 자동 적용 (시뮬레이션)",
+                    recommendation.getRecommendationId()));
         }
     }
 
