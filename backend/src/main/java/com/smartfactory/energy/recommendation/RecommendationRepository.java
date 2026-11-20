@@ -16,4 +16,9 @@ public interface RecommendationRepository extends JpaRepository<Recommendation, 
 
     // 가장 최근에 나온 추천 1건
     Optional<Recommendation> findFirstByOrderByRecommendedAtDescRecommendationIdDesc();
+
+    // 적용되거나(APPLIED) 자동 처리된(AUTO) 것 중 가장 최근 1건. 시뮬레이터가 "지금 ESS에 낼 명령"을
+    // 이 값으로 판단합니다 (메모리 대신 DB를 보므로, 적용 요청이 다른 서버로 가도 똑같이 따릅니다)
+    Optional<Recommendation> findFirstByStatusInOrderByRecommendedAtDescRecommendationIdDesc(
+            List<RecommendationStatus> statuses);
 }

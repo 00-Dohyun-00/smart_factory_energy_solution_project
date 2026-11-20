@@ -1,5 +1,6 @@
 package com.smartfactory.energy.recommendation;
 
+import static com.smartfactory.energy.TestData.bd;
 import static com.smartfactory.energy.TestData.interval;
 import static com.smartfactory.energy.TestData.recommendation;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -9,7 +10,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.smartfactory.energy.ess.EssCommandHolder;
+import com.smartfactory.energy.ess.EssCommand;
+import com.smartfactory.energy.ess.EssStatus;
 import com.smartfactory.energy.event.EventLog;
 import com.smartfactory.energy.event.EventLogRepository;
 import com.smartfactory.energy.global.exception.NotFoundException;
@@ -40,7 +42,6 @@ class RecommendationServiceTest {
     @Mock DemandInterval15mRepository demandInterval15mRepository;
     @Mock EventLogRepository eventLogRepository;
     @Mock SettingCache settingCache;
-    @Mock EssCommandHolder essCommandHolder;
     @InjectMocks RecommendationService recommendationService;
 
     // 처리는 "지금 구간"의 추천만 되므로 지금 시각이 들어 있는 15분 구간으로 시험함
@@ -158,6 +159,51 @@ class RecommendationServiceTest {
         when(recommendationRepository.findById(99L)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> recommendationService.handle(99L, "APPLIED"))
                 .isInstanceOf(NotFoundException.class);
+    }
+
+    // currentCommand(): 시뮬레이터가 메모리 대신 이 메서드로 "지금 유효한 적용된 추천"을 봄
+    // (적용 요청이 다른 서버로 가도, 공용 DB를 보는 이 시뮬레이터가 그대로 따르게 하기 위함)
+
+    @Test
+    void 적용된_추천이_유효_시간_안이면_그_명령을_돌려줌() {
+        when(settingCache.getNumber("operation.decision_valid_minutes")).thenReturn(15.0);
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        Recommendation applied = new Recommendation(now.minusMinutes(1), now.minusMinutes(5),
+                RecommendationAction.DISCHARGE, bd(153), RecommendationReasonType.PEAK_DEFENSE, "설명",
+                bd(1900), bd(1800), RecommendationStatus.APPLIED, "운영자", now.minusMinutes(1));
+        when(recommendationRepository.findFirstByStatusInOrderByRecommendedAtDescRecommendationIdDesc(any()))
+                .thenReturn(Optional.of(applied));
+
+        EssCommand command = recommendationService.currentCommand(now);
+
+        assertThat(command.status()).isEqualTo(EssStatus.DISCHARGE);
+        assertThat(command.powerKw()).isEqualByComparingTo("153");
+    }
+
+    @Test
+    void 유효_시간이_지났으면_대기를_돌려줌() {
+        when(settingCache.getNumber("operation.decision_valid_minutes")).thenReturn(15.0);
+        LocalDateTime now = LocalDateTime.now().withNano(0);
+        // 20분 전 구간, 20분 전에 적용 → 유효 시간(15분)도, 구간(15분)도 이미 지남
+        Recommendation expired = new Recommendation(now.minusMinutes(20), now.minusMinutes(20),
+                RecommendationAction.DISCHARGE, bd(153), RecommendationReasonType.PEAK_DEFENSE, "설명",
+                bd(1900), bd(1800), RecommendationStatus.APPLIED, "운영자", now.minusMinutes(20));
+        when(recommendationRepository.findFirstByStatusInOrderByRecommendedAtDescRecommendationIdDesc(any()))
+                .thenReturn(Optional.of(expired));
+
+        EssCommand command = recommendationService.currentCommand(now);
+
+        assertThat(command.status()).isEqualTo(EssStatus.IDLE);
+    }
+
+    @Test
+    void 적용된_추천이_없으면_대기를_돌려줌() {
+        when(recommendationRepository.findFirstByStatusInOrderByRecommendedAtDescRecommendationIdDesc(any()))
+                .thenReturn(Optional.empty());
+
+        EssCommand command = recommendationService.currentCommand(LocalDateTime.now());
+
+        assertThat(command.status()).isEqualTo(EssStatus.IDLE);
     }
 
     private Recommendation discharge(long id, LocalDateTime window, RecommendationStatus status) {

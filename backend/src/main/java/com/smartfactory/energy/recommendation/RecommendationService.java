@@ -1,7 +1,6 @@
 package com.smartfactory.energy.recommendation;
 
 import com.smartfactory.energy.ess.EssCommand;
-import com.smartfactory.energy.ess.EssCommandHolder;
 import com.smartfactory.energy.ess.EssStatus;
 import com.smartfactory.energy.event.EventLog;
 import com.smartfactory.energy.event.EventLogRepository;
@@ -35,11 +34,17 @@ public class RecommendationService {
     // 로그인이 없어서 화면에서 적용/넘기면 처리자는 항상 "운영자"
     private static final String OPERATOR = "운영자";
 
+    // currentCommand()를 PowerSimulator가 매초 부르므로, DB를 매번 보지 않게 이만큼(ms) 캐시
+    private static final long COMMAND_CACHE_MS = 5_000;
+
     private final RecommendationRepository recommendationRepository;
     private final DemandInterval15mRepository demandInterval15mRepository;
     private final EventLogRepository eventLogRepository;
     private final SettingCache settingCache;
-    private final EssCommandHolder essCommandHolder;
+
+    // currentCommand()가 보는 "적용되거나 자동 처리된 가장 최근 추천" 캐시와, 그걸 읽은 시각(ms)
+    private volatile Optional<Recommendation> cachedCommandSource = Optional.empty();
+    private volatile long cachedAt = 0;
 
     // 기간 안의 추천 이력 (최신 순)
     public List<RecommendationResponse> findInPeriod(LocalDate from, LocalDate to) {
@@ -106,31 +111,42 @@ public class RecommendationService {
             throw new IllegalArgumentException("이미 처리한 추천입니다.");
         }
 
-        // 3. 처리 결과 저장 + 이벤트 1줄 + (적용이면) ESS에 명령
+        // 3. 처리 결과 저장 + 이벤트 1줄. ESS에 낼 명령은 따로 메모리에 넣지 않고, 이 상태(APPLIED)와
+        //    처리 시각을 그대로 둬서 시뮬레이터가 currentCommand()로 DB에서 읽게 함
         recommendation.handle(newStatus, OPERATOR, now);
-        if (newStatus == RecommendationStatus.APPLIED) {
-            applyToEss(recommendation, now);
-        }
         eventLogRepository.save(new EventLog(now, EventType.HANDLE, null, handleMessage(recommendation),
                 recommendation.getRecommendationId()));
 
         return RecommendationResponse.from(recommendation, resultPeakOf(recommendation.getIntervalStart()));
     }
 
-    // 추천의 action(충전/방전)과 power_kw로 ESS에 명령을 내림. 유지 시간은 decision_valid_minutes와
-    // 그 추천의 15분 구간이 끝나는 시각 중 더 빨리 오는 쪽까지
-    // 판단 엔진(RecommendationEngine)도 자동 모드에서 이 메서드로 적용함
-    void applyToEss(Recommendation recommendation, LocalDateTime now) {
-        if (recommendation.getAction() == RecommendationAction.IDLE) {
-            return;
+    // 지금 ESS에 낼 명령. 시뮬레이터(PowerSimulator)가 매초 이 메서드로 DB를 보고 판단합니다.
+    // 메모리(서버별로 따로 있음) 대신 DB를 보므로, "적용"이 어느 서버로 가든 시뮬레이터가 그대로 따릅니다.
+    public EssCommand currentCommand(LocalDateTime now) {
+        return latestAppliedOrAuto()
+                .filter(r -> r.getAction() != RecommendationAction.IDLE)
+                .filter(r -> now.isBefore(validUntilOf(r)))
+                .map(r -> new EssCommand(EssStatus.valueOf(r.getAction().name()), r.getPowerKw()))
+                .orElse(EssCommand.idle());
+    }
+
+    // 적용되거나(APPLIED) 자동 처리된(AUTO) 것 중 가장 최근 1건. COMMAND_CACHE_MS 동안은 DB를 다시 보지 않음
+    private Optional<Recommendation> latestAppliedOrAuto() {
+        long now = System.currentTimeMillis();
+        if (now - cachedAt >= COMMAND_CACHE_MS) {
+            cachedCommandSource = recommendationRepository.findFirstByStatusInOrderByRecommendedAtDescRecommendationIdDesc(
+                    List.of(RecommendationStatus.APPLIED, RecommendationStatus.AUTO));
+            cachedAt = now;
         }
+        return cachedCommandSource;
+    }
+
+    // 추천이 ESS에 유지되는 끝 시각: 적용 시각 + decision_valid_minutes와, 그 추천의 15분 구간이
+    // 끝나는 시각 중 더 빨리 오는 쪽
+    private LocalDateTime validUntilOf(Recommendation recommendation) {
         LocalDateTime windowEnd = recommendation.getIntervalStart().plusMinutes(15);
-        LocalDateTime validUntil = now.plusMinutes(decisionValidMinutes());
-        if (validUntil.isAfter(windowEnd)) {
-            validUntil = windowEnd;
-        }
-        EssStatus essStatus = EssStatus.valueOf(recommendation.getAction().name());
-        essCommandHolder.set(new EssCommand(essStatus, recommendation.getPowerKw()), validUntil);
+        LocalDateTime validUntil = recommendation.getHandledAt().plusMinutes(decisionValidMinutes());
+        return validUntil.isAfter(windowEnd) ? windowEnd : validUntil;
     }
 
     // 추천 적용을 ESS에 유지하는 시간(분). setting에 없으면 15분

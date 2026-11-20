@@ -1,16 +1,17 @@
 package com.smartfactory.energy.simulator;
 
 import com.smartfactory.energy.ess.EssCommand;
-import com.smartfactory.energy.ess.EssCommandHolder;
 import com.smartfactory.energy.power.RawEquipmentLoad;
 import com.smartfactory.energy.power.RawEquipmentLoadRepository;
 import com.smartfactory.energy.power.RawFactoryLoad;
+import com.smartfactory.energy.recommendation.RecommendationService;
 import com.smartfactory.energy.setting.SettingCache;
 import com.smartfactory.energy.solar.SolarPower;
 import com.smartfactory.energy.solar.SolarPowerRepository;
 import com.smartfactory.energy.solar.SolarPowerType;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +45,7 @@ public class PowerSimulator {
     private final RawLoadCursor rawLoadCursor;
     private final RawEquipmentLoadRepository rawEquipmentLoadRepository;
     private final SolarPowerRepository solarPowerRepository;
-    private final EssCommandHolder essCommandHolder;
+    private final RecommendationService recommendationService;
     private final EssSocState essSocState;
     private final SettingCache settingCache;
     private final MinuteBuffer minuteBuffer;
@@ -69,8 +70,9 @@ public class PowerSimulator {
         minuteBuffer.addSample(ESS_EQUIPMENT_ID, essKw);
     }
 
-    // ESS 지시값(EssCommandHolder)에 제한(최대 출력, SOC 하한·상한, 역송 금지)을 적용해서 실제 출력을 구하고,
-    // 그만큼 SOC를 갱신합니다. 출력은 + 방전 / - 충전입니다.
+    // ESS 지시값(recommendation 테이블의 "지금 유효한 적용된 추천")에 제한(최대 출력, SOC 하한·상한,
+    // 역송 금지)을 적용해서 실제 출력을 구하고, 그만큼 SOC를 갱신합니다. 출력은 + 방전 / - 충전입니다.
+    // 메모리(EssCommandHolder) 대신 DB를 보므로, "적용"이 다른 서버로 가도 이 시뮬레이터가 그대로 따릅니다.
     private BigDecimal applyEss(BigDecimal loadKw, BigDecimal solarKw) {
         Map<String, Double> settings = essSettings();
         double maxPowerKw = settings.getOrDefault("ess.max_power_kw", DEFAULT_MAX_POWER_KW);
@@ -78,9 +80,9 @@ public class PowerSimulator {
         double socHigh = settings.getOrDefault("ess.soc_high", DEFAULT_SOC_HIGH);
         double efficiency = settings.getOrDefault("ess.efficiency_percent", DEFAULT_EFFICIENCY_PERCENT) / 100;
         double capacityKwh = settings.getOrDefault("ess.capacity_kwh", DEFAULT_CAPACITY_KWH);
-        double soc = essSocState.get().doubleValue();
+        double soc = essSocState.getRaw(); // 반올림 없는 값 (1초 변화량이 반올림에 깎이지 않게)
 
-        EssCommand command = essCommandHolder.get();
+        EssCommand command = recommendationService.currentCommand(LocalDateTime.now().withNano(0));
         double desiredKw = switch (command.status()) {
             case DISCHARGE -> command.powerKw().doubleValue();
             case CHARGE -> -command.powerKw().doubleValue();
@@ -103,11 +105,12 @@ public class PowerSimulator {
         }
 
         // SOC 갱신: 1초 충전량 = max(-ess,0)/3600, 1초 방전량 = max(ess,0)/3600
+        // 반올림하지 않고 그대로 저장 (소수 2자리로 매초 반올림하면 작은 변화가 깎여 쌓이지 않음)
         double chargeKwh = Math.max(-desiredKw, 0) / 3600;
         double dischargeKwh = Math.max(desiredKw, 0) / 3600;
         double newSoc = soc + (chargeKwh * efficiency - dischargeKwh) / capacityKwh * 100;
         newSoc = Math.max(socLow, Math.min(socHigh, newSoc));
-        essSocState.set(BigDecimal.valueOf(newSoc).setScale(2, RoundingMode.HALF_UP));
+        essSocState.set(newSoc);
 
         return BigDecimal.valueOf(desiredKw).setScale(2, RoundingMode.HALF_UP);
     }
