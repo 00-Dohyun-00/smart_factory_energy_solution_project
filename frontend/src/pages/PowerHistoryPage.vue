@@ -522,7 +522,7 @@ watch(
         <button class="retry" @click="load()">다시 시도</button>
       </p>
       <p v-if="historyStore.equipmentError" class="notice" role="alert">
-        설비별 전력을 불러오지 못해 "많이 쓴 설비" 칸이 비어 있습니다. ({{
+        설비별 전력을 불러오지 못해 구역별 · 설비별 kW 칸이 비어 있습니다. ({{
           historyStore.equipmentError
         }})
       </p>
