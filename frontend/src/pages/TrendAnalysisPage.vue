@@ -1138,6 +1138,8 @@ const patternOption = computed(() => {
       <span class="crumb-parent">분석</span>
       <span class="crumb-parent" aria-hidden="true">›</span>
       <h1 class="crumb-title">추이 분석</h1>
+      <!-- 조회 중 안내는 제목 옆에 둠: 조회 조건 카드 안에 두면 1366 화면에서 자리가 모자라 "보기"가 아랫줄로 밀렸음 -->
+      <p v-if="analysisStore.loading" class="loading-note">불러오는 중입니다.</p>
       <p class="crumb-note">공장이 쓴 전기를 한전 · 태양광 · ESS 중 어디서 채웠는지 봅니다</p>
     </div>
 
@@ -1175,7 +1177,7 @@ const patternOption = computed(() => {
         />
       </div>
 
-      <!-- 보기: 오른쪽 끝에 두 줄(2개씩)로 둬서, 왼쪽 메뉴가 펼쳐진 좁은 화면에서도 아래로 내려가지 않게 함 -->
+      <!-- 보기: 아래 오른쪽 열(시간대별 사용 패턴 카드)과 왼쪽 끝을 맞추고, 4개를 한 줄로 둠 (2026-11-20) -->
       <div class="field view-field">
         <span class="field-label">보기</span>
         <div class="checks">
@@ -1185,8 +1187,6 @@ const patternOption = computed(() => {
           </label>
         </div>
       </div>
-
-      <p v-if="analysisStore.loading" class="loading-note">불러오는 중입니다.</p>
       <p v-if="dateError" class="date-error" role="alert">{{ dateError }}</p>
     </section>
 
@@ -1569,6 +1569,8 @@ const patternOption = computed(() => {
   height: 100%; /* 화면 높이에 고정: 그래프 · 카드가 남은 높이에 맞춰 줄어들어 스크롤이 생기지 않음 */
   padding: 20px;
   overflow: hidden;
+  /* 오른쪽 열 폭. 조회 조건의 "보기" 칸도 이 값으로 폭을 맞춤 (좁은 화면 값은 맨 아래 @media) */
+  --right-width: 480px;
 }
 .crumb-note {
   margin-left: auto;
@@ -1585,18 +1587,24 @@ const patternOption = computed(() => {
   padding-top: 10px;
   padding-bottom: 10px;
 }
-/* 보기 체크박스: 오른쪽 끝, 3개씩 두 줄 */
+/* 보기 체크박스: 아래 오른쪽 열(.right)과 왼쪽 끝을 맞춘 칸에 4개를 한 줄로.
+   폭 = 오른쪽 열 폭 − 이 카드의 오른쪽 테두리(1px)와 안쪽 여백(16px).
+   그러면 왼쪽 구분선은 아래 카드의 왼쪽 테두리와, "보기" 글자는 아래 카드 제목과 같은 세로줄에 옴 */
 .view-field {
+  flex: none;
+  width: calc(var(--right-width) - 17px);
   margin-left: auto;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
 }
 .checks {
-  display: grid;
-  grid-template-columns: repeat(2, auto); /* 항목 4개 → 두 줄(2개씩) */
-  gap: 2px 14px;
+  display: flex;
+  gap: 14px;
 }
 .checks .check {
   font-size: 12px;
   line-height: 1.4;
+  white-space: nowrap; /* "공장 소비"가 두 줄로 꺾이지 않게 */
 }
 .field {
   display: flex;
@@ -1628,8 +1636,8 @@ const patternOption = computed(() => {
   height: 15px;
   accent-color: var(--ink);
 }
+/* 제목 옆 조회 중 안내 */
 .loading-note {
-  margin-left: auto;
   font-size: 13px;
   color: var(--mute);
 }
@@ -1688,6 +1696,12 @@ const patternOption = computed(() => {
   font-weight: 400;
   color: var(--ink-2);
 }
+/* 목표를 넘은 구간 옆 비율 (%) */
+.summary .pct {
+  margin-left: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
 .summary p {
   overflow: hidden;
   font-size: 11px;
@@ -1695,12 +1709,6 @@ const patternOption = computed(() => {
   color: var(--mute);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-/* 목표를 넘은 구간 옆 비율 (%) */
-.summary .pct {
-  margin-left: 4px;
-  font-size: 13px;
-  color: var(--ink-2);
 }
 
 /* 그래프와 오른쪽 열 */
@@ -1790,7 +1798,7 @@ const patternOption = computed(() => {
   flex: none;
   flex-direction: column;
   gap: 10px;
-  width: 480px; /* 가로는 그대로 */
+  width: var(--right-width); /* 가로는 그대로 */
   min-height: 0;
 }
 /* 남은 높이를 채우는 그래프(.fit)만 줄어들고, 제목 · 고정 높이 그래프 · 안내 글은 높이를 지킴 */
@@ -2101,8 +2109,27 @@ const patternOption = computed(() => {
 
 /* 화면이 좁으면 오른쪽 열을 줄여 그래프 자리를 남김 */
 @media (max-width: 1600px) {
-  .right {
-    width: 400px;
+  .page {
+    --right-width: 400px;
+  }
+  /* 오른쪽 열에 맞춘 "보기" 칸도 좁아지므로, 4개가 한 줄에 들어가게 글자 · 체크 칸 · 간격을 줄임 */
+  .checks {
+    gap: 10px;
+  }
+  .checks .check {
+    gap: 4px;
+    font-size: 11px;
+  }
+  .checks .check input {
+    width: 13px;
+    height: 13px;
+  }
+  /* 1366 화면에서 왼쪽 메뉴를 펼쳐도 기간과 보기가 한 줄에 들어가게 기간 쪽 여백을 줄임 (보기가 아랫줄로 내려가지 않게) */
+  .filters {
+    column-gap: 16px;
+  }
+  .filters .presets button {
+    padding: 0 10px;
   }
 }
 </style>
