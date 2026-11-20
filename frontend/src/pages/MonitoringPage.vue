@@ -413,6 +413,7 @@ const trendOption = computed(() => makeTrendOption(TREND_LINES.value, true))
         <EssAdviceCard
           class="advice"
           :decision="realtimeStore.decision"
+          :status="status"
           :busy="busy"
           :offline="!realtimeStore.connected"
           :auto="settingsStore.values['operation.auto_mode'] === true"
