@@ -84,9 +84,9 @@ class RecommendationServiceTest {
     }
 
     @Test
-    void 이력_기간은_62일까지() {
+    void 이력_기간은_121일까지() {
         LocalDate day = LocalDate.of(2026, 11, 1);
-        assertThatThrownBy(() -> recommendationService.findInPeriod(day, day.plusDays(62)))
+        assertThatThrownBy(() -> recommendationService.findInPeriod(day, day.plusDays(121)))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> recommendationService.findInPeriod(day, day.minusDays(1)))
                 .isInstanceOf(IllegalArgumentException.class);

@@ -76,13 +76,13 @@ class AnalysisServiceTest {
     }
 
     @Test
-    void 기간은_62일까지_되고_63일이면_400() {
+    void 기간은_121일까지_되고_122일이면_400() {
         when(sitePowerMinuteRepository.findInPeriod(any(), any())).thenReturn(List.of());
         when(recommendationRepository.findInPeriod(any(), any())).thenReturn(List.of());
         when(demandInterval15mRepository.findInPeriod(any(), any())).thenReturn(List.of());
 
-        analysisService.getTrend(DAY, DAY.plusDays(61), "DAY"); // 62일: 통과
-        assertThatThrownBy(() -> analysisService.getTrend(DAY, DAY.plusDays(62), "DAY"))
+        analysisService.getTrend(DAY, DAY.plusDays(120), "DAY"); // 121일: 통과
+        assertThatThrownBy(() -> analysisService.getTrend(DAY, DAY.plusDays(121), "DAY"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
