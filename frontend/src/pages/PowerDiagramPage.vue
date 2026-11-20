@@ -8,6 +8,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Chart from '@/components/Chart.vue'
 import FitChart from '@/components/FitChart.vue'
 import PowerTree from '@/components/PowerTree.vue'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import { useThemeStore } from '@/stores/useThemeStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
@@ -364,6 +365,12 @@ const equipmentShareOption = computed(() => {
 
 <template>
   <div class="page">
+    <!-- 처음 들어가거나 새로 고친 뒤 첫 값을 받기 전: 화면 전체에 스피너 (빈 카드만 보여 멈춘 것처럼 보이지 않게) -->
+    <!-- 첫 요청이 실패하면 끄고, 연결 끊김 알림(MainLayout)에 맡김 -->
+    <LoadingSpinner
+      v-if="!status && !realtimeStore.errorMessage"
+      text="실시간 데이터를 불러오는 중입니다."
+    />
     <div class="crumb">
       <span class="crumb-parent">모니터링</span>
       <span class="crumb-parent" aria-hidden="true">›</span>
@@ -605,6 +612,7 @@ const equipmentShareOption = computed(() => {
 <style scoped>
 /* 스크롤 없이 한 화면에 들어가게 화면 높이에 고정 (2026-11-18) */
 .page {
+  position: relative; /* 첫 로딩 스피너가 이 영역을 덮게 */
   display: flex;
   flex-direction: column;
   gap: 16px;

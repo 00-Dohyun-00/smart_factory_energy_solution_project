@@ -8,6 +8,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { useRouter } from 'vue-router'
 import Chart from '@/components/Chart.vue'
 import FitChart from '@/components/FitChart.vue'
 import { useThemeStore } from '@/stores/useThemeStore'
@@ -25,6 +26,7 @@ import {
 const analysisStore = useAnalysisStore()
 const historyStore = useHistoryStore() // 그래프 위 추천 핀용. 추천 이력 화면과 같은 API를 씀
 const realtimeStore = useRealtimeStore()
+const router = useRouter()
 
 const INTERVALS = [
   { value: 'QUARTER', label: '15분' },
@@ -120,6 +122,8 @@ function load(showLoading = true) {
   analysisStore.fetchTrend(fromDate.value, toDate.value, interval.value, showLoading)
   // 같은 기간의 추천 이력도 받아 그래프 위에 핀으로 꽂음
   historyStore.fetchDecisions(fromDate.value, toDate.value, showLoading)
+  // 같은 기간의 "목표를 넘은 15분 구간"도 받아 그래프 위에 빨간 점으로 찍음
+  analysisStore.fetchExceeded(fromDate.value, toDate.value)
 }
 
 // 기간이나 간격이 바뀌면 다시 조회
@@ -309,6 +313,10 @@ function linkCharts() {
     instance.getZr().on('mousemove', (event) => {
       if (pinIndexAt(instance, event) !== null) instance.getZr().setCursorStyle('pointer')
     })
+    // 피크 초과 점(●)을 누르면 전력 이력 화면으로 이동
+    instance.on('click', { seriesName: EXCEED_NAME }, (event) => {
+      if (event.data?.top) openPowerHistory(event.data.top)
+    })
     instance.getZr().on('click', (event) => {
       const index = pinIndexAt(instance, event)
       if (index === null) return
@@ -318,6 +326,45 @@ function linkCharts() {
       instance.dispatchAction({ type: 'showTip', seriesIndex, dataIndex: index })
     })
   }
+}
+
+// ---- 피크 초과 점 (●) ----
+// 피크 분석 API의 15분 기준 초과 구간을 그래프 칸에 놓음. 한 칸(1시간·1일)에 여러 번 넘었으면 가장 높은 값에 점 하나
+// 그래프 선(1시간 평균 등)이 아니라 15분 값이라, 점이 선보다 위에 떠 보일 수 있음 (짧게 튄 피크가 평균에 묻힌 것)
+const EXCEED_NAME = '피크 초과 (15분)'
+const exceededBySlot = computed(() => {
+  const result = {} // 예: { '2026-11-19T14:00:00': [구간, 구간] }
+  const interval = trend.value?.interval
+  if (!interval) return result
+  for (const item of analysisStore.exceededWindows) {
+    const slot = slotStartOf(item.windowStart, interval)
+    if (!result[slot]) result[slot] = []
+    result[slot].push(item)
+  }
+  return result
+})
+
+function exceedSeries() {
+  return {
+    name: EXCEED_NAME,
+    type: 'scatter',
+    symbolSize: 9,
+    z: 5,
+    itemStyle: { color: COLOR.crit, borderColor: COLOR.card, borderWidth: 1 },
+    cursor: 'pointer',
+    // 칸마다 그 칸에서 가장 높았던 초과 구간 (없으면 비움). windows는 클릭·툴팁용으로 같이 둠
+    data: points.value.map((item) => {
+      const list = exceededBySlot.value[slotStartOf(item.recordedAt, trend.value.interval)]
+      if (!list) return null
+      const top = list.reduce((a, b) => (b.peakKw > a.peakKw ? b : a))
+      return { value: top.peakKw, top, count: list.length }
+    }),
+  }
+}
+
+// 점을 누르면 운영 로그 > 전력 이력으로 이동 (그 15분 구간 시각을 주소에 담아 감)
+function openPowerHistory(top) {
+  router.push({ path: '/logs/power', query: { at: top.windowStart } })
 }
 
 // 마우스 위치가 전력 그래프 위쪽 기호 띠의 추천 기호 위면 그 칸 번호, 아니면 null
@@ -654,6 +701,8 @@ const powerOption = computed(() => {
       [{ value: target, text: `목표 피크 ${formatKw(target)}`, color: COLOR.target, below: true }]
     : []
   if (series.length) series[0].markLine = markLines(lines, true)
+  // 피크 초과 점은 한전 구매와 비교하는 값이라, 한전 구매를 켰을 때만 찍음
+  if (shown.value.includes('grid')) series.push(exceedSeries())
   // 범례에는 보이는 선만 (보이지 않는 선은 범례 목록에서 뺌)
   const legendNames = series.map((item) => item.name)
   series.push(cursorSeries())
@@ -670,12 +719,22 @@ const powerOption = computed(() => {
       formatter: (allParams) => {
         if (!allParams.length) return ''
         const label = allParams[0].axisValue
-        const params = realParams(allParams)
+        const params = realParams(allParams).filter((item) => item.seriesName !== EXCEED_NAME)
         // 기록이 없는 칸이면 값마다 "—"를 늘어놓지 않고 한 줄로 알림
         if (params.every((item) => item.value == null)) return `${label}<br/>기록 없음`
         const rows = params.map(
           (item) => `${item.marker}${item.seriesName} <strong>${formatKw(item.value)} kW</strong>`,
         )
+        // 이 칸에 목표를 넘은 15분 구간이 있으면 한 줄 더 (점을 누르면 전력 이력으로 감)
+        const exceed = allParams.find((item) => item.seriesName === EXCEED_NAME && item.data)
+        if (exceed) {
+          const { top, count } = exceed.data
+          const many = count > 1 ? ` 외 ${count - 1}번` : ''
+          rows.push(
+            `${exceed.marker}15분 피크 초과 <strong>${formatHourMinute(top.windowStart)} ${formatKw(top.peakKw)} kW</strong>${many}` +
+              `<br/><span style="opacity:.7">점을 누르면 전력 이력을 봅니다</span>`,
+          )
+        }
         return `${label}<br/>${rows.join('<br/>')}${pinTooltip(label)}`
       },
     },
@@ -1104,6 +1163,10 @@ const patternOption = computed(() => {
               <span v-if="showPins" class="chart-note">
                 추천: ● 적용 · ◇ 자동 · ✕ 넘김 · ○ 추천 중
               </span>
+              <span v-if="shown.includes('grid')" class="chart-note exceed-note">
+                <span class="exceed-dot" aria-hidden="true"></span> 목표 넘은 15분 (누르면 전력
+                이력)
+              </span>
               <label class="check pin-toggle">
                 <input v-model="showPins" type="checkbox" />
                 추천 표시
@@ -1357,6 +1420,16 @@ const patternOption = computed(() => {
 </template>
 
 <style scoped>
+/* 피크 초과 점 설명 (그래프 점과 같은 빨간 점) */
+.exceed-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--crit);
+  vertical-align: middle;
+}
 .page {
   display: flex;
   flex-direction: column;

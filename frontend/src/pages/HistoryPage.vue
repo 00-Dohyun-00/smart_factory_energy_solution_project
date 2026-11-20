@@ -1,7 +1,7 @@
 <!-- 운영 이력: 추천 → 적용 여부 → 결과를 시간순 표로 보여 줍니다 -->
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { useHistoryStore } from '@/stores/useHistoryStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { formatHourMinute, formatKw, formatMonthDayTime } from '@/utils/format'
@@ -182,6 +182,51 @@ const counts = computed(() => {
   ]
 })
 
+// ---- 엑셀 받기 ----
+// 지금 표에 보이는 이력(거른 결과)을 엑셀에서 열 수 있는 CSV 파일로 만듦 (라이브러리 없이).
+// 엑셀에서 한글이 깨지지 않게 맨 앞에 BOM(\uFEFF)을 붙임. 칸은 표와 같고 맨 뒤에 추천 이유를 더함
+function downloadExcel() {
+  const header = [
+    '추천 시각',
+    '대상 시간',
+    '추천',
+    '추천 kW',
+    '규칙',
+    '예상 피크 kW',
+    '처리',
+    '처리자',
+    '처리 시각',
+    '실제 피크 kW',
+    '목표 달성',
+    '이유',
+  ]
+  const lines = filtered.value.map((item) => [
+    item.decidedAt.replace('T', ' ').slice(0, 19),
+    `${formatHourMinute(item.windowStart)}~${formatHourMinute(item.windowEnd)}`,
+    ACTION_LABELS[item.action] ?? item.action,
+    item.action === 'IDLE' ? '' : formatKw(item.powerKw),
+    item.ruleLabel ?? '',
+    formatKw(item.predictedKw),
+    STATUS_INFO[item.status]?.label ?? item.status,
+    handlerText(item.appliedBy),
+    item.appliedAt ? formatHourMinute(item.appliedAt) : '',
+    item.resultPeakKw !== null ? formatKw(item.resultPeakKw) : '',
+    item.resultStatus ? RESULT_INFO[item.resultStatus].label : '구간 진행 중',
+    item.reason ?? '',
+  ])
+  // 칸 안에 쉼표 · 따옴표 · 줄바꿈이 있어도 깨지지 않게 큰따옴표로 감쌈
+  const cell = (value) => `"${String(value).replaceAll('"', '""')}"`
+  const csv = [header, ...lines].map((line) => line.map(cell).join(',')).join('\r\n')
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  // 파일 받기는 화면 이동이 아니라서 RouterLink 대신 임시 링크를 만들어 누름
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `추천이력_${fromDate.value}_${toDate.value}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 function toggle(id) {
   openedId.value = openedId.value === id ? null : id
 }
@@ -195,12 +240,20 @@ function toggle(id) {
         <span class="crumb-parent" aria-hidden="true">›</span>
         <h1 class="crumb-title">추천 이력</h1>
       </div>
+      <!-- 운영 로그의 두 탭 (추천 이력 / 전력 이력) -->
+      <nav class="log-tabs" aria-label="운영 로그 탭">
+        <RouterLink to="/logs" class="tab active" aria-current="page">추천 이력</RouterLink>
+        <RouterLink to="/logs/power" class="tab">전력 이력</RouterLink>
+      </nav>
       <ul class="counts">
         <li v-for="item in counts" :key="item.label">
           {{ item.label }} <strong class="num">{{ item.value }}</strong>
         </li>
       </ul>
-      <button class="reset head-reset" @click="resetFilters">조건 초기화</button>
+      <button class="reset head-reset" :disabled="!filtered.length" @click="downloadExcel">
+        엑셀 받기
+      </button>
+      <button class="reset" @click="resetFilters">조건 초기화</button>
     </div>
 
     <!-- 조회 조건 -->
@@ -423,8 +476,37 @@ function toggle(id) {
   align-items: center;
   gap: 24px;
 }
+/* 운영 로그 탭 (전력 이력 화면에도 같은 모양이 있음) */
+.log-tabs {
+  display: flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.log-tabs .tab {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 14px;
+  background: var(--card);
+  color: var(--ink-2);
+}
+.log-tabs .tab + .tab {
+  border-left: 1px solid var(--line-strong);
+}
+.log-tabs .tab:hover {
+  background: var(--bg);
+}
+.log-tabs .tab.active {
+  background: var(--ink);
+  font-weight: 700;
+  color: var(--card);
+}
 .head-reset {
   margin-left: auto;
+}
+.reset:disabled {
+  opacity: 0.5;
 }
 .title {
   font-size: 20px;

@@ -5,6 +5,7 @@ import MonitoringPage from '@/pages/MonitoringPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
 import PeakAnalysisPage from '@/pages/PeakAnalysisPage.vue'
 import PowerDiagramPage from '@/pages/PowerDiagramPage.vue'
+import PowerHistoryPage from '@/pages/PowerHistoryPage.vue'
 import ReportPage from '@/pages/ReportPage.vue'
 import SettingsPage from '@/pages/SettingsPage.vue'
 import TrendAnalysisPage from '@/pages/TrendAnalysisPage.vue'
@@ -39,6 +40,12 @@ const routes = [
       { path: 'report', component: ReportPage, meta: { parent: '보고서', title: '월간 성적표' } },
       // 운영 로그
       { path: 'logs', component: HistoryPage, meta: { parent: '운영 로그', title: '추천 이력' } },
+      // 전력 이력: 추이 그래프의 피크 초과 점(●)을 누르면 ?at=2026-11-19T14:15:00 으로 들어옴
+      {
+        path: 'logs/power',
+        component: PowerHistoryPage,
+        meta: { parent: '운영 로그', title: '전력 이력' },
+      },
       { path: 'history', redirect: '/logs' }, // 예전 주소로 들어와도 열리게 함
       // 환경 설정
       {
