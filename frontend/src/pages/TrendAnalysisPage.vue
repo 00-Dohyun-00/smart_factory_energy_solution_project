@@ -12,7 +12,6 @@ import { useRouter } from 'vue-router'
 import FitChart from '@/components/FitChart.vue'
 import { useThemeStore } from '@/stores/useThemeStore'
 import { useAnalysisStore } from '@/stores/useAnalysisStore'
-import { useHistoryStore } from '@/stores/useHistoryStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import {
   formatHourMinute,
@@ -23,7 +22,6 @@ import {
 } from '@/utils/format'
 
 const analysisStore = useAnalysisStore()
-const historyStore = useHistoryStore() // 그래프 위 추천 핀용. 추천 이력 화면과 같은 API를 씀
 const realtimeStore = useRealtimeStore()
 const router = useRouter()
 
@@ -52,10 +50,10 @@ const STATUS_INFO = {
   AUTO: { shape: '◇', label: '자동' },
   IGNORED: { shape: '✕', label: '넘김' },
 }
-// 그래프 위 추천 핀: 위의 처리 상태에 "추천 중"(아직 처리 전)을 더함
+// "피크가 높았던 구간" 표의 "그때의 추천 처리" 기호: 위의 처리 상태에 "추천 중"(아직 처리 전)을 더함
+// (전력 그래프 위 추천 기호 기능은 2026-11-20에 뺌, 사용자 요청)
 const PIN_INFO = { ...STATUS_INFO, RECOMMENDED: { shape: '○', label: '추천 중' } }
 
-const ACTION_LABELS = { CHARGE: '충전', DISCHARGE: '방전', IDLE: '대기' }
 // 요금 시간대 이름 (순위 보기에서 시각 옆에 적음)
 const PERIOD_LABELS = { PEAK: '최대부하', MID: '중간부하', LIGHT: '경부하' }
 
@@ -65,14 +63,13 @@ const preset = ref('week')
 const fromDate = ref('') // 예: '2026-11-10'
 const toDate = ref('')
 const shown = ref(ITEMS.map((item) => item.key)) // 켜져 있는 항목들
-// 전력 그래프에 세로선으로 표시할 시각. 위쪽 추천 기호(점선)나 "피크가 높았던 구간" 표의 줄(실선)을 눌러 고름
+// 전력 그래프에 세로선(실선)으로 표시할 시각. "피크가 높았던 구간" 표의 줄을 눌러 고름
 const focusAt = ref('')
-const focusNote = ref('') // 표에서 고른 구간의 내용 (세로선 위에 적음). 추천 기호로 고른 칸이면 ''
+const focusNote = ref('') // 표에서 고른 구간의 내용 (세로선 위에 적음)
 const selectedWindow = ref('') // "피크가 높았던 구간" 표에서 고른 줄의 key
 const hourlyView = ref('time') // 시간대별 사용 패턴 보기: time(시간 순 막대) | rank(많이 쓴 순위)
 // 시간대별 사용 패턴의 막대 간격: AUTO(기간에 맞춰 자동) | HOUR(1시간) | HOUR4(4시간) | DAY(1일)
 const patternStep = ref('AUTO')
-const showPins = ref(true) // 전력 그래프 위에 추천 기호를 보일지
 
 // "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
 const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) ?? '')
@@ -148,8 +145,6 @@ function load(showLoading = true) {
   if (!fromDate.value || !toDate.value || dateError.value) return
   // 간격이 1시간이라, 스토어가 이 결과를 시간대별 사용 패턴에도 그대로 넣어 줌 (따로 받지 않음 — 이슈 #25)
   analysisStore.fetchTrend(fromDate.value, toDate.value, INTERVAL, showLoading)
-  // 같은 기간의 추천 이력도 받아 그래프 위에 핀으로 꽂음
-  historyStore.fetchDecisions(fromDate.value, toDate.value, showLoading)
   // 전력 그래프 아래 "일별 최대 피크" 그래프용 (피크 분석 화면과 같은 API)
   if (!peakTooLong.value) analysisStore.fetchPeak(fromDate.value, toDate.value, showLoading)
 }
@@ -248,12 +243,6 @@ function clearFocus() {
   focusNote.value = ''
   selectedWindow.value = ''
 }
-// 위쪽 추천 기호를 누름: 그 칸에 점선 (같은 칸을 다시 누르면 지움)
-function toggleFocus(at) {
-  const same = focusAt.value === at && !selectedWindow.value
-  clearFocus()
-  if (!same) focusAt.value = at
-}
 // "피크가 높았던 구간" 표의 줄을 누름: 그 시각에 실선 + 구간 내용 (같은 줄을 다시 누르면 지움)
 function toggleWindow(key, at, note) {
   const same = selectedWindow.value === key
@@ -263,19 +252,7 @@ function toggleWindow(key, at, note) {
   focusAt.value = at
   focusNote.value = note
 }
-// 세로선 위에 적는 글자.
-// 표에서 고른 구간이면 그 내용, 추천 기호로 고른 칸이면 "● 10:00 방전 500 kW" (추천이 여러 건이면 첫 건 + 외 N건)
-const focusText = computed(() => {
-  if (focusNote.value) return focusNote.value
-  const pins = focusLabel.value ? pinsByLabel.value[focusLabel.value] : null
-  if (!pins) return ''
-  const first = pins[0]
-  const power = first.action === 'IDLE' ? '' : ` ${formatKw(first.powerKw)} kW`
-  const more = pins.length > 1 ? ` 외 ${pins.length - 1}건` : ''
-  return `${PIN_INFO[first.status].shape} ${formatHourMinute(first.decidedAt)} ${ACTION_LABELS[first.action]}${power}${more}`
-})
-
-// ---- 전력 그래프의 추천 기호 누르기 ----
+// ---- 전력 그래프 누르기 (피크 초과 점) ----
 // 그래프는 공통 차트(Chart.vue)가 만들므로, 여기서는 이미 만들어진 그래프를 찾아 마우스 알림만 연결함
 // (예전에는 배터리 잔량 · 온도 그래프와 마우스 점선을 맞추는 연결도 했으나, 두 그래프를 없애 빠짐 — 2026-11-20)
 const chartsBox = ref(null)
@@ -292,21 +269,9 @@ function linkCharts() {
   for (const instance of chartInstances()) {
     if (instance.trendLinked) continue
     instance.trendLinked = true
-    // 전력 그래프 위쪽의 추천 기호: 마우스를 올리면 손가락 모양, 누르면 그 칸에 점선을 고정하고 값을 보여 줌
-    instance.getZr().on('mousemove', (event) => {
-      if (pinIndexAt(instance, event) !== null) instance.getZr().setCursorStyle('pointer')
-    })
     // 피크 초과 점(●)을 누르면 전력 이력 화면으로 이동 (팀원 커밋 78fe23a에서 가져옴)
     instance.on('click', { seriesName: EXCEED_NAME }, (event) => {
       if (event.data?.top) openPowerHistory(event.data.top)
-    })
-    instance.getZr().on('click', (event) => {
-      const index = pinIndexAt(instance, event)
-      if (index === null) return
-      toggleFocus(points.value[index].recordedAt)
-      // 그 칸의 툴팁(값 + 추천 목록)을 띄움. 보이지 않는 선(맨 마지막 계열)은 모든 칸에 값이 있어 항상 뜸
-      const seriesIndex = (instance.getOption().series?.length ?? 1) - 1
-      instance.dispatchAction({ type: 'showTip', seriesIndex, dataIndex: index })
     })
   }
 }
@@ -349,20 +314,6 @@ function exceedSeries() {
 // 점을 누르면 운영 로그 > 전력 이력으로 이동 (그 15분 구간 시각을 주소에 담아 감)
 function openPowerHistory(top) {
   router.push({ path: '/logs/power', query: { at: top.windowStart } })
-}
-
-// 마우스 위치가 전력 그래프 위쪽 기호 띠의 추천 기호 위면 그 칸 번호, 아니면 null
-// (기호는 그래프 칸 맨 위 바로 위, POWER_GRID_TOP 위쪽 20px 띠에 적힘. 기호가 작아서 좌우 2칸까지는 같은 기호로 봄)
-function pinIndexAt(instance, event) {
-  if (instance !== chartInstances()[0] || !showPins.value) return null
-  if (event.offsetY > POWER_GRID_TOP || event.offsetY < POWER_GRID_TOP - 20) return null
-  const center = instance.convertFromPixel({ xAxisIndex: 0 }, event.offsetX)
-  if (typeof center !== 'number' || Number.isNaN(center)) return null
-  for (const step of [0, -1, 1, -2, 2]) {
-    const index = Math.round(center) + step
-    if (pinsByLabel.value[labels.value[index]]) return index
-  }
-  return null
 }
 
 // ---- 그래프 공통 ----
@@ -457,7 +408,7 @@ const POWER_LEGEND = [
 ]
 const powerLegend = computed(() =>
   POWER_LEGEND.filter((item) => shown.value.includes(item.key)).filter(
-    // 피크 초과는 이 기간에 점이 있을 때만 범례에 넣음 (점이 없는데 자리를 차지하면 1536 화면에서 "추천 표시"가 아랫줄로 밀림)
+    // 피크 초과는 이 기간에 점이 있을 때만 범례에 넣음 (그래프에 없는 표시가 범례에만 있으면 헷갈림)
     (item) => item.className !== 'exceed' || Object.keys(exceededBySlot.value).length > 0,
   ),
 )
@@ -471,56 +422,18 @@ function slotLabelOf(at) {
   return found
 }
 
-// 추천 기호를 눌러 고른 시각이 그래프의 어느 칸인지
+// 표에서 고른 시각이 그래프의 어느 칸인지
 const focusLabel = computed(() => (focusAt.value ? slotLabelOf(focusAt.value) : null))
 
-// ---- 추천 핀 ----
-// 조회 기간 안의 추천을 그래프 칸별로 묶음. 예: { '11-13 10:00': [추천, 추천] }
-const pinsByLabel = computed(() => {
-  const result = {}
-  if (!trend.value) return result
-  const from = `${trend.value.from}T00:00:00`
-  const to = `${trend.value.to}T23:59:59`
-  for (const item of historyStore.decisions) {
-    // 다른 화면에서 받아 둔 다른 기간의 이력이 섞이지 않게 기간 안의 것만 씀
-    if (!PIN_INFO[item.status] || item.decidedAt < from || item.decidedAt > to) continue
-    const label = slotLabelOf(item.decidedAt)
-    if (!label) continue
-    if (!result[label]) result[label] = []
-    result[label].push(item)
-  }
-  return result
-})
-
-// 핀에 적는 기호: 그 칸에 나온 추천들의 처리 상태 (같은 기호는 한 번만)
-function pinShapes(list) {
-  return [...new Set(list.map((item) => PIN_INFO[item.status].shape))].join('')
-}
-
-// 전력 그래프 툴팁 아래에 붙이는 그 칸의 추천 목록
-function pinTooltip(label) {
-  if (!showPins.value) return ''
-  const list = pinsByLabel.value[label] ?? []
-  if (!list.length) return ''
-  const rows = list.slice(0, 4).map((item) => {
-    const power = item.action === 'IDLE' ? '' : ` ${formatKw(item.powerKw)} kW`
-    const info = PIN_INFO[item.status]
-    return `${info.shape} ${formatHourMinute(item.decidedAt)} ${ACTION_LABELS[item.action]}${power} · ${info.label}`
-  })
-  if (list.length > 4) rows.push(`외 ${list.length - 4}건`)
-  return `<br/><strong>추천</strong><br/>${rows.join('<br/>')}`
-}
-
-// 기준선(가로), 추천 기호, 고른 시각(세로)을 그리는 설정
+// 기준선(가로), 고른 시각(세로)을 그리는 설정
 // 전력 그래프의 오른쪽 여백. 예전에는 배터리 잔량 · 온도 그래프의 기준선 이름표(상한 · 제한) 자리로 58px를 비웠으나,
 // 두 그래프를 없애 그래프 칸을 넓힘 (목표 피크 이름표는 그래프 안쪽에 적음)
 const GRID_RIGHT = 20
-// 전력 그래프 칸의 위쪽 여백 (이 위에 추천 기호 띠 20px가 들어감. 범례는 제목 줄로 옮김)
+// 전력 그래프 칸의 위쪽 여백 (고른 시각 세로선 위에 적는 글자 자리. 범례는 제목 줄로 옮김)
 const POWER_GRID_TOP = 24
 
 // lines 예: [{ value: 1800, text: '목표 피크 1,800', color: COLOR.ink, dashed: false }]
-// withPins = true면 그래프 위쪽 띠에 추천 기호를 적음 (전력 그래프만)
-function markLines(lines, withPins = false) {
+function markLines(lines) {
   // 기준값이 null이면(백엔드가 설정 값을 못 찾은 경우) 그 선은 빼고 그림. 넣으면 ECharts 오류가 남
   const data = lines
     .filter((item) => item.value !== null && item.value !== undefined)
@@ -531,7 +444,7 @@ function markLines(lines, withPins = false) {
         width: 1.5,
         type: item.dashed ? 'dashed' : 'solid',
       },
-      // below: true면 이름표를 선 아래에 적음 (선 위쪽이 그래프 맨 위의 추천 기호 띠와 겹칠 때)
+      // below: true면 이름표를 선 아래에 적음 (선 위쪽이 그래프 맨 위의 세로선 글자와 겹칠 때)
       label: {
         formatter: item.text,
         position: item.below ? 'insideEndBottom' : 'insideEndTop',
@@ -541,32 +454,15 @@ function markLines(lines, withPins = false) {
         distance: 5,
       },
     }))
-  // 추천은 세로선을 긋지 않고(선이 많으면 그래프가 지저분해짐) 그래프 위쪽 띠에 기호만 적음.
-  // 선 색을 투명하게 두고 선 끝의 글자(기호)만 보이게 하는 방식. 자세한 내용은 툴팁으로 봄
-  // (opacity: 0을 쓰면 글자까지 같이 사라져서 색을 투명하게 함)
-  if (withPins && showPins.value) {
-    for (const [label, list] of Object.entries(pinsByLabel.value)) {
-      data.push({
-        xAxis: label,
-        lineStyle: { color: 'rgba(0, 0, 0, 0)' },
-        label: {
-          formatter: pinShapes(list),
-          position: 'end',
-          color: COLOR.legendText,
-          fontSize: 11,
-        },
-      })
-    }
-  }
   if (focusLabel.value) {
     data.push({
       xAxis: focusLabel.value,
-      // 표에서 고른 구간은 실선, 추천 기호로 고른 칸은 점선
-      lineStyle: { color: COLOR.ink, width: 2, type: focusNote.value ? 'solid' : 'dashed' },
+      // "피크가 높았던 구간" 표에서 고른 구간 (실선)
+      lineStyle: { color: COLOR.ink, width: 2, type: 'solid' },
       // 세로선 위쪽 끝(그래프 위 여백)에 적음. 작은 그래프의 위 여백(16px)에도 들어가게 11px,
       // 바탕을 칠해 다른 선 · 글자와 겹쳐도 읽히게 함
       label: {
-        formatter: focusText.value || '선택',
+        formatter: focusNote.value || '선택',
         position: 'end',
         distance: 1,
         color: COLOR.ink,
@@ -722,11 +618,11 @@ const powerOption = computed(() => {
   const target = trend.value.targetPeakKw
   const lines = has('grid')
     ? // 목표 피크선은 공장 소비 선(먹색)과 구분되게 전용 자주색 (통합 화면의 목표 피크선과 같은 색)
-      // 이름표는 선 아래에 둠: 목표선이 그래프 맨 위 가까이 있으면 위쪽 이름표가 추천 기호(● ◇ ✕ ○)와 겹쳤음
+      // 이름표는 선 아래에 둠: 목표선이 그래프 맨 위 가까이 있으면 위쪽 이름표가 세로선 글자와 겹침
       [{ value: target, text: `목표 피크 ${formatKw(target)}`, color: COLOR.target, below: true }]
     : []
   if (series.length) {
-    series[0].markLine = markLines(lines, true)
+    series[0].markLine = markLines(lines)
     series[0].markArea = { silent: true, data: emptyAreas() }
   }
   // 피크 초과 점은 한전 구매와 비교하는 값이라, 한전 구매를 켰을 때만 찍음
@@ -735,14 +631,13 @@ const powerOption = computed(() => {
 
   return {
     animation: false,
-    // 위쪽에 추천 핀 기호 띠가 들어감. 범례는 그래프 칸을 넓히려고 제목 줄(powerLegend)에 둠
+    // 범례는 그래프 칸을 넓히려고 제목 줄(powerLegend)에 둠
     grid: { left: 52, right: GRID_RIGHT, top: POWER_GRID_TOP, bottom: 24 },
     legend: { show: false },
     tooltip: {
       ...tooltipColors(),
       trigger: 'axis',
-      // 공장 소비 → 한전 구매 → 태양광 → ESS 순서로, ESS는 방전/충전 중 한 줄만 보여 줌.
-      // 값 목록 아래에 그 칸에 나온 추천을 함께 보여 줌
+      // 공장 소비 → 한전 구매 → 태양광 → ESS 순서로, ESS는 방전/충전 중 한 줄만 보여 줌
       formatter: (allParams) => {
         if (!allParams.length) return ''
         const label = allParams[0].axisValue
@@ -775,7 +670,7 @@ const powerOption = computed(() => {
               `<br/><span style="opacity:.7">점을 누르면 전력 이력을 봅니다</span>`,
           )
         }
-        return `${label}<br/>${rows.join('<br/>')}${pinTooltip(label)}`
+        return `${label}<br/>${rows.join('<br/>')}`
       },
     },
     // 충전(0 아래)이 있으면 가로축 선이 그래프 가운데(0)로 올라오므로, 가로축은 항상 맨 아래에 둠
@@ -1340,34 +1235,20 @@ const patternOption = computed(() => {
           <section v-if="shown.length" class="card power-card">
             <h2 class="chart-title main-chart">
               전력 <small>kW</small>
-              <span v-if="showPins" class="chart-note">
-                추천: ● 적용 · ◇ 자동 · ✕ 넘김 · ○ 추천 중
-              </span>
-              <!-- 범례 (그래프의 면 · 선 색과 같음) -->
+              <!-- 범례 (그래프의 면 · 선 색과 같음). 추천 기호 설명 · "추천 표시" 체크는 2026-11-20에 뺌 (사용자 요청) -->
               <span class="power-legend">
                 <span v-for="item in powerLegend" :key="item.name" class="power-legend-item">
                   <span class="power-swatch" :class="item.className" aria-hidden="true"></span>
                   {{ item.name }}
                 </span>
               </span>
-              <label class="check pin-toggle">
-                <input v-model="showPins" type="checkbox" />
-                추천 표시
-              </label>
             </h2>
-            <p v-if="historyStore.errorMessage" class="pin-error" role="alert">
-              추천 기록을 불러오지 못해 핀을 표시하지 못했습니다. ({{ historyStore.errorMessage }})
-            </p>
             <!--
               key: 켜 둔 항목이 바뀌면 그래프를 새로 만듦.
               Chart.vue는 이전 설정에 새 설정을 덮어쓰는 방식이라, 선의 개수가 줄면 꺼 둔 선이 남기 때문
             -->
             <!-- 카드의 남은 높이를 채움 -->
-            <FitChart
-              :key="`${shown.join()}-${showPins}`"
-              :option="powerOption"
-              :min-height="100"
-            />
+            <FitChart :key="shown.join()" :option="powerOption" :min-height="100" />
           </section>
 
           <p v-if="!shown.length" class="card state">"보기"에서 볼 항목을 하나 이상 골라 주세요.</p>
@@ -1851,13 +1732,6 @@ const patternOption = computed(() => {
   font-weight: 400;
   color: var(--mute);
 }
-.chart-note {
-  margin-left: 8px;
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--legend-text);
-}
-
 .right {
   display: flex;
   flex: none;
@@ -2011,18 +1885,10 @@ const patternOption = computed(() => {
   font-size: 12px;
   color: var(--mute);
 }
-.pin-toggle {
-  margin-left: auto;
-  font-size: 13px;
-  font-weight: 400;
-}
 /* 전력 제목 줄: 화면이 좁아 한 줄에 안 들어가면 범례가 다음 줄로 내려감 */
 .chart-title.main-chart {
   flex-wrap: wrap;
   row-gap: 2px;
-}
-.chart-title.main-chart .pin-toggle {
-  margin-left: 12px; /* 범례가 오른쪽으로 붙도록 빈 공간은 범례 앞에 둠 */
 }
 .power-legend {
   display: inline-flex;
@@ -2082,11 +1948,6 @@ const patternOption = computed(() => {
 .power-swatch.over {
   background: var(--crit);
 }
-.pin-error {
-  font-size: 12px;
-  color: var(--crit);
-}
-
 /* 시간대별 사용 패턴: 보기 방식 전환 */
 .view-switch {
   margin-left: auto;
