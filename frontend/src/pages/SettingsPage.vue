@@ -8,6 +8,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { formatInteger, formatKw, formatOneDecimal } from '@/utils/format'
@@ -320,9 +321,9 @@ const historyRows = computed(() =>
       기준값을 불러오지 못했습니다. ({{ settingsStore.errorMessage }})
       <button class="retry" @click="settingsStore.fetchSettings()">다시 시도</button>
     </p>
-    <p v-else-if="settingsStore.loading || !settingsStore.items.length" class="state">
-      불러오는 중입니다.
-    </p>
+    <div v-else-if="settingsStore.loading || !settingsStore.items.length" class="state spinner-box">
+      <LoadingSpinner />
+    </div>
 
     <template v-else>
       <div class="groups">
@@ -777,5 +778,10 @@ const historyRows = computed(() =>
 }
 .table s {
   color: var(--mute);
+}
+/* 불러오는 중: 이 칸을 덮는 공통 스피너(LoadingSpinner)를 칸 안에 둠 (통합 화면과 같은 모양) */
+.spinner-box {
+  position: relative;
+  min-height: 160px;
 }
 </style>

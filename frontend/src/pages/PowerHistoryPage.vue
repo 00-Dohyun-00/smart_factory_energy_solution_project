@@ -12,6 +12,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import { useHistoryStore } from '@/stores/useHistoryStore'
 import { useRealtimeStore } from '@/stores/useRealtimeStore'
 import { formatHourMinute, formatKw, formatOneDecimal } from '@/utils/format'
@@ -491,8 +492,10 @@ watch(
         }})
       </p>
 
-      <p v-if="historyStore.powerLoading" class="empty">불러오는 중입니다.</p>
-      <p v-else-if="!date" class="empty">서버에서 현재 시각을 받으면 오늘 기록을 조회합니다.</p>
+      <div v-if="historyStore.powerLoading" class="empty spinner-box"><LoadingSpinner /></div>
+      <div v-else-if="!date" class="empty spinner-box">
+        <LoadingSpinner text="서버에서 현재 시각을 받으면 오늘 기록을 조회합니다." />
+      </div>
       <p v-else-if="!rows.length && !historyStore.powerError" class="empty">
         조건에 맞는 구간이 없습니다. 날짜나 보기를 바꿔 보세요.
       </p>
@@ -696,5 +699,10 @@ watch(
 }
 .ok {
   color: var(--ok);
+}
+/* 불러오는 중: 이 칸을 덮는 공통 스피너(LoadingSpinner)를 칸 안에 둠 (통합 화면과 같은 모양) */
+.spinner-box {
+  position: relative;
+  min-height: 160px;
 }
 </style>
