@@ -42,7 +42,7 @@ const ITEMS = [
   { key: 'load', label: '공장 소비' },
   { key: 'grid', label: '한전 구매' },
   { key: 'solar', label: '태양광' },
-  { key: 'ess', label: 'ESS 충·방전' },
+  { key: 'ess', label: 'ESS 방전' },
 ]
 // 처리 상태는 색만으로 구분하지 않도록 도형 + 글자로 표시 (운영 로그 화면과 같은 표시)
 const STATUS_INFO = {
@@ -397,12 +397,12 @@ const valueAxis = {
 
 // 전력 그래프 범례: 그래프 안에 두면 위쪽 한 줄을 차지해 그래프 칸이 좁아지므로 제목 줄에 글자로 둠
 // (색은 그래프와 같은 CSS 변수. "보기"에서 끈 항목은 범례에서도 뺌)
+// 선 4개는 툴팁과 같은 순서 (공장 소비 → 한전 구매 → 태양광 → ESS)
 const POWER_LEGEND = [
-  { key: 'grid', name: '한전 구매', className: 'grid' },
-  { key: 'solar', name: '태양광', className: 'solar' },
-  { key: 'ess', name: 'ESS 방전', className: 'discharge' },
-  { key: 'ess', name: 'ESS 충전(−)', className: 'charge' },
-  { key: 'load', name: '공장 소비', className: 'load' },
+  { key: 'load', name: '공장 소비', className: 'line load' },
+  { key: 'grid', name: '한전 구매', className: 'line grid' },
+  { key: 'solar', name: '태양광', className: 'line solar' },
+  { key: 'ess', name: 'ESS 방전', className: 'line ess' },
   // 한전 구매를 켰을 때만 찍히는 빨간 점. 제목 줄이 꺾이지 않게 이름은 짧게 ("15분"은 툴팁에 적음)
   { key: 'grid', name: '피크 초과', className: 'exceed' },
 ]
@@ -510,29 +510,12 @@ function cursorSeries() {
 const realParams = (params) => params.filter((item) => item.seriesName !== CURSOR_NAME)
 
 // ---- 전력 (kW) ----
-// 공장 소비 = 한전 구매 + 태양광 + ESS(방전 +, 충전 −) 이므로, 공장이 쓴 전기를 "어디서 채웠는지" 쌓아서 그림.
-// - 0 위: 한전 구매(맨 아래) → 태양광 → ESS 방전 순서로 쌓은 면. 맨 위가 공장 소비 선과 만남
-// - 0 아래: ESS 충전 (배터리로 들어간 만큼)
-// - 한전 구매가 맨 아래 층이라, 그 윗선을 목표 피크선과 바로 비교할 수 있음
-// (예전에는 선 3개 + 막대를 겹쳐 그려, 선이 서로 얽혀 무엇이 큰지 알기 어려웠음)
-
-const ESS_DISCHARGE = 'ESS 방전'
-const ESS_CHARGE = 'ESS 충전(−)'
-
-// 쌓는 면 하나. 그라데이션 없이 단색을 옅게 칠하고, 윗선은 같은 색으로 얇게
-function areaSeries(name, data, color, { stack, areaOpacity, lineWidth }) {
-  return {
-    name,
-    type: 'line',
-    stack,
-    showSymbol: false,
-    data,
-    lineStyle: { color, width: lineWidth },
-    itemStyle: { color },
-    areaStyle: { color, opacity: areaOpacity },
-    emphasis: { disabled: true },
-  }
-}
+// 공장 소비 · 한전 구매 · 태양광 · ESS를 칠하지 않은 선 4개로 그리고, 전력 종류는 선 색으로 구분함 (2026-11-20, 사용자 요청.
+// 그 전에는 "어디서 채웠는지"를 쌓은 면으로 칠했음 — 커밋 18d7960)
+// ESS는 방전만 그림 (2026-11-20, 사용자 요청으로 충전을 뺌). 백엔드 essKw는 방전 +, 충전 − 라서
+// 충전 · 대기 중인 칸은 0으로 둠 (기록이 없는 칸만 비움). 충전량은 기간 요약의 "ESS 방전 / 충전"에서 봄
+const ESS_NAME = 'ESS 방전'
+const dischargeKw = (essKw) => (essKw == null ? null : Math.max(essKw, 0))
 
 // 기록이 없는 구간을 옅은 띠로 칠하고 "기록 없음"이라고 적음 (값이 0으로 떨어진 것과 구분되게)
 // 맨 끝(오늘의 아직 오지 않은 시간)은 기록이 "없는" 게 아니라 "아직 안 온" 것이라 칠하지 않음
@@ -572,46 +555,16 @@ function emptyAreas() {
 
 const powerOption = computed(() => {
   const has = (key) => shown.value.includes(key)
-  const pick = (field) => points.value.map((item) => item[field] ?? null) // 기록 없는 칸은 비움
   const series = []
-  if (has('grid')) {
-    series.push(
-      areaSeries('한전 구매', pick('gridKw'), COLOR.grid, {
-        stack: 'supply',
-        areaOpacity: 0.35,
-        lineWidth: 1.5, // 목표 피크선과 비교하는 선이라 조금 또렷하게
-      }),
-    )
-  }
-  if (has('solar')) {
-    series.push(
-      // 노랑은 옅게 칠하면 어두운 바탕에서 갈색으로 보여 진하게.
-      // 윗선은 긋지 않음: 밤(태양광 0)에는 윗선이 한전 구매 윗선 위에 겹쳐 노란 선이 보였음
-      areaSeries('태양광', pick('solarKw'), COLOR.solar, {
-        stack: 'supply',
-        areaOpacity: 0.8,
-        lineWidth: 0,
-      }),
-    )
-  }
+  // 뒤에 넣은 선이 위에 그려지므로, 가장 중요한 공장 소비를 맨 마지막에 넣음
+  if (has('grid')) series.push(lineSeries('한전 구매', 'gridKw', COLOR.grid))
+  if (has('solar')) series.push(lineSeries('태양광', 'solarKw', COLOR.solar))
   if (has('ess')) {
-    // ESS 값 하나(방전 +, 충전 −)를 부호로 나눠, 방전은 위에 쌓고 충전은 0 아래에 그림
-    const essOf = (pickSign) =>
-      points.value.map((item) => (item.essKw == null ? null : pickSign(item.essKw, 0)))
-    series.push(
-      areaSeries(ESS_DISCHARGE, essOf(Math.max), COLOR.ess, {
-        stack: 'supply',
-        areaOpacity: 0.65,
-        lineWidth: 0,
-      }),
-      areaSeries(ESS_CHARGE, essOf(Math.min), COLOR.ess, {
-        stack: 'charge',
-        areaOpacity: 0.3,
-        lineWidth: 0,
-      }),
-    )
+    series.push({
+      ...lineSeries(ESS_NAME, 'essKw', COLOR.ess),
+      data: points.value.map((item) => dischargeKw(item.essKw)),
+    })
   }
-  // 공장 소비는 쌓지 않은 선으로 맨 위에 그림 (쌓인 면의 맨 위와 만나는지 보면 됨)
   if (has('load')) series.push(lineSeries('공장 소비', 'loadKw', COLOR.ink))
 
   // 목표 피크선은 한전 구매전력과 비교하는 선이라, 한전 구매를 켰을 때만 그림
@@ -646,20 +599,13 @@ const powerOption = computed(() => {
         // 기록이 없는 칸이면 값마다 "—"를 늘어놓지 않고 한 줄로 알림
         if (params.every((item) => item.value == null)) return `${label}<br/>기록 없음`
         const marker = (name) => params.find((item) => item.seriesName === name)?.marker ?? ''
-        // kw를 주지 않으면 이름만 적음 (ESS 대기)
-        const row = (name, text, kw) =>
-          `${marker(name)}${text}${kw === undefined ? '' : ` <strong>${formatKw(kw)} kW</strong>`}`
+        const row = (name, text, kw) => `${marker(name)}${text} <strong>${formatKw(kw)} kW</strong>`
         const rows = []
         if (has('load')) rows.push(row('공장 소비', '공장 소비', point.loadKw))
         if (has('grid')) rows.push(row('한전 구매', '한전 구매', point.gridKw))
         if (has('solar')) rows.push(row('태양광', '태양광', point.solarKw))
-        if (has('ess')) {
-          const ess = point.essKw
-          if (ess != null && ess < 0) rows.push(row(ESS_CHARGE, 'ESS 충전', Math.abs(ess)))
-          else if (ess > 0) rows.push(row(ESS_DISCHARGE, 'ESS 방전', ess))
-          else if (ess === 0) rows.push(row(ESS_DISCHARGE, 'ESS 대기'))
-          else rows.push(row(ESS_DISCHARGE, 'ESS', null)) // 이 칸만 ESS 기록이 없으면 "—"
-        }
+        // 그래프와 같게 방전만 적음 (충전 · 대기 중이면 0, 이 칸만 ESS 기록이 없으면 "—")
+        if (has('ess')) rows.push(row(ESS_NAME, 'ESS 방전', dischargeKw(point.essKw)))
         // 이 칸에 목표를 넘은 15분 구간이 있으면 한 줄 더 (점을 누르면 전력 이력으로 감)
         const exceed = allParams.find((item) => item.seriesName === EXCEED_NAME && item.data)
         if (exceed) {
@@ -673,7 +619,8 @@ const powerOption = computed(() => {
         return `${label}<br/>${rows.join('<br/>')}`
       },
     },
-    // 충전(0 아래)이 있으면 가로축 선이 그래프 가운데(0)로 올라오므로, 가로축은 항상 맨 아래에 둠
+    // 0 아래 값이 있으면 가로축 선이 그래프 가운데(0)로 올라오므로, 가로축은 항상 맨 아래에 둠
+    // (ESS 충전을 뺀 뒤로는 보통 0 아래 값이 없음)
     xAxis: { ...timeAxis(), axisLine: { onZero: false, lineStyle: { color: COLOR.line } } },
     yAxis: [
       {
@@ -687,8 +634,8 @@ const powerOption = computed(() => {
           has('grid') && target != null && target >= value.max
             ? Math.ceil((target * 1.05) / 500) * 500
             : null,
-        // 충전(0 아래)은 보통 수백 kW라, ECharts에 맡기면 칸이 낮을 때 -1,000까지 내려가 그래프 1/4이 비었음.
-        // 가장 큰 충전값 바로 아래(250 단위)에서 자름
+        // 0 아래 값이 있을 때 ECharts에 맡기면 칸이 낮을 때 -1,000까지 내려가 그래프 1/4이 비었음.
+        // 가장 작은 값 바로 아래(250 단위)에서 자름. 0 아래 값이 없으면 0부터 시작
         min: (value) => (value.min < 0 ? Math.floor(value.min / 250) * 250 : null),
       },
       CURSOR_AXIS,
@@ -1906,30 +1853,26 @@ const patternOption = computed(() => {
   gap: 4px;
   white-space: nowrap;
 }
-/* 면은 네모, 공장 소비(선)는 가는 막대. 그래프에서 칠한 진하기와 비슷하게 */
+/* 기본은 네모(일별 최대 피크 막대). 전력 그래프의 선은 그래프 선과 같은 색의 짧은 막대 */
 .power-swatch {
   width: 10px;
   height: 10px;
 }
+.power-swatch.line {
+  width: 14px;
+  height: 3px;
+}
+.power-swatch.load {
+  background: var(--ink);
+}
 .power-swatch.grid {
   background: var(--src-grid);
-  opacity: 0.6;
 }
 .power-swatch.solar {
   background: var(--src-solar);
-  opacity: 0.85;
 }
-.power-swatch.discharge {
+.power-swatch.ess {
   background: var(--src-ess);
-  opacity: 0.8;
-}
-.power-swatch.charge {
-  background: var(--src-ess);
-  opacity: 0.4;
-}
-.power-swatch.load {
-  height: 2px;
-  background: var(--ink);
 }
 /* 피크 초과 점 (그래프의 빨간 점과 같음) */
 .power-swatch.exceed {
