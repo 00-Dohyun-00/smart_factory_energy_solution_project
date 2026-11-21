@@ -146,7 +146,7 @@ function load(showLoading = true) {
   if (!fromDate.value || !toDate.value || dateError.value) return
   // 간격이 1시간이라, 스토어가 이 결과를 시간대별 사용 패턴에도 그대로 넣어 줌 (따로 받지 않음 — 이슈 #25)
   analysisStore.fetchTrend(fromDate.value, toDate.value, INTERVAL, showLoading)
-  // 전력 그래프 아래 "일별 최대 피크" 그래프용 (피크 분석 화면과 같은 API)
+  // 전력 그래프 아래 "일별 최대 피크" 그래프용 (피크 분석 API)
   if (!peakTooLong.value) analysisStore.fetchPeak(fromDate.value, toDate.value, showLoading)
 }
 
@@ -649,8 +649,7 @@ const powerOption = computed(() => {
 // 값은 피크 분석 API(dailyPeaks)가 준 그대로: 그날 15분 평균 중 최대(실제)와, 방전하지 않았다면 예상되는 최대.
 // 위 전력 그래프는 1시간 평균이라, 같은 날이라도 이 값이 전력 그래프의 면보다 높거나 낮을 수 있음
 
-// 지금 조회 기간의 피크 결과만 씀. 피크 분석 화면에서 받아 둔 다른 기간의 결과나,
-// 기간을 바꾼 뒤 아직 새 결과가 오기 전의 이전 결과는 쓰지 않음
+// 지금 조회 기간의 피크 결과만 씀. 기간을 바꾼 뒤 아직 새 결과가 오기 전의 이전 결과는 쓰지 않음
 const peak = computed(() => {
   const result = analysisStore.peak
   if (!result || !trend.value) return null
@@ -703,7 +702,7 @@ const peakSummaryNote = computed(() => {
 const dailyOption = computed(() => {
   const rows = dailyRows.value
   const target = peak.value?.targetPeakKw ?? null
-  // 차이(저감량)가 잘 보이게 세로축을 0이 아닌 값에서 시작함 (피크 분석 화면과 같은 방식)
+  // 차이(저감량)가 잘 보이게 세로축을 0이 아닌 값에서 시작함 (월간 성적표의 일별 그래프와 같은 방식)
   const lowest = Math.min(...rows.map((item) => item.peakKw).filter((value) => value != null))
   return {
     animation: false,
@@ -803,7 +802,7 @@ watch(windowMode, () => {
   if (selectedWindow.value) clearFocus()
 })
 
-// 그 구간의 추천 처리를 한 줄 문구로 (status 코드를 화면에서 글자로 바꿈. 피크 분석 화면과 같음)
+// 그 구간의 추천 처리를 한 줄 문구로 (status 코드를 화면에서 글자로 바꿈)
 // 백엔드 note는 추천 이유 문장이라 표 칸에 넣기엔 길어서 쓰지 않음
 function windowNote(item) {
   if (!item.status) return '방전 추천 없음'

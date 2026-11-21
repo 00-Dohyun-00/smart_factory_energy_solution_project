@@ -58,10 +58,8 @@ const menus = [
   },
   {
     label: '분석',
-    children: [
-      { label: '추이 분석', to: '/analysis/trend' },
-      { label: '피크 분석', to: '/analysis/peak' },
-    ],
+    // 피크 분석은 추이 분석에 합치고 지웠음(2026-11-21)
+    children: [{ label: '추이 분석', to: '/analysis/trend' }],
   },
   { label: '보고서', children: [{ label: '월간 성적표', to: '/report' }] },
   {

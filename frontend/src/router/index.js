@@ -3,7 +3,6 @@ import MainLayout from '@/layouts/MainLayout.vue'
 import HistoryPage from '@/pages/HistoryPage.vue'
 import MonitoringPage from '@/pages/MonitoringPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
-import PeakAnalysisPage from '@/pages/PeakAnalysisPage.vue'
 import PowerDiagramPage from '@/pages/PowerDiagramPage.vue'
 import PowerHistoryPage from '@/pages/PowerHistoryPage.vue'
 import ReportPage from '@/pages/ReportPage.vue'
@@ -31,11 +30,8 @@ const routes = [
         component: TrendAnalysisPage,
         meta: { parent: '분석', title: '추이 분석' },
       },
-      {
-        path: 'analysis/peak',
-        component: PeakAnalysisPage,
-        meta: { parent: '분석', title: '피크 분석' },
-      },
+      // 피크 분석 화면은 추이 분석에 합치고 지웠음(2026-11-21). 예전 주소로 들어오면 추이 분석을 염
+      { path: 'analysis/peak', redirect: '/analysis/trend' },
       // 보고서
       { path: 'report', component: ReportPage, meta: { parent: '보고서', title: '월간 성적표' } },
       // 운영 로그
