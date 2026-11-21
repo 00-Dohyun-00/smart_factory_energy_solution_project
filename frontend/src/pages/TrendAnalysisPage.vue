@@ -77,8 +77,9 @@ const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) 
 
 // 백엔드가 한 번에 조회해 주는 최대 기간 (넘으면 400을 줌). 동절기(최대 121일)가 들어가게 백엔드와 같이 늘림
 const MAX_DAYS = 121
-// 일별 최대 피크(피크 분석 API)는 백엔드가 62일까지만 받음. 기간이 이보다 길면 그 그래프만 숨김
-const PEAK_MAX_DAYS = 62
+// 일별 최대 피크(피크 분석 API)가 받는 최대 기간. 기간이 이보다 길면 그 그래프만 숨김
+// (원래 62일이라 하절기 · 동절기에 피크 그래프가 비었음 → 백엔드와 같이 121일로 늘림, 2026-11-21)
+const PEAK_MAX_DAYS = 121
 
 // '2026-11-01' ~ '2026-11-18' → 18 (시작일과 종료일을 모두 셈)
 function dayCount(from, to) {
