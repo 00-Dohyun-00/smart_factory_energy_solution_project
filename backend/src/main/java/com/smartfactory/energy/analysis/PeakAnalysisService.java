@@ -39,7 +39,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class PeakAnalysisService {
 
     // 한 번에 조회할 수 있는 최대 기간 (일)
-    private static final int MAX_DAYS = 62;
+    // 추이 분석 화면이 하절기(92일) · 동절기(최대 121일)에도 일별 최대 피크를 그리도록 추이 분석 API(121일)와 맞춤
+    // (15분 구간만 읽어서 121일이어도 약 1만 2천 줄)
+    private static final int MAX_DAYS = 121;
 
     // 피크가 높았던 구간을 몇 개 보여 줄지
     private static final int TOP_WINDOW_COUNT = 8;

@@ -58,6 +58,15 @@ class PeakAnalysisServiceTest {
     }
 
     @Test
+    void 기간은_121일까지_되고_122일이면_400() {
+        when(demandInterval15mRepository.findInPeriod(any(), any())).thenReturn(List.of());
+
+        peakAnalysisService.getPeak(DAY, DAY.plusDays(120)); // 121일: 통과
+        assertThatThrownBy(() -> peakAnalysisService.getPeak(DAY, DAY.plusDays(121)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void 다_찬_구간이_없으면_hasData_false() {
         when(demandInterval15mRepository.findInPeriod(any(), any()))
                 .thenReturn(List.of(interval(DAY.atTime(9, 0), 1500, 1500, 3)));

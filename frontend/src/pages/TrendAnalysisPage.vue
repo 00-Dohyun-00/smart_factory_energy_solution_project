@@ -77,8 +77,9 @@ const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) 
 
 // 백엔드가 한 번에 조회해 주는 최대 기간 (넘으면 400을 줌). 동절기(최대 121일)가 들어가게 백엔드와 같이 늘림
 const MAX_DAYS = 121
-// 일별 최대 피크(피크 분석 API)는 백엔드가 62일까지만 받음. 기간이 이보다 길면 그 그래프만 숨김
-const PEAK_MAX_DAYS = 62
+// 일별 최대 피크(피크 분석 API)가 받는 최대 기간. 기간이 이보다 길면 그 그래프만 숨김
+// (원래 62일이라 하절기 · 동절기에 피크 그래프가 비었음 → 백엔드와 같이 121일로 늘림, 2026-11-21)
+const PEAK_MAX_DAYS = 121
 
 // '2026-11-01' ~ '2026-11-18' → 18 (시작일과 종료일을 모두 셈)
 function dayCount(from, to) {
@@ -146,7 +147,7 @@ function load(showLoading = true) {
   if (!fromDate.value || !toDate.value || dateError.value) return
   // 간격이 1시간이라, 스토어가 이 결과를 시간대별 사용 패턴에도 그대로 넣어 줌 (따로 받지 않음 — 이슈 #25)
   analysisStore.fetchTrend(fromDate.value, toDate.value, INTERVAL, showLoading)
-  // 전력 그래프 아래 "일별 최대 피크" 그래프용 (피크 분석 화면과 같은 API)
+  // 전력 그래프 아래 "일별 최대 피크" 그래프용 (피크 분석 API)
   if (!peakTooLong.value) analysisStore.fetchPeak(fromDate.value, toDate.value, showLoading)
 }
 
@@ -649,8 +650,7 @@ const powerOption = computed(() => {
 // 값은 피크 분석 API(dailyPeaks)가 준 그대로: 그날 15분 평균 중 최대(실제)와, 방전하지 않았다면 예상되는 최대.
 // 위 전력 그래프는 1시간 평균이라, 같은 날이라도 이 값이 전력 그래프의 면보다 높거나 낮을 수 있음
 
-// 지금 조회 기간의 피크 결과만 씀. 피크 분석 화면에서 받아 둔 다른 기간의 결과나,
-// 기간을 바꾼 뒤 아직 새 결과가 오기 전의 이전 결과는 쓰지 않음
+// 지금 조회 기간의 피크 결과만 씀. 기간을 바꾼 뒤 아직 새 결과가 오기 전의 이전 결과는 쓰지 않음
 const peak = computed(() => {
   const result = analysisStore.peak
   if (!result || !trend.value) return null
@@ -703,12 +703,13 @@ const peakSummaryNote = computed(() => {
 const dailyOption = computed(() => {
   const rows = dailyRows.value
   const target = peak.value?.targetPeakKw ?? null
-  // 차이(저감량)가 잘 보이게 세로축을 0이 아닌 값에서 시작함 (피크 분석 화면과 같은 방식)
+  // 차이(저감량)가 잘 보이게 세로축을 0이 아닌 값에서 시작함 (월간 성적표의 일별 그래프와 같은 방식)
   const lowest = Math.min(...rows.map((item) => item.peakKw).filter((value) => value != null))
   return {
     animation: false,
     // 왼쪽 · 오른쪽 여백을 전력 그래프와 같게 해야 날짜 칸이 위아래로 맞음
-    grid: { left: 52, right: GRID_RIGHT, top: 8, bottom: 6 },
+    // 아래 여백은 가로축 날짜 글자 자리 (전력 그래프와 같은 24)
+    grid: { left: 52, right: GRID_RIGHT, top: 8, bottom: 24 },
     legend: { show: false }, // 범례는 제목 줄에 글자로 둠
     tooltip: {
       ...tooltipColors(),
@@ -732,7 +733,12 @@ const dailyOption = computed(() => {
       data: rows.map((item) => item.date.slice(5)),
       axisLine: { lineStyle: { color: COLOR.line } },
       axisTick: { show: false },
-      axisLabel: { show: false }, // 날짜는 바로 위 전력 그래프의 가로축 글자로 봄
+      // 날짜 글자: 전력 그래프와 같은 날짜에만 적음 (날짜가 많으면 며칠에 하나씩, 겹치지 않게)
+      // (처음엔 위 전력 그래프 글자를 보게 하고 껐는데, 막대가 어느 날인지 알기 어려워 다시 켬, 2026-11-21)
+      axisLabel: {
+        color: COLOR.mute,
+        interval: (index) => index % dayStep.value === 0,
+      },
       // 전력 그래프와 같은 날짜에 세로선 (날짜 경계)
       splitLine: {
         show: !isSingleDay.value,
@@ -797,7 +803,7 @@ watch(windowMode, () => {
   if (selectedWindow.value) clearFocus()
 })
 
-// 그 구간의 추천 처리를 한 줄 문구로 (status 코드를 화면에서 글자로 바꿈. 피크 분석 화면과 같음)
+// 그 구간의 추천 처리를 한 줄 문구로 (status 코드를 화면에서 글자로 바꿈)
 // 백엔드 note는 추천 이유 문장이라 표 칸에 넣기엔 길어서 쓰지 않음
 function windowNote(item) {
   if (!item.status) return '방전 추천 없음'
