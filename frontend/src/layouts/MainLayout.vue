@@ -24,9 +24,24 @@ const pollSeconds = computed(() => {
 let timer = null
 
 // 주기에 맞춰 최신 상태를 반복해서 받음. 주기가 바뀌면 이전 반복을 멈추고 새로 시작함
+// 탭이 숨겨져 있으면 시작하지 않음 (다시 보일 때 아래 onVisibilityChange가 시작함)
 function startPolling() {
   clearInterval(timer)
+  timer = null
+  if (document.hidden) return
   timer = setInterval(() => realtimeStore.fetchLatest(), pollSeconds.value * 1000)
+}
+
+// 다른 탭을 보거나 창을 내리면 폴링을 멈추고, 다시 보이면 바로 한 번 받은 뒤 이어서 폴링함
+// (안 보는 동안에도 몇 초마다 API 3개를 부르면 공용 DB(Supabase) 사용량만 늘어남)
+function onVisibilityChange() {
+  if (document.hidden) {
+    clearInterval(timer)
+    timer = null
+    return
+  }
+  realtimeStore.fetchLatest()
+  startPolling()
 }
 
 // 최신 상태는 왼쪽 메뉴(시각, 날씨, 연결 표시등)가 모든 화면에서 쓰므로 여기서 한 번만 폴링함
@@ -34,13 +49,15 @@ onMounted(() => {
   realtimeStore.fetchLatest()
   settingsStore.fetchSettings()
   startPolling()
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 watch(pollSeconds, startPolling)
 
-// 화면을 떠날 때 폴링을 반드시 멈춤
+// 화면을 떠날 때 폴링과 탭 감시를 반드시 멈춤
 onBeforeUnmount(() => {
   clearInterval(timer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
 // 자동 모드인지 (실제 제어가 아니라 시뮬레이션이라는 점을 함께 알림)
