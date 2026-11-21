@@ -119,6 +119,16 @@ class RecommendationEngineTest {
         when(sitePowerMinuteRepository.findFirstByOrderByTsDesc()).thenReturn(Optional.of(rows.get(rows.size() - 1)));
     }
 
+    // 이번 구간에 이미 운영자가 적용한 피크 방어 방전 추천 (원래 규칙대로면 구간이 끝날 때까지 유지됨)
+    private void lastIsAppliedPeakDefense(double powerKw) {
+        LocalDateTime windowStart = RecommendationEngine.quarterStartOf(NOW);
+        Recommendation last = new Recommendation(windowStart.plusMinutes(1), windowStart, RecommendationAction.DISCHARGE,
+                bd(powerKw), RecommendationReasonType.PEAK_DEFENSE, "이전 추천", bd(1900), bd(1800),
+                RecommendationStatus.APPLIED, "운영자", windowStart.plusMinutes(1));
+        when(recommendationRepository.findFirstByOrderByRecommendedAtDescRecommendationIdDesc())
+                .thenReturn(Optional.of(last));
+    }
+
     private Recommendation savedRecommendation() {
         ArgumentCaptor<Recommendation> saved = ArgumentCaptor.forClass(Recommendation.class);
         verify(recommendationRepository).save(saved.capture());
@@ -206,6 +216,48 @@ class RecommendationEngineTest {
         recommendationEngine.run();
 
         verify(recommendationRepository, times(1)).save(any());
+    }
+
+    // 이슈 #33: 경고 → 태양광 증가 → 예상 피크 정상이 되면 같은 구간 안에서도 방전 추천이 풀려야 함
+    @Test
+    void 피크_방어_중_ESS_없이도_예상_피크가_충분히_낮아지면_유지를_풀고_다시_추천함() {
+        history(300, 0); // 부하 − 태양광이 300 kW로 줄어든 상황 (태양광이 늘어난 것과 같음)
+        lastIsAppliedPeakDefense(200);
+
+        recommendationEngine.run();
+
+        Recommendation r = savedRecommendation();
+        assertThat(r.getIntervalStart()).isEqualTo(RecommendationEngine.quarterStartOf(NOW)); // 같은 구간 안에서 바뀜
+        assertThat(r.getReasonType()).isNotEqualTo(RecommendationReasonType.PEAK_DEFENSE);
+        assertThat(r.getAction()).isNotEqualTo(RecommendationAction.DISCHARGE);
+    }
+
+    @Test
+    void 피크_방어_중_예상_피크가_방어선_바로_아래면_깜빡이지_않게_유지함() {
+        // 예상 1,780 kW: 방어선(목표 1,800) 아래지만 주의선(1,746)보다 높음 → 경계라 풀지 않음
+        history(300, 1780, 0);
+        lastIsAppliedPeakDefense(200);
+
+        recommendationEngine.run();
+
+        verify(recommendationRepository, never()).save(any());
+    }
+
+    @Test
+    void 피크_방어_중_방전_덕분에_한전_구매가_내려간_것이면_유지함() {
+        // 방전 400 kW로 한전 구매는 1,600 kW지만, ESS가 없으면(부하 − 태양광) 여전히 2,000 kW
+        LocalDateTime windowStart = RecommendationEngine.quarterStartOf(NOW);
+        List<SitePowerMinute> rows = new ArrayList<>();
+        for (int i = 59; i >= 0; i--) {
+            LocalDateTime ts = NOW.minusMinutes(i);
+            rows.add(ts.isBefore(windowStart) ? power(ts, 300, 0, 0, 300) : power(ts, 1600, 0, 400, 2000));
+        }
+        when(sitePowerMinuteRepository.findInPeriod(any(), any())).thenReturn(rows);
+        lastIsAppliedPeakDefense(400);
+
+        recommendationEngine.run();
+
+        verify(recommendationRepository, never()).save(any());
     }
 
     @Test
