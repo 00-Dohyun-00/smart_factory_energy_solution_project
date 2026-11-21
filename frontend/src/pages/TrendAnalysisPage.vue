@@ -708,7 +708,8 @@ const dailyOption = computed(() => {
   return {
     animation: false,
     // 왼쪽 · 오른쪽 여백을 전력 그래프와 같게 해야 날짜 칸이 위아래로 맞음
-    grid: { left: 52, right: GRID_RIGHT, top: 8, bottom: 6 },
+    // 아래 여백은 가로축 날짜 글자 자리 (전력 그래프와 같은 24)
+    grid: { left: 52, right: GRID_RIGHT, top: 8, bottom: 24 },
     legend: { show: false }, // 범례는 제목 줄에 글자로 둠
     tooltip: {
       ...tooltipColors(),
@@ -732,7 +733,12 @@ const dailyOption = computed(() => {
       data: rows.map((item) => item.date.slice(5)),
       axisLine: { lineStyle: { color: COLOR.line } },
       axisTick: { show: false },
-      axisLabel: { show: false }, // 날짜는 바로 위 전력 그래프의 가로축 글자로 봄
+      // 날짜 글자: 전력 그래프와 같은 날짜에만 적음 (날짜가 많으면 며칠에 하나씩, 겹치지 않게)
+      // (처음엔 위 전력 그래프 글자를 보게 하고 껐는데, 막대가 어느 날인지 알기 어려워 다시 켬, 2026-11-21)
+      axisLabel: {
+        color: COLOR.mute,
+        interval: (index) => index % dayStep.value === 0,
+      },
       // 전력 그래프와 같은 날짜에 세로선 (날짜 경계)
       splitLine: {
         show: !isSingleDay.value,
