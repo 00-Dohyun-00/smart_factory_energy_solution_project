@@ -34,7 +34,7 @@ let MAX_DISCHARGE_KW = 500 // ESS 최대 방전 출력
 
 // 공장 컨셉: 전기차 열관리 부품 공장 (가상).
 // 설비 id · 이름 · 구역 · 정격 전력은 실제 DB equipment 표와 같게 맞춤 (2026-11-18, GET /api/equipment)
-// zoneId = 화면의 구역 id (DB zone_code. 유틸리티는 DB에서 U1이지만 화면은 U로 씀)
+// zoneId = 화면의 구역 id (실제 백엔드와 같은 Z1~Z6. 유틸리티는 예전에 U로 썼으나 화면이 Z6으로 바뀌어 맞춤, 2026-11-21)
 // share = 평소 공장 전력에서 그 설비가 차지하는 비중 (합계 1.0, 임시로 정한 값)
 const EQUIPMENTS = [
   { id: 'HEX-01', zoneId: 'Z1', name: 'CNC 가공기 1호', ratedKw: 120, share: 0.05 },
@@ -49,9 +49,9 @@ const EQUIPMENTS = [
   { id: 'MOD-02', zoneId: 'Z4', name: '조립 라인 2', ratedKw: 40, share: 0.01 },
   { id: 'INS-01', zoneId: 'Z5', name: '리크 테스터', ratedKw: 120, share: 0.05 },
   { id: 'INS-02', zoneId: 'Z5', name: '비전 검사기', ratedKw: 80, share: 0.03 },
-  { id: 'UTL-01', zoneId: 'U', name: '공기압축기', ratedKw: 200, share: 0.08 }, // 실측 설비 (DB is_virtual = false)
-  { id: 'UTL-02', zoneId: 'U', name: '냉각탑', ratedKw: 150, share: 0.06 },
-  { id: 'UTL-03', zoneId: 'U', name: '공조기', ratedKw: 120, share: 0.04 },
+  { id: 'UTL-01', zoneId: 'Z6', name: '공기압축기', ratedKw: 200, share: 0.08 }, // 실측 설비 (DB is_virtual = false)
+  { id: 'UTL-02', zoneId: 'Z6', name: '냉각탑', ratedKw: 150, share: 0.06 },
+  { id: 'UTL-03', zoneId: 'Z6', name: '공조기', ratedKw: 120, share: 0.04 },
 ]
 
 // 실패 상황을 화면에서 확인하기 위한 장치. 주소 뒤에 붙여서 씁니다.
@@ -138,13 +138,14 @@ function toLocalDateTime(date) {
 
 // 브레이징로가 가열할 때 늘어나는 전력 (약 4분 주기로 반복되게 만든 값)
 // 15분 평균을 내면 거의 0이 되어, 순간값만 출렁이고 구간 평균은 크게 바꾸지 않음
+// 촬영용 "튐" 시나리오에서는 출렁임을 작게 함 (평소 장면이 "정상"으로 차분하게 보이도록)
 function furnaceSwingAt(seconds) {
-  return 330 * Math.sin(seconds / 40)
+  return 330 * Math.sin(seconds / 40) * (scenario === 'spike' ? 0.15 : 1)
 }
 
 // 사출기가 한 사이클 돌 때마다 출렁이는 전력
 function injectionSwingAt(seconds) {
-  return 40 * Math.sin(seconds / 7)
+  return 40 * Math.sin(seconds / 7) * (scenario === 'spike' ? 0.15 : 1)
 }
 
 // ---- 실제 데이터로 만드는 전력 ----
@@ -164,6 +165,49 @@ const SOLAR_SCALE = 1.536 // 태양광 kW = generation_mwh × 1.536 (1,000 kW �
 // 평범한 날에는 피크 장면이 드물어서, 시연에서 피크 방어를 보여 줄 때 씀
 //   http://localhost:5173/?scenario=peak
 const scenario = new URLSearchParams(window.location.search).get('scenario')
+
+// ---- 촬영용 "튐" 시나리오 (?scenario=spike, 2026-11-21 시연 영상용) ----
+// 평소 약 1,250 kW로 "정상"이다가, 페이지를 열고 3분 뒤 처음 시작하는 15분 구간의 1분째부터 9분 동안
+// 여러 설비가 한꺼번에 돌아(사출 · 유틸리티 구역이 가장 많이) 약 700 kW가 늘어남 → 그 뒤 다시 평소로. 30분마다 되풀이
+// (방전 추천은 튄 지 3~4분 뒤에 뜨므로, 적용한 뒤 설비 모니터링을 보여 줄 시간이 남도록 9분으로 둠)
+// 목표 피크는 1,500 kW(실제 공용 설정과 같은 값)로 시작하고, 하루 계획(계획 충·방전)은 쉬게 함
+//   http://localhost:5173/?fake&scenario=spike&speed=5
+const isSpikeScenario = scenario === 'spike'
+const SPIKE_BASE_KW = 1250
+// 튈 때 설비마다 늘어나는 전력 (합 700 kW). 설비 모니터링에서 어느 구역이 늘었는지 보이게 함
+// 설비마다 "평소 값(1,250~1,275 kW × 비중) + 출렁임 + 늘어나는 값"이 설비 임계치(useSettingsStore의
+// DEFAULT_EQUIPMENT_THRESHOLDS)의 90% 안, 될 수 있으면 정격 전력 안에 들게 나눔 → "▲ 초과"가 뜨지 않음
+// (처음에는 브레이징로에 210 kW를 몰아서 602 kW로 임계치 504 kW를 넘었음)
+const SPIKE_EXTRA_KW = {
+  'INJ-01': 85, // 사출 구역 +245 kW: 사출기 1호 약 216 kW (정격 220, 임계 413)
+  'INJ-02': 85, //   사출기 2호 약 215 kW (정격 220, 임계 398)
+  'INJ-03': 75, //   사출기 3호 약 126 kW (임계 147)
+  'UTL-01': 90, // 유틸리티 구역 +205 kW: 공기압축기 약 192 kW (정격 200, 임계 295)
+  'UTL-02': 65, //   냉각탑 약 142 kW (정격 150, 임계 221)
+  'UTL-03': 50, //   공조기 약 101 kW (임계 147)
+  'BRZ-02': 100, // 브레이징 구역 +120 kW: 탈지·건조기 약 177 kW (정격 180, 임계 221)
+  'BRZ-01': 20, //   브레이징로 약 452 kW까지 (출렁임 포함, 임계 504)
+  'HEX-01': 40, // 가공 구역 +90 kW: CNC 가공기 1호 약 104 kW (임계 184)
+  'HEX-02': 50, //   CNC 가공기 2호 약 101 kW (임계 147)
+  'INS-01': 25, // 검사 구역 +40 kW: 리크 테스터 약 89 kW (임계 184)
+  'INS-02': 15, //   비전 검사기 약 53 kW (임계 111)
+}
+const SPIKE_TOTAL_KW = Object.values(SPIKE_EXTRA_KW).reduce((sum, kw) => sum + kw, 0)
+
+// 그 시각에 얼마나 튀었는지 (0 = 평소, 1 = 다 튐). 오르내릴 때는 30초 동안 이어지게 함
+function spikeFactorAt(time) {
+  if (!isSpikeScenario) return 0
+  const firstWindow = Math.ceil((openedAt + 3 * 60000) / WINDOW_MS) * WINDOW_MS
+  const elapsed = time.getTime() - firstWindow
+  if (elapsed < 0) return 0
+  const inCycle = elapsed % (30 * 60000)
+  const start = 1 * 60000
+  const end = 10 * 60000
+  if (inCycle < start || inCycle >= end) return 0
+  return Math.min(1, (inCycle - start) / 30000, (end - inCycle) / 30000)
+}
+const spikeTotalKwAt = (time) => SPIKE_TOTAL_KW * spikeFactorAt(time)
+const spikeExtraKwAt = (id, time) => (SPIKE_EXTRA_KW[id] ?? 0) * spikeFactorAt(time)
 
 // 그해 1월 1일부터 며칠째인지 (0부터). month는 0(1월)~11(12월)
 function dayOfYear(year, month, day) {
@@ -236,6 +280,7 @@ function loadKwOfTime(time) {
 // AI가 예측한 그 칸의 공장 전력 (kW). 실제 값과 같은 식으로 우리 공장 크기로 바꿈
 //   mean: 평균 예측 (요금 계산용) / peak: 상위 90% 예측 (방어선 판단용, 피크를 낮게 보지 않게)
 function forecastLoadKwOfTime(time, kind) {
+  if (isSpikeScenario) return SPIKE_BASE_KW // 촬영용 시나리오: 평소 부하가 이어진다고 봄
   const values = kind === 'peak' ? loadForecast.peakLoadKwh : loadForecast.loadKwh
   return BASE_LOAD_KW + LOAD_SCALE * values[loadSlotIndexOf(time)] * 4
 }
@@ -298,13 +343,20 @@ function weatherOf(date) {
 
 // 그 시각 공장의 기준 전력 (데이터 값. 설비가 몇 분 단위로 출렁이는 부분은 뺀 값)
 function baseLoadAt(time) {
+  // 촬영용 시나리오: 데이터 대신 평소 부하 + 작은 흔들림 (튀는 부분은 factoryLoadAt · equipmentsAt에서 더함)
+  if (isSpikeScenario) {
+    const ms = time.getTime()
+    return SPIKE_BASE_KW + 15 * Math.sin(ms / 15400) + 10 * Math.sin(ms / 3700)
+  }
   return smoothValueAt(time, loadKwOfTime, 15 * 60000)
 }
 
-// 그 시각 공장 전체가 쓰는 전력 (기준 전력 + 브레이징로·사출기의 출렁임)
+// 그 시각 공장 전체가 쓰는 전력 (기준 전력 + 브레이징로·사출기의 출렁임 + 촬영용 시나리오의 튐)
 function factoryLoadAt(time) {
   const seconds = time.getTime() / 1000
-  return baseLoadAt(time) + furnaceSwingAt(seconds) + injectionSwingAt(seconds)
+  return (
+    baseLoadAt(time) + furnaceSwingAt(seconds) + injectionSwingAt(seconds) + spikeTotalKwAt(time)
+  )
 }
 
 // 그 시각의 태양광 발전량 (데이터 값)
@@ -559,7 +611,10 @@ function updateDecision(now, info) {
     return explainDecision(shownKind, values, explainContextOf(now, limits), limits)
   }
 
-  if (active && (current.kind === kind || current.kind === 'PEAK' || shortGap)) {
+  // 피크 방어 중이라도 ESS 없이 이번 구간 예상이 주의선 아래로 내려오면 유지를 풀고 새로 추천함
+  // (실제 백엔드 이슈 #33과 같은 규칙. 튐이 끝난 뒤 카드가 구간 끝까지 "방전 중 0 kW"로 남지 않게)
+  const defenseOver = current?.kind === 'PEAK' && kind !== 'PEAK' && predictedOf(0) < WARN_KW
+  if (active && !defenseOver && (current.kind === kind || current.kind === 'PEAK' || shortGap)) {
     if (current.status === 'RECOMMENDED' && current.action === action && action !== 'IDLE') {
       current.powerKw = Math.abs(wantKw) // 아직 답하지 않았으면 지금 필요한 양으로 숫자를 고쳐 둠
     }
@@ -829,10 +884,14 @@ function equipmentsAt(time) {
     zoneId: item.zoneId,
     name: item.name,
     ratedKw: item.ratedKw,
-    loadKw: round1(baseKw * item.share + (extraKw[item.id] ?? 0)),
+    // 촬영용 시나리오에서 튈 때는 설비마다 늘어난 전력(SPIKE_EXTRA_KW)을 더함
+    loadKw: round1(baseKw * item.share + (extraKw[item.id] ?? 0) + spikeExtraKwAt(item.id, time)),
     origin: item.id === 'UTL-01' ? 'MEASURED' : 'SIMULATED',
     // 설비 상태. 브레이징로는 전력이 크게 오를 때 "가열 중"으로 표시 (필드는 확인 필요)
-    state: item.id === 'BRZ-01' && furnaceSwingAt(seconds) > 100 ? 'HEATING' : 'RUNNING',
+    state:
+      item.id === 'BRZ-01' && (furnaceSwingAt(seconds) > 100 || spikeFactorAt(time) > 0.5)
+        ? 'HEATING'
+        : 'RUNNING',
   }))
 }
 
@@ -928,7 +987,15 @@ function livePlanOf(now, socPercent) {
   const startSlot = now.getHours() * 4 + Math.floor(now.getMinutes() / 15)
   const key = `${dateKey}|${startSlot}|${planSettingsKey()}`
   if (!livePlan || livePlan.key !== key) {
-    const result = planDay(planInputsOf(dayInputs(dateKey), startSlot), socPercent, essLimits())
+    // 촬영용 시나리오: 하루 계획은 쉬게 함 (요금 때문에 "계획 충·방전" 추천이 끼어들지 않고 피크 방어만 보이게)
+    const result = isSpikeScenario
+      ? {
+          lineKw: TARGET_PEAK_KW,
+          // 주의선보다 30 kW 더 낮게 맞춰, 적용한 뒤 "정상"과 "주의"가 경계에서 깜빡이지 않게 함
+          marginKw: TARGET_PEAK_KW - WARN_KW + 30,
+          essKw: new Array(96 - startSlot).fill(0),
+        }
+      : planDay(planInputsOf(dayInputs(dateKey), startSlot), socPercent, essLimits())
     livePlan = { key, dateKey, startSlot, ...result }
   }
   return livePlan
@@ -949,7 +1016,7 @@ function dayInputs(dateKey) {
     let solarKw = 0
     for (let step = 0; step < 6; step++) {
       const time = new Date(start.getTime() + (step + 0.5) * 150000)
-      loadKw += baseLoadAt(time) / 6
+      loadKw += (baseLoadAt(time) + spikeTotalKwAt(time)) / 6 // 촬영용 시나리오의 튐도 오늘 그래프에 보이게
       solarKw += solarKwAt(time) / 6
     }
     const period = periodAt(middle)
@@ -1595,6 +1662,12 @@ const settings = {
   operationMode: 'MANUAL', // MANUAL(운영자 승인) | AUTO(자동 모드, 시뮬레이션)
   pollSeconds: 5,
   decisionValidMinutes: 15,
+}
+// 촬영용 시나리오: 목표 피크를 실제 공용 설정과 같은 1,500 kW로 시작
+if (isSpikeScenario) {
+  settings.targetPeakKw = 1500
+  TARGET_PEAK_KW = 1500
+  WARN_KW = Math.round((1500 * settings.warnPercent) / 100)
 }
 
 const settingSavedAt = {} // 항목별 마지막 저장 시각
