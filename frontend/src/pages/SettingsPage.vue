@@ -24,6 +24,7 @@ const MODES = [
 
 // 화면에 놓을 항목들. key는 명세 v0.2의 설정 키 그대로 (예: 'peak.target_kw')
 // min, max: 화면에서 먼저 걸러 주는 범위 / readOnly: 명세에서 "보기만"인 항목 (고칠 수 없음)
+// 범위는 백엔드(SettingService의 NUMBER_RANGES)가 받는 범위와 똑같이 둠. 최종 검사는 백엔드가 함 (이슈 #25-10)
 // (2026-11-17, UI 피드백) 요금 단가와 충·방전 효율은 요금 기준표·외부에서 받아오는 값이라 화면에서 뺐음
 const GROUPS = [
   {
@@ -31,7 +32,7 @@ const GROUPS = [
     title: '피크',
     // note: '피크 단계를 나누는 기준',
     fields: [
-      { key: 'peak.target_kw', label: '목표 피크', unit: 'kW', min: 100, max: 100000 },
+      { key: 'peak.target_kw', label: '목표 피크', unit: 'kW', min: 1, max: 100000 },
       { key: 'peak.warn_ratio', label: '주의선', unit: '%', min: 50, max: 100 },
     ],
   },
@@ -42,9 +43,9 @@ const GROUPS = [
     fields: [
       { key: 'ess.capacity_kwh', label: '배터리 용량', unit: 'kWh', readOnly: true },
       { key: 'ess.max_power_kw', label: '최대 충·방전 출력', unit: 'kW', readOnly: true },
-      { key: 'ess.soc_low', label: '잔량 하한', unit: '%', min: 1, max: 99 },
-      { key: 'ess.soc_high', label: '잔량 상한', unit: '%', min: 1, max: 100 },
-      { key: 'ess.room_temp_limit', label: '배터리실 온도 제한', unit: '℃', min: 1, max: 80 },
+      { key: 'ess.soc_low', label: '잔량 하한', unit: '%', min: 0, max: 100 },
+      { key: 'ess.soc_high', label: '잔량 상한', unit: '%', min: 0, max: 100 },
+      { key: 'ess.room_temp_limit', label: '배터리실 온도 제한', unit: '℃', min: 0, max: 80 },
     ],
   },
   {
@@ -193,14 +194,18 @@ onMounted(() => window.addEventListener('beforeunload', warnBeforeUnload))
 onBeforeUnmount(() => window.removeEventListener('beforeunload', warnBeforeUnload))
 
 // 값이 잘못됐으면 그 이유, 괜찮으면 ''
+// 바꾼 칸만 검사함: 안 바꾼 칸은 이미 저장된 값이라, 범위 밖이어도(예: API로 직접 넣은 값)
+// 같은 묶음의 다른 칸을 저장하지 못하게 막지 않음. 백엔드도 보낸 값만 검사함 (이슈 #25-10)
 function errorOf(field) {
-  if (field.mode || field.readOnly) return ''
+  if (field.mode || field.readOnly || !isChanged(field)) return ''
   const value = draft.value[field.key]
   if (typeof value !== 'number' || !Number.isFinite(value)) return '숫자를 넣어 주세요.'
   if (value < field.min || value > field.max) {
     return `${formatInteger(field.min)} ~ ${formatInteger(field.max)} 사이로 넣어 주세요.`
   }
-  if (field.key === 'ess.soc_low' && value >= draft.value['ess.soc_high']) {
+  // 하한 · 상한 중 바꾼 칸에 표시 (상한만 내려서 하한보다 작아지는 경우도 잡음. 백엔드와 같은 규칙)
+  const isSocField = field.key === 'ess.soc_low' || field.key === 'ess.soc_high'
+  if (isSocField && draft.value['ess.soc_low'] >= draft.value['ess.soc_high']) {
     return '잔량 하한은 잔량 상한보다 작아야 합니다.'
   }
   return ''
