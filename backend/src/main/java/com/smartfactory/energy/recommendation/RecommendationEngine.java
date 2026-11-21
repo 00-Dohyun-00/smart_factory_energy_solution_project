@@ -108,8 +108,8 @@ public class RecommendationEngine {
         EssPlanner.NowInfo info = nowInfoOf(history, windowStart, socPercent);
         EssPlanner.Advice advice = essPlanner.decide(plan, info, inputs.get(0).netKw(), limits);
 
-        // 4. 저장
-        saveIfChanged(now, windowStart, advice, info, inputs, limits, settings, periods);
+        // 4. 저장 (피크 방어 유지를 풀지 판단하려고 계획의 방어선도 넘김)
+        saveIfChanged(now, windowStart, advice, info, plan.lineKw(), inputs, limits, settings, periods);
     }
 
     // ---------- 계획에 넣을 값 ----------
@@ -155,8 +155,9 @@ public class RecommendationEngine {
     // 같은 구간에서 피크 방어가 나왔으면 그 구간이 끝날 때까지 유지 (방전 → 대기 → 방전 깜빡임 방지)
     // 단, 피크 방어 중에 더 많이 방전해야 하는 상황으로 악화되면(ESCALATION_KW 이상 더 필요) 그 유지
     // 규칙보다 우선해서 다시 추천함 (예: 40kW 적용해 뒀는데 갑자기 500kW가 필요해진 경우)
+    // 반대로 태양광이 늘거나 부하가 줄어 피크 방어가 필요 없어져도 유지를 풀고 다시 추천함 (이슈 #33)
     private void saveIfChanged(LocalDateTime now, LocalDateTime windowStart, EssPlanner.Advice advice,
-                               EssPlanner.NowInfo info, List<PlanInput> inputs, EssLimits limits,
+                               EssPlanner.NowInfo info, double lineKw, List<PlanInput> inputs, EssLimits limits,
                                Map<String, String> settings, List<TariffPeriod> periods) {
         Optional<Recommendation> latest = recommendationRepository.findFirstByOrderByRecommendedAtDescRecommendationIdDesc();
         if (latest.isPresent()) {
@@ -166,7 +167,15 @@ public class RecommendationEngine {
             boolean needsMoreDefense = advice.reasonType() == RecommendationReasonType.PEAK_DEFENSE
                     && last.getReasonType() == RecommendationReasonType.PEAK_DEFENSE
                     && Math.abs(advice.wantKw()) - last.getPowerKw().doubleValue() >= ESCALATION_KW;
-            if (sameWindow && !needsMoreDefense && (sameAdvice || last.getReasonType() == RecommendationReasonType.PEAK_DEFENSE)) {
+            // 피크 방어 유지를 푸는 기준: 남은 시간에 ESS를 전혀 안 써도(predictedOf(0)) 이번 구간 평균이
+            // 방어선보다 주의선 차이(목표 − 주의선, 기본 54 kW)만큼 더 낮을 때.
+            // 방어선 바로 아래에서 풀면, 값이 경계에서 오르내릴 때 방전 ↔ 대기가 매분 바뀌므로 여유를 둠
+            double releaseKw = lineKw - (limits.targetPeakKw() - limits.warnKw());
+            boolean defenseNoLongerNeeded = last.getReasonType() == RecommendationReasonType.PEAK_DEFENSE
+                    && advice.reasonType() != RecommendationReasonType.PEAK_DEFENSE
+                    && info.predictedOf(0) <= releaseKw;
+            if (sameWindow && !needsMoreDefense && !defenseNoLongerNeeded
+                    && (sameAdvice || last.getReasonType() == RecommendationReasonType.PEAK_DEFENSE)) {
                 return;
             }
             // 대기 추천은 구간이 바뀌어도 대기가 이어지면 새로 쌓지 않음 (이력이 대기로 가득 차지 않게)
