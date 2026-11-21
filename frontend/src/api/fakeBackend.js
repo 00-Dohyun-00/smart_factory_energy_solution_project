@@ -559,7 +559,10 @@ function updateDecision(now, info) {
     return explainDecision(shownKind, values, explainContextOf(now, limits), limits)
   }
 
-  if (active && (current.kind === kind || current.kind === 'PEAK' || shortGap)) {
+  // 피크 방어 중이라도 ESS 없이 이번 구간 예상이 주의선 아래로 내려오면 유지를 풀고 새로 추천함
+  // (실제 백엔드 이슈 #33과 같은 규칙. 튐이 끝난 뒤 카드가 구간 끝까지 "방전 중 0 kW"로 남지 않게)
+  const defenseOver = current?.kind === 'PEAK' && kind !== 'PEAK' && predictedOf(0) < WARN_KW
+  if (active && !defenseOver && (current.kind === kind || current.kind === 'PEAK' || shortGap)) {
     if (current.status === 'RECOMMENDED' && current.action === action && action !== 'IDLE') {
       current.powerKw = Math.abs(wantKw) // 아직 답하지 않았으면 지금 필요한 양으로 숫자를 고쳐 둠
     }
