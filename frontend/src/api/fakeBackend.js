@@ -34,7 +34,7 @@ let MAX_DISCHARGE_KW = 500 // ESS 최대 방전 출력
 
 // 공장 컨셉: 전기차 열관리 부품 공장 (가상).
 // 설비 id · 이름 · 구역 · 정격 전력은 실제 DB equipment 표와 같게 맞춤 (2026-11-18, GET /api/equipment)
-// zoneId = 화면의 구역 id (DB zone_code. 유틸리티는 DB에서 U1이지만 화면은 U로 씀)
+// zoneId = 화면의 구역 id (실제 백엔드와 같은 Z1~Z6. 유틸리티는 예전에 U로 썼으나 화면이 Z6으로 바뀌어 맞춤, 2026-11-21)
 // share = 평소 공장 전력에서 그 설비가 차지하는 비중 (합계 1.0, 임시로 정한 값)
 const EQUIPMENTS = [
   { id: 'HEX-01', zoneId: 'Z1', name: 'CNC 가공기 1호', ratedKw: 120, share: 0.05 },
@@ -49,9 +49,9 @@ const EQUIPMENTS = [
   { id: 'MOD-02', zoneId: 'Z4', name: '조립 라인 2', ratedKw: 40, share: 0.01 },
   { id: 'INS-01', zoneId: 'Z5', name: '리크 테스터', ratedKw: 120, share: 0.05 },
   { id: 'INS-02', zoneId: 'Z5', name: '비전 검사기', ratedKw: 80, share: 0.03 },
-  { id: 'UTL-01', zoneId: 'U', name: '공기압축기', ratedKw: 200, share: 0.08 }, // 실측 설비 (DB is_virtual = false)
-  { id: 'UTL-02', zoneId: 'U', name: '냉각탑', ratedKw: 150, share: 0.06 },
-  { id: 'UTL-03', zoneId: 'U', name: '공조기', ratedKw: 120, share: 0.04 },
+  { id: 'UTL-01', zoneId: 'Z6', name: '공기압축기', ratedKw: 200, share: 0.08 }, // 실측 설비 (DB is_virtual = false)
+  { id: 'UTL-02', zoneId: 'Z6', name: '냉각탑', ratedKw: 150, share: 0.06 },
+  { id: 'UTL-03', zoneId: 'Z6', name: '공조기', ratedKw: 120, share: 0.04 },
 ]
 
 // 실패 상황을 화면에서 확인하기 위한 장치. 주소 뒤에 붙여서 씁니다.
