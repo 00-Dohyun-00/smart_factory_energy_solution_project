@@ -123,9 +123,12 @@ const sources = computed(() => {
 const zones = computed(() =>
   ZONE_NAMES.map((zone, index) => {
     const equipments = (props.status?.equipments ?? []).filter((item) => item.zoneId === zone.id)
-    const totalKw = equipments.length
-      ? equipments.reduce((sum, item) => sum + item.loadKw, 0)
-      : null
+    // 설비 하나라도 값이 없으면(null) 합계를 내지 않음. 그대로 더하면 0 + null = 0이라 "0.0 kW"로 보였음
+    // (분이 바뀐 직후 1~2초 동안 백엔드가 설비 값을 비워 보냄 — 이슈 #35-3, #34-9)
+    const totalKw =
+      equipments.length && equipments.every((item) => item.loadKw != null)
+        ? equipments.reduce((sum, item) => sum + item.loadKw, 0)
+        : null
     // 값이 없으면 0이 아니라 null로 둠 (화면에 "—"로 보이게)
     const percent =
       totalKw === null || !props.status.loadKw ? null : (totalKw / props.status.loadKw) * 100
@@ -150,7 +153,7 @@ const zones = computed(() =>
       overCount,
       thresholdSum,
       gauge: gaugeOf(
-        totalKw ?? 0,
+        totalKw,
         thresholdSum,
         percent ?? 0,
         percent === null ? '—' : `공장의 ${formatOneDecimal(percent)}%`,
@@ -171,7 +174,13 @@ const children = computed(() => {
   const start = Math.min(Math.max(zone.centerX - total / 2, 10), WIDTH - total - 10)
   const opacities = opacityOrder(zone.equipments, props.selectedEquipment)
   return zone.equipments.map((item, index) => {
-    const percent = zone.totalKw ? (item.loadKw / zone.totalKw) * 100 : 0
+    // 설비 값이나 구역 합계가 없으면 비율도 null ("—"로 보임)
+    const percent =
+      item.loadKw == null || zone.totalKw == null
+        ? null
+        : zone.totalKw
+          ? (item.loadKw / zone.totalKw) * 100
+          : 0
     const threshold = props.thresholds[item.id] ?? null
     return {
       ...item,
@@ -181,7 +190,7 @@ const children = computed(() => {
         item.loadKw,
         threshold,
         percent,
-        `구역의 ${formatOneDecimal(percent)}%`,
+        percent === null ? '—' : `구역의 ${formatOneDecimal(percent)}%`,
         '임계의',
       ),
       opacity: opacities[item.id],
@@ -200,10 +209,12 @@ const THRESHOLD_POINT = 0.9
 // absolutePrefix: 절대값일 때 글자 앞말 (예: '임계의' → "임계의 50.0%")
 function gaugeOf(loadKw, threshold, relativePercent, relativeText, absolutePrefix) {
   if (props.gaugeMode === 'relative') {
-    return { width: relativePercent, text: relativeText, fullKw: null }
+    return { width: relativePercent ?? 0, text: relativeText, fullKw: null }
   }
   if (threshold == null) return { width: 0, text: '임계 미설정', fullKw: null }
   const fullKw = threshold / THRESHOLD_POINT // 게이지 끝(100%)에 해당하는 kW
+  // 값이 없으면 막대는 비우고 "—" (0으로 계산하면 "임계의 0.0%"로 보였음)
+  if (loadKw == null) return { width: 0, text: '—', fullKw }
   return {
     width: Math.min((loadKw / fullKw) * 100, 100),
     text: `${absolutePrefix} ${formatOneDecimal((loadKw / threshold) * 100)}%`,
