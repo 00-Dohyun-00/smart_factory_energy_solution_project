@@ -58,10 +58,12 @@ const THRESHOLD_POINT = 0.9
 // absolutePrefix: 절대값일 때 글자 앞말 (예: '임계의' → "임계의 50.0%")
 function gaugeOf(loadKw, threshold, relativePercent, relativeText, absolutePrefix) {
   if (gaugeMode.value === 'relative') {
-    return { width: relativePercent, text: relativeText, fullKw: null }
+    return { width: relativePercent ?? 0, text: relativeText, fullKw: null }
   }
   if (threshold == null) return { width: 0, text: '임계 미설정', fullKw: null }
   const fullKw = threshold / THRESHOLD_POINT // 게이지 끝(100%)에 해당하는 kW
+  // 값이 없으면 막대는 비우고 "—" (0으로 계산하면 "임계의 0.0%"로 보였음)
+  if (loadKw == null) return { width: 0, text: '—', fullKw }
   return {
     width: Math.min((loadKw / fullKw) * 100, 100),
     text: `${absolutePrefix} ${formatOneDecimal((loadKw / threshold) * 100)}%`,
@@ -112,8 +114,14 @@ const thresholds = computed(() => {
 const zoneEquipments = computed(() =>
   (status.value?.equipments ?? []).filter((item) => item.zoneId === selectedZone.value),
 )
+// 설비 값이 하나라도 비어 있는지 (분이 바뀐 직후 1~2초 동안 백엔드가 설비 값을 null로 보냄 — 이슈 #35-3, #34-9)
+// 비어 있으면 합계·비율을 "—"로 두고 원그래프는 회색 고리로 그림. 그대로 더하면 0 + null = 0이라 "0.0 kW"로 보였음
+const hasEmptyLoad = (list) => list.some((item) => item.loadKw == null)
+const equipmentsIncomplete = computed(() => hasEmptyLoad(status.value?.equipments ?? []))
+const zoneIncomplete = computed(() => hasEmptyLoad(zoneEquipments.value))
+
 const zoneKw = computed(() =>
-  zoneEquipments.value.length
+  zoneEquipments.value.length && !zoneIncomplete.value
     ? zoneEquipments.value.reduce((sum, item) => sum + item.loadKw, 0)
     : null,
 )
@@ -130,10 +138,10 @@ const zoneThreshold = computed(() =>
 // 구역 게이지 (상대값이면 공장 대비 비율, 절대값이면 임계 합 기준)
 const zoneGauge = computed(() =>
   gaugeOf(
-    zoneKw.value ?? 0,
+    zoneKw.value,
     zoneThreshold.value,
-    zonePercent.value ?? 0,
-    `공장의 ${formatOneDecimal(zonePercent.value)}%`,
+    zonePercent.value,
+    zonePercent.value === null ? '—' : `공장의 ${formatOneDecimal(zonePercent.value)}%`,
     '임계 합의',
   ),
 )
@@ -160,7 +168,13 @@ function opacityOrder(list, selectedId) {
 const equipmentRows = computed(() => {
   const opacities = opacityOrder(zoneEquipments.value, selectedEquipment.value)
   return zoneEquipments.value.map((item) => {
-    const percent = zoneKw.value ? (item.loadKw / zoneKw.value) * 100 : 0
+    // 설비 값이나 구역 합계가 없으면 비율도 null ("—"로 보임)
+    const percent =
+      item.loadKw == null || zoneKw.value === null
+        ? null
+        : zoneKw.value
+          ? (item.loadKw / zoneKw.value) * 100
+          : 0
     return {
       ...item,
       opacity: opacities[item.id],
@@ -171,7 +185,7 @@ const equipmentRows = computed(() => {
         item.loadKw,
         thresholds.value[item.id],
         percent,
-        `구역의 ${formatOneDecimal(percent)}%`,
+        percent === null ? '—' : `구역의 ${formatOneDecimal(percent)}%`,
         '임계의',
       ),
       stateInfo: STATE_INFO[item.state] ?? { shape: '', label: '—', className: '' },
@@ -254,7 +268,8 @@ function sliceIndexAt(event, values) {
 
 // 구역 원그래프에서 조각을 누르면 그 구역을 고름 (계통도에서 구역을 누른 것과 같음)
 function onZoneDonutClick(event) {
-  if (donutOffline.value) return // 연결이 끊긴 회색 고리는 누를 조각이 없음
+  // 연결이 끊겼거나 설비 값이 비어 회색 고리일 때는 누를 조각이 없음
+  if (donutOffline.value || equipmentsIncomplete.value) return
   const values = zoneShareOption.value.series[0].data.map((item) => item.value)
   const index = sliceIndexAt(event, values)
   if (index >= 0) selectedZone.value = ZONE_ORDER[index]
@@ -262,7 +277,8 @@ function onZoneDonutClick(event) {
 
 // 설비 원그래프에서 조각을 누르면 그 설비 버튼을 누른 것과 같음 (다시 누르면 풀림)
 function onEquipmentDonutClick(event) {
-  if (donutOffline.value) return // 연결이 끊긴 회색 고리는 누를 조각이 없음
+  // 연결이 끊겼거나 설비 값이 비어 회색 고리일 때는 누를 조각이 없음
+  if (donutOffline.value || zoneIncomplete.value) return
   const index = sliceIndexAt(
     event,
     equipmentRows.value.map((item) => item.loadKw),
@@ -318,7 +334,8 @@ function donutOption(items, unitLabel) {
 
 // 공장 전체 전력에서 각 구역이 차지하는 비율 (고른 구역 강조)
 const zoneShareOption = computed(() => {
-  if (donutOffline.value) return offlineDonutOption()
+  // 설비 값이 하나라도 비면 구역 비율을 낼 수 없으므로 회색 고리 (빈 구역을 0으로 보면 다른 구역이 크게 보임)
+  if (donutOffline.value || equipmentsIncomplete.value) return offlineDonutOption()
   const equipments = status.value?.equipments ?? []
   const items = ZONE_ORDER.map((zoneId) => {
     const isSelected = zoneId === selectedZone.value
@@ -343,7 +360,7 @@ const zoneShareOption = computed(() => {
 // 이 구역 전력에서 각 설비가 차지하는 비율
 // 색은 구역 색, 설비마다 진하기만 다름 (계통도 설비 상자와 같은 색). 설비를 고르면 그 조각만 테두리 + 나머지 옅게
 const equipmentShareOption = computed(() => {
-  if (donutOffline.value) return offlineDonutOption()
+  if (donutOffline.value || zoneIncomplete.value) return offlineDonutOption()
   const color = COLOR[zoneColorKey(selectedZone.value)]
   const items = equipmentRows.value.map((item) => {
     const isSelected = item.id === selectedEquipment.value

@@ -42,6 +42,21 @@ let timer = null
 // "오늘"은 브라우저 시계가 아니라 서버가 보낸 시각에서 구함 (시뮬레이터가 배속으로 돌 수 있음)
 const serverDate = computed(() => realtimeStore.status?.recordedAt.slice(0, 10) ?? '')
 
+// 서버의 지금 시각(ms) = 지금 15분 구간 끝 − 남은 초 (브라우저 시계는 쓰지 않음). 모르면 null
+const serverNowMs = computed(() => {
+  const status = realtimeStore.status
+  if (!status?.windowEnd || status.remainingSeconds == null) return null
+  return new Date(status.windowEnd).getTime() - status.remainingSeconds * 1000
+})
+
+// 결과(목표 달성)가 아직 없을 때의 글자
+// 백엔드는 구간이 끝났어도 1분 기록이 15개가 다 차지 않으면 결과를 비워 보냄 (이슈 #34-1).
+// 예전에는 결과가 없으면 모두 "구간 진행 중"이라 몇 시간 전 구간도 진행 중처럼 보였음 (이슈 #35-5)
+function pendingResultText(item) {
+  if (serverNowMs.value === null) return '—' // 서버 시각을 모르면 끝났는지 알 수 없음
+  return new Date(item.windowEnd).getTime() > serverNowMs.value ? '구간 진행 중' : '결과 없음'
+}
+
 // 백엔드가 한 번에 조회해 주는 최대 기간 (넘으면 400을 줌)
 const MAX_DAYS = 62
 
@@ -212,7 +227,7 @@ function downloadExcel() {
     handlerText(item.appliedBy),
     item.appliedAt ? formatHourMinute(item.appliedAt) : '',
     item.resultPeakKw !== null ? formatKw(item.resultPeakKw) : '',
-    item.resultStatus ? RESULT_INFO[item.resultStatus].label : '구간 진행 중',
+    item.resultStatus ? RESULT_INFO[item.resultStatus].label : pendingResultText(item),
     item.reason ?? '',
   ])
   // 칸 안에 쉼표 · 따옴표 · 줄바꿈이 있어도 깨지지 않게 큰따옴표로 감쌈
@@ -430,7 +445,7 @@ function toggle(id) {
                     <span aria-hidden="true">{{ RESULT_INFO[item.resultStatus].shape }}</span>
                     {{ RESULT_INFO[item.resultStatus].label }}
                   </span>
-                  <span v-else class="sub">구간 진행 중</span>
+                  <span v-else class="sub">{{ pendingResultText(item) }}</span>
                 </td>
               </tr>
 
