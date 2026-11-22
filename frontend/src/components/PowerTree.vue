@@ -73,12 +73,25 @@ function opacityOrder(list, selectedId) {
   return result
 }
 
+// 공급원 비율을 화면에 보여 줄 값으로 (충전 중일 때만 고침 — KpiCards.vue와 같은 규칙, 이슈 #35-1, #34-10)
+// 백엔드는 충전 중이면 ESS를 음수로, 한전을 100 − 태양광 − ESS(100을 넘음)로 줘서 "공장의 104.3%",
+// "공장의 -4.3%"처럼 보였음. 정하기 전까지 ESS는 0, 한전은 태양광이 채우지 못한 나머지(100 − 태양광)
+function displayRatio(ratio) {
+  if (!ratio || !(ratio.essPercent < 0)) return ratio
+  return {
+    gridPercent: Math.max(0, 100 - ratio.solarPercent),
+    solarPercent: ratio.solarPercent,
+    essPercent: 0,
+  }
+}
+
 // 위쪽 공급원 3곳
 const sources = computed(() => {
   const status = props.status
-  // 공장 전체에서 차지하는 비율은 백엔드가 준 값(sourceRatio)을 그대로 씀
+  // 공장 전체에서 차지하는 비율은 백엔드가 준 값(sourceRatio)을 씀 (충전 중일 때만 위 규칙으로 고침)
   // 상자 아래쪽에 비율 막대와 "공장의 N%" 글자로 보여 줌 (구역 상자와 같은 모양)
   // 값이 없으면 "공장의 —%"가 아니라 "—"만 보여 줌
+  const sourceRatio = displayRatio(status?.sourceRatio)
   const share = (percent) =>
     percent === null || percent === undefined ? '—' : `공장의 ${formatOneDecimal(percent)}%`
   const ratio = (percent) => (percent === null || percent === undefined ? 0 : percent)
@@ -91,8 +104,8 @@ const sources = computed(() => {
       centerX: 205,
       kw: status?.gridKw ?? null,
       sub: '',
-      percent: ratio(status?.sourceRatio?.gridPercent),
-      shareText: share(status?.sourceRatio?.gridPercent),
+      percent: ratio(sourceRatio?.gridPercent),
+      shareText: share(sourceRatio?.gridPercent),
     },
     {
       key: 'solar',
@@ -100,8 +113,8 @@ const sources = computed(() => {
       centerX: 595,
       kw: status?.solarKw ?? null,
       sub: '',
-      percent: ratio(status?.sourceRatio?.solarPercent),
-      shareText: share(status?.sourceRatio?.solarPercent),
+      percent: ratio(sourceRatio?.solarPercent),
+      shareText: share(sourceRatio?.solarPercent),
     },
     {
       key: 'ess',
@@ -111,8 +124,8 @@ const sources = computed(() => {
       sub: status
         ? `${PCS_LABELS[status.pcsStatus] ?? '—'}, 잔량 ${formatOneDecimal(status.socPercent)}%`
         : '—',
-      percent: ratio(status?.sourceRatio?.essPercent),
-      shareText: share(status?.sourceRatio?.essPercent),
+      percent: ratio(sourceRatio?.essPercent),
+      shareText: share(sourceRatio?.essPercent),
       soc: status?.socPercent ?? 0, // 배터리 그림의 채움 정도 (0~100)
       discharging: status?.pcsStatus === 'DISCHARGING',
     },
