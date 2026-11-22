@@ -68,20 +68,31 @@ const GROUPS = [
 ]
 // ---- 설비 임계치 ----
 // 실시간 상태에 포함된 설비마다 환경설정 값을 한 칸씩 보여 줌.
-// 임계치는 settingsStore가 받은 설정값만 사용하고, 정격 전력은 기본값으로 사용하지 않음.
+// 임계치는 settingsStore.values를 씀 (서버 값이 있으면 서버 값, 없으면 스토어의 프론트 기본값 = 정격 전력).
+// 서버(setting 표)에 그 설비의 행이 없으면 저장해도 백엔드가 "없는 설정"이라며 거절함(400) →
+// 그 칸은 보기만으로 두고 묶음 위에 이유를 적음. 행이 생기면 저절로 고칠 수 있는 칸이 됨 (이슈 #35-6)
+// (예전에는 입력이 열려 있어 저장하면 늘 실패했고, 그 뒤 메뉴를 옮길 때마다 "저장하지 않은 값" 확인 창이 떴음)
+const serverKeys = computed(() => new Set(settingsStore.items.map((item) => item.key)))
 const equipmentGroup = computed(() => {
-  const fields = (realtimeStore.status?.equipments ?? []).map((item) => ({
-    key: `equipment.${item.id}.max_kw`,
-    label: item.name,
-    unit: 'kW',
-    min: 1,
-    max: 100000,
-  }))
+  const fields = (realtimeStore.status?.equipments ?? []).map((item) => {
+    const key = `equipment.${item.id}.max_kw`
+    return {
+      key,
+      label: item.name,
+      unit: 'kW',
+      min: 1,
+      max: 100000,
+      readOnly: !serverKeys.value.has(key),
+    }
+  })
   return {
     key: 'equipment',
     title: '설비 임계치',
     // note: '설비 전력이 이 값을 넘으면 설비 모니터링에서 빨갛게 표시',
     wide: true, // 칸이 많아서 한 줄을 다 쓰고 3열로 놓음
+    notice: fields.some((field) => field.readOnly)
+      ? '서버에 설비 임계치 설정 항목이 없어 설비 정격 전력을 기본값으로 씁니다. 이 화면에서는 바꿀 수 없습니다.'
+      : '',
     fields,
   }
 })
@@ -253,7 +264,9 @@ function valueText(field, value) {
 
 // 항목 아래의 도움말
 function helpOf(field) {
-  if (field.readOnly) return '수정할 수 없는 값 (설비 사양)'
+  // 설비 임계치의 보기만 칸은 이유를 묶음 위에 한 번만 적으므로 칸마다 도움말을 달지 않음
+  if (field.readOnly)
+    return field.key.startsWith('equipment.') ? '' : '수정할 수 없는 값 (설비 사양)'
   if (field.key === 'peak.target_kw') return '15분 평균이 이 값을 넘으면 경고'
   if (field.key === 'peak.warn_ratio') {
     // 주의가 시작되는 kW = 목표 피크 × 주의선 % (고치는 중인 값으로 미리 보여 주는 표시용 계산)
@@ -349,6 +362,8 @@ const historyRows = computed(() =>
             <span class="note">{{ group.note }}</span>
           </div>
 
+          <!-- 묶음 전체에 대한 안내 (예: 서버에 설정 항목이 없어 저장할 수 없는 설비 임계치) -->
+          <p v-if="group.notice" class="group-notice">{{ group.notice }}</p>
           <!-- 칸이 하나도 없어도 묶음 틀은 그대로 둠 (예: 서버가 끊겨 설비 목록을 못 받은 설비 임계치) -->
           <p v-if="!group.fields.length" class="group-empty">
             설비 목록을 받으면 설비마다 임계치 칸이 생깁니다. (지금은 서버에서 설비 목록을 받지

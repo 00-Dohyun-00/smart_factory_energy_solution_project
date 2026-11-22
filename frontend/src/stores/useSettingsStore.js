@@ -2,26 +2,28 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { getSettingHistories, getSettings, updateSettings } from '@/api/settingsApi'
 
-// 설비별 전력 임계치 기본값 (kW). 2026-11-19 08:22 기준 각 설비 전력의 2배를 정수로 반올림한 값
-// DB(setting 표)에 equipment.{설비 id}.max_kw 행이 아직 없어서 화면에서 임시로 쓰는 값
-// TODO: 백엔드가 설정 행을 추가하면 서버 값이 우선 쓰이므로, 그때 이 표는 지워도 됨
-// (지금은 환경 설정에서 이 값을 바꿔 저장하면 백엔드가 "없는 설정"이라며 거절함)
+// 설비별 전력 임계치 기본값 (kW) = 각 설비의 정격 전력 (실시간 상태의 equipments[].ratedKw와 같은 값)
+// DB(setting 표)에 equipment.{설비 id}.max_kw 행이 없어서 프론트에 둔 값. 서버에 값이 생기면 서버 값이 우선임
+// 정격으로 정한 이유: 설비 사양이라 "정격을 넘으면 초과"로 설명하기 쉽고, 평소 부하는 정격의 80~87%라
+// 늘 "▲ 초과"가 뜨지 않음 (2026-11-21~22 하루 동안 15분 평균 최고값도 모두 정격 아래)
+// (예전 값은 11-19 한 시점 전력의 2배였는데, 지금 부하보다 낮은 설비가 있어 사출 구역에 늘 "▲ 초과"가 떴음, 이슈 #35-2)
+// 바꾸려면 이 표의 숫자를 고침 (환경 설정 화면에서는 서버에 행이 없어 저장할 수 없음)
 const DEFAULT_EQUIPMENT_THRESHOLDS = {
-  'equipment.HEX-01.max_kw': 184, // CNC 가공기 1호 (당시 92.1 kW)
-  'equipment.HEX-02.max_kw': 147, // CNC 가공기 2호 (73.7 kW)
-  'equipment.HEX-03.max_kw': 111, // 프레스 (55.3 kW)
-  'equipment.BRZ-01.max_kw': 504, // 브레이징로 (251.9 kW)
-  'equipment.BRZ-02.max_kw': 221, // 탈지·건조기 (110.6 kW)
-  'equipment.INJ-01.max_kw': 413, // 사출기 1호 (206.5 kW)
-  'equipment.INJ-02.max_kw': 398, // 사출기 2호 (199.1 kW)
-  'equipment.INJ-03.max_kw': 147, // 사출기 3호 (73.7 kW)
-  'equipment.MOD-01.max_kw': 37, // 조립 라인 1 (18.4 kW)
-  'equipment.MOD-02.max_kw': 37, // 조립 라인 2 (18.4 kW)
-  'equipment.INS-01.max_kw': 184, // 리크 테스터 (92.1 kW)
-  'equipment.INS-02.max_kw': 111, // 비전 검사기 (55.3 kW)
-  'equipment.UTL-01.max_kw': 295, // 공기압축기 (147.4 kW)
-  'equipment.UTL-02.max_kw': 221, // 냉각탑 (110.6 kW)
-  'equipment.UTL-03.max_kw': 147, // 공조기 (73.7 kW)
+  'equipment.HEX-01.max_kw': 120, // CNC 가공기 1호
+  'equipment.HEX-02.max_kw': 120, // CNC 가공기 2호
+  'equipment.HEX-03.max_kw': 100, // 프레스
+  'equipment.BRZ-01.max_kw': 600, // 브레이징로
+  'equipment.BRZ-02.max_kw': 180, // 탈지·건조기
+  'equipment.INJ-01.max_kw': 220, // 사출기 1호
+  'equipment.INJ-02.max_kw': 220, // 사출기 2호
+  'equipment.INJ-03.max_kw': 220, // 사출기 3호
+  'equipment.MOD-01.max_kw': 40, // 조립 라인 1
+  'equipment.MOD-02.max_kw': 40, // 조립 라인 2
+  'equipment.INS-01.max_kw': 120, // 리크 테스터
+  'equipment.INS-02.max_kw': 80, // 비전 검사기
+  'equipment.UTL-01.max_kw': 200, // 공기압축기
+  'equipment.UTL-02.max_kw': 150, // 냉각탑
+  'equipment.UTL-03.max_kw': 120, // 공조기
 }
 
 // 환경 설정(기준값). 화면 갱신 주기와 운영 모드는 모든 화면이 쓰므로 공통 틀(MainLayout)에서도 읽음
@@ -44,7 +46,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   // key로 값을 바로 꺼낼 수 있게 한 모양. 예: values['peak.target_kw'] → 1800
-  // 설비 임계치는 DB에 값이 없으면 프론트 기본값(DEFAULT_EQUIPMENT_THRESHOLDS)을 먼저 넣어 두고,
+  // 설비 임계치는 프론트 기본값(DEFAULT_EQUIPMENT_THRESHOLDS)을 먼저 넣어 두고,
   // 서버가 준 값이 있으면 그 값으로 덮어씀
   const values = computed(() => {
     const result = { ...DEFAULT_EQUIPMENT_THRESHOLDS }

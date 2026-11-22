@@ -131,6 +131,20 @@ function needle(ratio) {
   }
 }
 
+// 공장 소비를 무엇으로 채웠는지 비율 (백엔드 sourceRatio). 충전 중일 때만 화면에서 고쳐 보여 줌 (이슈 #35-1, #34-10)
+// 백엔드는 충전 중이면 ESS를 음수로, 한전을 100 − 태양광 − ESS(100을 넘음)로 줘서
+// 계기판의 한전 색이 바늘보다 더 칠해지고 "한전 104% · ESS -4%"처럼 보였음.
+// 충전 중 비율을 어떻게 줄지 백엔드와 정하기 전까지, 화면에서는 ESS를 0으로 두고
+// 한전은 공장 소비 중 태양광이 채우지 못한 나머지(100 − 태양광)로 보여 줌 (PowerTree.vue도 같은 규칙)
+function displayRatio(ratio) {
+  if (!ratio || !(ratio.essPercent < 0)) return ratio
+  return {
+    gridPercent: Math.max(0, 100 - ratio.solarPercent),
+    solarPercent: ratio.solarPercent,
+    essPercent: 0,
+  }
+}
+
 // 구매전력이 목표 피크의 몇 %인지 (표시용 비율: 백엔드 값 두 개를 나눈 것)
 const gridPercent = computed(() =>
   shown.value ? (shown.value.gridKw / shown.value.targetPeakKw) * 100 : null,
@@ -138,6 +152,7 @@ const gridPercent = computed(() =>
 
 const kpis = computed(() => {
   const s = shown.value
+  const ratio = displayRatio(s?.sourceRatio) // 공급원 비율 (충전 중이면 위 규칙으로 고친 값)
   const target = s?.targetPeakKw
   const over = gridPercent.value > 100
   // ESS는 충전 중이면 충전 전력을, 그 밖에는 방전 전력을 보여 줌
@@ -150,8 +165,8 @@ const kpis = computed(() => {
   const loadMax = target ? target * LOAD_SCALE : null
   const loadNow = s?.liveLoadKw ?? s?.loadKw
   const loadFill = s && loadMax ? clamp(loadNow / loadMax) * 100 : 0
-  const gridEnd = s ? (loadFill * s.sourceRatio.gridPercent) / 100 : 0
-  const solarEnd = s ? gridEnd + (loadFill * s.sourceRatio.solarPercent) / 100 : 0
+  const gridEnd = s ? (loadFill * ratio.gridPercent) / 100 : 0
+  const solarEnd = s ? gridEnd + (loadFill * ratio.solarPercent) / 100 : 0
 
   // 구매전력: 정상 · 주의 · 경고 띠 (기준선은 백엔드가 준 값)
   const gridMax = target ? target * GRID_SCALE : null
@@ -173,15 +188,15 @@ const kpis = computed(() => {
         ? [
             {
               label: '한전',
-              percent: Math.round(s.sourceRatio.gridPercent),
+              percent: Math.round(ratio.gridPercent),
               className: 'fill-grid',
             },
             {
               label: '태양광',
-              percent: Math.round(s.sourceRatio.solarPercent),
+              percent: Math.round(ratio.solarPercent),
               className: 'fill-solar',
             },
-            { label: 'ESS', percent: Math.round(s.sourceRatio.essPercent), className: 'fill-ess' },
+            { label: 'ESS', percent: Math.round(ratio.essPercent), className: 'fill-ess' },
           ]
         : null,
       min: '0',
@@ -228,15 +243,12 @@ const kpis = computed(() => {
       name: '태양광 발전량',
       value: formatKw(s?.solarKw),
       unit: 'kW',
-      sub: s ? `공장 소비의 ${formatOneDecimal(s.sourceRatio.solarPercent)}%` : '',
+      sub: s ? `공장 소비의 ${formatOneDecimal(ratio.solarPercent)}%` : '',
       // 공장 소비 전체를 눈금 끝으로 보고 태양광이 얼마나 채웠는지 그림
       min: '0',
       max: '공장 소비',
-      segments: [
-        segment(0, 100, 'track'),
-        segment(0, s ? s.sourceRatio.solarPercent : 0, 'fill-solar'),
-      ],
-      needle: s ? needle(s.sourceRatio.solarPercent / 100) : null,
+      segments: [segment(0, 100, 'track'), segment(0, s ? ratio.solarPercent : 0, 'fill-solar')],
+      needle: s ? needle(ratio.solarPercent / 100) : null,
     },
     {
       key: 'ess',
