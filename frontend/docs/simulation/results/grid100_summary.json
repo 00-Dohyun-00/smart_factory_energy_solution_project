@@ -1,0 +1,84 @@
+{
+ "backend": {
+  "grid100": {
+   "kwh": 12680883.876000056,
+   "base": 212536796.16000003,
+   "energy": 1882905070.811199,
+   "total": 2095441866.971199,
+   "yearPeak": 2148.772,
+   "overSlots": 2234,
+   "overDays": 192
+  },
+  "solarOnly": {
+   "kwh": 11401734.27600004,
+   "base": 209275622.39999998,
+   "energy": 1678953099.0511987,
+   "total": 1888228721.4511986,
+   "yearPeak": 2096.11,
+   "overSlots": 586,
+   "overDays": 113
+  },
+  "wattever": {
+   "kwh": 11425116.60200004,
+   "base": 198553538.56,
+   "energy": 1671654453.1280737,
+   "total": 1870207991.6880736,
+   "yearPeak": 1993.792,
+   "overSlots": 187,
+   "overDays": 44
+  },
+  "endSocFix": -54808.5251396648,
+  "wear": 3910166.025,
+  "watteverTotalFixed": 1870153183.162934,
+  "savingSolar": 207213145.52000046,
+  "savingEss": 14165372.263264513,
+  "savingAll": 221378517.78326496,
+  "savingAllPercent": 10.564765421206873,
+  "savingBaseAll": 13983257.600000024,
+  "savingEnergyAll": 211305426.20826483,
+  "solarUsedKwh": 1279149.6,
+  "solarAllKwh": 1279149.6,
+  "carbonT": 587.64132624
+ },
+ "nobias": {
+  "grid100": {
+   "kwh": 12680883.876000056,
+   "base": 212536796.16000003,
+   "energy": 1882905070.811199,
+   "total": 2095441866.971199,
+   "yearPeak": 2148.772,
+   "overSlots": 2234,
+   "overDays": 192
+  },
+  "solarOnly": {
+   "kwh": 11401734.27600004,
+   "base": 209275622.39999998,
+   "energy": 1678953099.0511987,
+   "total": 1888228721.4511986,
+   "yearPeak": 2096.11,
+   "overSlots": 586,
+   "overDays": 113
+  },
+  "wattever": {
+   "kwh": 11421930.14825004,
+   "base": 187085982.71999997,
+   "energy": 1672404729.2389238,
+   "total": 1859490711.9589238,
+   "yearPeak": 1873.858,
+   "overSlots": 5,
+   "overDays": 3
+  },
+  "endSocFix": -54858.0,
+  "wear": 3366883.4000000004,
+  "watteverTotalFixed": 1859435853.9589238,
+  "savingSolar": 207213145.52000046,
+  "savingEss": 25425984.092274763,
+  "savingAll": 232639129.6122752,
+  "savingAllPercent": 11.102151449733954,
+  "savingBaseAll": 25450813.440000057,
+  "savingEnergyAll": 210555199.57227516,
+  "solarUsedKwh": 1279149.6,
+  "solarAllKwh": 1279149.6,
+  "carbonT": 587.64132624
+ }
+}
